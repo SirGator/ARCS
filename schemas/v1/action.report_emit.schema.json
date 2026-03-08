@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "vera/actions/report_emit@v1",
+  "type": "object",
+  "required": ["action_id", "type", "params"],
+  "properties": {
+    "action_id": { "type": "string" },
+    "type": {
+      "type": "string",
+      "const": "report_emit"
+    },
+    "params": {
+      "type": "object",
+      "required": ["format"],
+      "properties": {
+        "format": {
+          "type": "string",
+          "enum": ["json", "md"]
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

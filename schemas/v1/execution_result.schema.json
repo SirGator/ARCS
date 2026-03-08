@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "vera/execution_result@v1",
+  "type": "object",
+  "required": ["action_id", "status"],
+  "properties": {
+    "action_id": { "type": "string" },
+    "status": {
+      "type": "string",
+      "enum": ["success", "fail", "timeout", "cancelled"]
+    },
+    "output": { "type": "string" }
+  },
+  "additionalProperties": false
+}

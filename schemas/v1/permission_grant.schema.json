@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "vera/permission_grant@v1",
+  "type": "object",
+  "required": ["principal", "capability"],
+  "properties": {
+    "principal": { "type": "string" },
+    "capability": { "type": "string" },
+    "scope": { "type": "string" },
+    "expires_at": { "type": "string", "format": "date-time" }
+  },
+  "additionalProperties": false
+}

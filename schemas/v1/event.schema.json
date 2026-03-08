@@ -1,0 +1,58 @@
+ {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "vera/event@v1",
+  "type": "object",
+  "required": [
+    "event_id",
+    "event_type",
+    "seq",
+    "ts",
+    "actor",
+    "refs"
+  ],
+  "properties": {
+    "event_id": { "type": "string" },
+    "event_type": {
+      "type": "string",
+      "enum": [
+        "artifact_committed",
+        "head_advanced",
+        "approval_recorded",
+        "action_materialized",
+        "execution_recorded"
+      ]
+    },
+    "seq": { "type": "integer", "minimum": 1 },
+    "ts": { "type": "string", "format": "date-time" },
+    "actor": {
+      "type": "object",
+      "required": ["actor_type", "id"],
+      "properties": {
+        "actor_type": {
+          "type": "string",
+          "enum": ["human", "system", "model", "executor"]
+        },
+        "id": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "refs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["artifact_id", "version_id", "role"],
+        "properties": {
+          "artifact_id": { "type": "string" },
+          "version_id": { "type": "string" },
+          "role": {
+            "type": "string",
+            "enum": ["target", "parent", "policy", "action", "result"]
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "payload": { "type": "object" }
+  },
+  "additionalProperties": false
+}

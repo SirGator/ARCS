@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "vera/approval@v1",
+  "type": "object",
+  "required": ["target_option", "policy_ref", "decision"],
+  "properties": {
+    "target_option": {
+      "type": "object",
+      "required": ["artifact_id", "version_id"],
+      "properties": {
+        "artifact_id": { "type": "string" },
+        "version_id": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "policy_ref": {
+      "type": "object",
+      "required": ["artifact_id", "version_id"],
+      "properties": {
+        "artifact_id": { "type": "string" },
+        "version_id": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "decision": {
+      "type": "string",
+      "enum": ["approve", "reject", "modify", "revoke"]
+    },
+    "expires_at": { "type": "string", "format": "date-time" }
+  },
+  "additionalProperties": false
+}
