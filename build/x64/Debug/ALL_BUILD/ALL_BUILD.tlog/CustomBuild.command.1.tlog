@@ -1,0 +1,10 @@
+^D:\SIMON_PROJEKTE\SOFTWEAR\ARCS\ARCS\CMAKELISTS.TXT
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SD:/Simon_Projekte/Softwear/ARCS/ARCS -BD:/Simon_Projekte/Softwear/ARCS/ARCS/build --check-stamp-file D:/Simon_Projekte/Softwear/ARCS/ARCS/build/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd

@@ -1,0 +1,9 @@
+{
+	"InstallScripts" : 
+	[
+		"D:/Simon_Projekte/Softwear/ARCS/ARCS/build/cmake_install.cmake",
+		"D:/Simon_Projekte/Softwear/ARCS/ARCS/build/src/schema/cmake_install.cmake",
+		"D:/Simon_Projekte/Softwear/ARCS/ARCS/build/app/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

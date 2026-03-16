@@ -1,0 +1,13 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="18.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <CustomBuild Include="D:\Simon_Projekte\Softwear\ARCS\ARCS\build\CMakeFiles\4d4daae173b25518c56539da8a9a3658\generate.stamp.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="CMake Rules">
+      <UniqueIdentifier>{D2ABF995-C209-34A3-999D-A3BB4A63EED6}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

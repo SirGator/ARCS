@@ -1,0 +1,4 @@
+D:/Simon_Projekte/Softwear/ARCS/ARCS/build/CMakeFiles/ALL_BUILD.dir
+D:/Simon_Projekte/Softwear/ARCS/ARCS/build/CMakeFiles/ZERO_CHECK.dir
+D:/Simon_Projekte/Softwear/ARCS/ARCS/build/src/schema/CMakeFiles/arcs_schema.dir
+D:/Simon_Projekte/Softwear/ARCS/ARCS/build/app/CMakeFiles/arcs_app.dir

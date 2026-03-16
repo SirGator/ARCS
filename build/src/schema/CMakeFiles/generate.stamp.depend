@@ -1,0 +1,7 @@
+# CMake generation dependency list for this directory.
+C:/Dev/toolchains/vcpkg/installed/x64-windows/share/nlohmann_json/nlohmann_jsonConfig.cmake
+C:/Dev/toolchains/vcpkg/installed/x64-windows/share/nlohmann_json/nlohmann_jsonConfigVersion.cmake
+C:/Dev/toolchains/vcpkg/installed/x64-windows/share/nlohmann_json/nlohmann_jsonTargets.cmake
+C:/Program Files/CMake/share/cmake-4.2/Modules/FindPackageHandleStandardArgs.cmake
+C:/Program Files/CMake/share/cmake-4.2/Modules/FindPackageMessage.cmake
+D:/Simon_Projekte/Softwear/ARCS/ARCS/src/schema/CMakeLists.txt
