@@ -5,16 +5,14 @@
 
 namespace arcs::schema{
 
-    // error path + nassege
-    struct validationError{
+    struct ValidationError{
         std::string path;
-        std::string massege;
+        std::string message;
     };
 
-        // ok / nicht ok 
     struct ValidationResult{
         bool valid = false;
         std::string schema_id;
-        std::vector<std::string> errors;
+        std::vector<ValidationError> errors;
     };
 }

@@ -1,6 +1,6 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "vera/task@v1",
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "$id": "arcs.task.v1",
   "type": "object",
   "required": ["title"],
   "properties": {

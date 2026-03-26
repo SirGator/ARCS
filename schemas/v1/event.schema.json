@@ -1,17 +1,17 @@
- {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "vera/event@v1",
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "$id": "arcs.event.v1",
   "type": "object",
   "required": [
     "event_id",
     "event_type",
-    "seq",
     "ts",
     "actor",
-    "refs"
+    "refs",
+    "stream_key"
   ],
   "properties": {
-    "event_id": { "type": "string" },
+    "event_id": { "type": "string", "minLength": 1 },
     "event_type": {
       "type": "string",
       "enum": [
@@ -22,7 +22,6 @@
         "execution_recorded"
       ]
     },
-    "seq": { "type": "integer", "minimum": 1 },
     "ts": { "type": "string", "format": "date-time" },
     "actor": {
       "type": "object",
@@ -32,7 +31,7 @@
           "type": "string",
           "enum": ["human", "system", "model", "executor"]
         },
-        "id": { "type": "string" }
+        "id": { "type": "string", "minLength": 1 }
       },
       "additionalProperties": false
     },
@@ -42,8 +41,8 @@
         "type": "object",
         "required": ["artifact_id", "version_id", "role"],
         "properties": {
-          "artifact_id": { "type": "string" },
-          "version_id": { "type": "string" },
+          "artifact_id": { "type": "string", "minLength": 1 },
+          "version_id": { "type": "string", "minLength": 1 },
           "role": {
             "type": "string",
             "enum": ["target", "parent", "policy", "action", "result"]
@@ -52,7 +51,9 @@
         "additionalProperties": false
       }
     },
-    "payload": { "type": "object" }
+    "stream_key": { "type": "string", "minLength": 1 },
+    "payload": { "type": "object" },
+    "prev_hash": { "type": "string" }
   },
   "additionalProperties": false
 }

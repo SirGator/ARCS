@@ -1,10 +1,65 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "vera/policy@v1",
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "$id": "arcs.policy.v1",
   "type": "object",
-  "required": ["allowed_actions"],
+  "required": ["capabilities", "constraints", "verifier_rules", "approval_required_for"],
   "properties": {
-    "allowed_actions": {
+    "capabilities": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "constraints": {
+      "type": "object",
+      "properties": {
+        "shell": {
+          "type": "object",
+          "properties": {
+            "allow_cmd": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          },
+          "additionalProperties": false
+        },
+        "net": {
+          "type": "object",
+          "properties": {
+            "allow_domains": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          },
+          "additionalProperties": false
+        },
+        "file": {
+          "type": "object",
+          "properties": {
+            "allow_roots": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "verifier_rules": {
+      "type": "object",
+      "required": ["hard_checks", "soft_checks"],
+      "properties": {
+        "hard_checks": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "soft_checks": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "approval_required_for": {
       "type": "array",
       "items": { "type": "string" }
     }

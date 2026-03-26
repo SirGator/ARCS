@@ -1,14 +1,40 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "vera/option@v1",
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "$id": "arcs.option.v1",
   "type": "object",
-  "required": ["title", "steps", "requires_permissions"],
+  "required": ["title", "human_summary", "steps", "requires_permissions", "safety_level"],
   "properties": {
     "title": { "type": "string", "minLength": 1 },
+    "human_summary": { "type": "string", "minLength": 1 },
     "steps": {
       "type": "array",
-      "items": { "type": "string" },
-      "minItems": 1
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["kind", "params"],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": ["emit_report"]
+          },
+          "params": {
+            "type": "object",
+            "required": ["format"],
+            "properties": {
+              "format": {
+                "type": "string",
+                "enum": ["json", "md"]
+              },
+              "sections": {
+                "type": "array",
+                "items": { "type": "string" }
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      }
     },
     "risks": {
       "type": "array",
@@ -21,6 +47,10 @@
     "requires_permissions": {
       "type": "array",
       "items": { "type": "string" }
+    },
+    "safety_level": {
+      "type": "string",
+      "enum": ["low", "medium", "high"]
     }
   },
   "additionalProperties": false

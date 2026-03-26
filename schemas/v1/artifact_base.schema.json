@@ -1,6 +1,6 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "vera/artifact_base@v1",
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "$id": "arcs.artifact_base.v1",
   "type": "object",
   "required": [
     "artifact_id",
@@ -8,9 +8,12 @@
     "version",
     "type",
     "schema_id",
+    "schema_version",
     "created_at",
     "created_by",
+    "source",
     "trust",
+    "stream_key",
     "payload"
   ],
   "properties": {
@@ -19,6 +22,7 @@
     "version": { "type": "integer", "minimum": 1 },
     "type": { "type": "string", "minLength": 1 },
     "schema_id": { "type": "string", "minLength": 1 },
+    "schema_version": { "type": "integer", "minimum": 1 },
     "created_at": { "type": "string", "format": "date-time" },
     "created_by": {
       "type": "object",
@@ -29,6 +33,18 @@
           "enum": ["human", "system", "model", "executor"]
         },
         "id": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "source": {
+      "type": "object",
+      "required": ["kind", "ref"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["chat", "file", "api", "sensor", "timer", "internal"]
+        },
+        "ref": { "type": "string", "minLength": 1 }
       },
       "additionalProperties": false
     },
@@ -43,12 +59,49 @@
         "source_class": {
           "type": "string",
           "enum": ["human", "system", "model", "external"]
-        },
-        "reason": { "type": "string" }
+        }
       },
       "additionalProperties": false
     },
-    "payload": { "type": "object" }
+    "stream_key": { "type": "string", "minLength": 1 },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "payload": { "type": "object" },
+    "provenance": {
+      "type": "object",
+      "properties": {
+        "parents": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "rules_applied": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "models_used": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "prompt_hash", "inputs", "temperature", "raw_output_hash"],
+            "properties": {
+              "name": { "type": "string", "minLength": 1 },
+              "prompt_hash": { "type": "string", "minLength": 1 },
+              "inputs": {
+                "type": "array",
+                "items": { "type": "string" }
+              },
+              "temperature": { "type": "number" },
+              "raw_output_hash": { "type": "string", "minLength": 1 }
+            },
+            "additionalProperties": false
+          }
+        },
+        "transform": { "type": "string" }
+      },
+      "additionalProperties": false
+    }
   },
   "additionalProperties": false
 }

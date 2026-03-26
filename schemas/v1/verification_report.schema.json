@@ -1,6 +1,6 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "vera/verification_report@v1",
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "$id": "arcs.verification_report.v1",
   "type": "object",
   "required": ["target", "status"],
   "properties": {
@@ -8,8 +8,8 @@
       "type": "object",
       "required": ["artifact_id", "version_id"],
       "properties": {
-        "artifact_id": { "type": "string" },
-        "version_id": { "type": "string" }
+        "artifact_id": { "type": "string", "minLength": 1 },
+        "version_id": { "type": "string", "minLength": 1 }
       },
       "additionalProperties": false
     },
@@ -32,6 +32,14 @@
         },
         "additionalProperties": false
       }
+    },
+    "blockers": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "recommendations": {
+      "type": "array",
+      "items": { "type": "string" }
     }
   },
   "additionalProperties": false

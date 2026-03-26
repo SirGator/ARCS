@@ -1,10 +1,10 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "vera/actions/report_emit@v1",
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "$id": "arcs.action.report_emit.v1",
   "type": "object",
-  "required": ["action_id", "type", "params"],
+  "required": ["action_id", "type", "params", "required_permissions", "safety_level", "idempotency_key"],
   "properties": {
-    "action_id": { "type": "string" },
+    "action_id": { "type": "string", "minLength": 1 },
     "type": {
       "type": "string",
       "const": "report_emit"
@@ -16,10 +16,23 @@
         "format": {
           "type": "string",
           "enum": ["json", "md"]
+        },
+        "sections": {
+          "type": "array",
+          "items": { "type": "string" }
         }
       },
       "additionalProperties": false
-    }
+    },
+    "required_permissions": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "safety_level": {
+      "type": "string",
+      "enum": ["low", "medium", "high"]
+    },
+    "idempotency_key": { "type": "string", "minLength": 1 }
   },
   "additionalProperties": false
 }

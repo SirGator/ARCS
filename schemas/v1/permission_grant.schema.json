@@ -1,11 +1,11 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "vera/permission_grant@v1",
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "$id": "arcs.permission_grant.v1",
   "type": "object",
   "required": ["principal", "capability"],
   "properties": {
-    "principal": { "type": "string" },
-    "capability": { "type": "string" },
+    "principal": { "type": "string", "minLength": 1 },
+    "capability": { "type": "string", "minLength": 1 },
     "scope": { "type": "string" },
     "expires_at": { "type": "string", "format": "date-time" }
   },
