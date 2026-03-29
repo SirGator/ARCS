@@ -9,7 +9,7 @@
 #include "artifact/trust.hpp"
 #include "artifact/provenance.hpp"
 
-namespace arcs {
+namespace arcs::artifact {
 
 struct ArtifactVersion {
     std::string artifact_id;
@@ -33,4 +33,4 @@ struct ArtifactVersion {
     Provenance provenance;
 };
 
-} // namespace arcs
+} // namespace arcs::artifact

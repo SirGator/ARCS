@@ -1,7 +1,7 @@
 #pragma once
 #include <string>
 
-namespace arcs {
+namespace arcs::artifact {
 
 struct ActorRef {
     std::string actor_type; // human | system | model | executor

@@ -2,7 +2,7 @@
 
 #include "artifact/json.hpp"
 
-namespace arcs {
+namespace arcs::event {
 
 void to_json(json& j, const EventRef& v) {
     j = json{
@@ -52,4 +52,4 @@ void from_json(const json& j, Event& v) {
     }
 }
 
-} // namespace arcs
+} // namespace arcs::event

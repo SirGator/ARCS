@@ -1,7 +1,7 @@
 #pragma once
 #include <string>
 
-namespace arcs {
+namespace arcs::artifact {
 
 struct SourceRef {
     std::string kind; // chat | file | api | sensor | timer | internal

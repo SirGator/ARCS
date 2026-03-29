@@ -5,6 +5,7 @@
 #include <valijson/validation_results.hpp>
 #include <valijson/validator.hpp>
 
+#include <exception>
 #include <string>
 #include <utility>
 

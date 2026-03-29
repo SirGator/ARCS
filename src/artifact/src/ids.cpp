@@ -1,13 +1,14 @@
 #include "artifact/ids.hpp"
 
 #include <atomic>
+#include <cstdint>
 #include <chrono>
 #include <iomanip>
 #include <random>
 #include <sstream>
 #include <string>
 
-namespace arcs::ids {
+namespace arcs::artifact::ids {
 
 namespace {
     std::atomic<std::uint64_t> g_counter{0};
@@ -30,7 +31,7 @@ namespace {
 
         return oss.str();
     }
-}
+} // namespace arcs::artifact::ids
 
 std::string new_artifact_id() {
     return make_id("a_");

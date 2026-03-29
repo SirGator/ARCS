@@ -1,7 +1,7 @@
 #pragma once
 #include <string>
 
-namespace arcs {
+namespace arcs::artifact {
 
 struct TrustInfo {
     std::string level;        // low | medium | high

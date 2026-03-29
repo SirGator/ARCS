@@ -2,7 +2,7 @@
 
 #include <stdexcept>
 
-namespace arcs {
+namespace arcs::artifact {
 
 namespace {
 
@@ -185,4 +185,4 @@ void from_json(const json& j, ArtifactVersion& v)
     }
 }
 
-} // namespace arcs
+} // namespace arcs::artifact

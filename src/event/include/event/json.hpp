@@ -4,7 +4,7 @@
 
 #include "event/event.hpp"
 
-namespace arcs {
+namespace arcs::event {
 
 using nlohmann::json;
 
@@ -14,4 +14,4 @@ void from_json(const json& j, EventRef& v);
 void to_json(json& j, const Event& v);
 void from_json(const json& j, Event& v);
 
-} // namespace arcs
+} // namespace arcs::event

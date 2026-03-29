@@ -2,7 +2,7 @@
 #include <string>
 #include <vector>
 
-namespace arcs {
+namespace arcs::artifact {
 
 struct ModelUsage {
     std::string name;

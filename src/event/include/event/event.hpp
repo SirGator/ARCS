@@ -6,7 +6,7 @@
 
 #include "artifact/actor.hpp"
 
-namespace arcs {
+namespace arcs::event {
 
 struct EventRef {
     std::string artifact_id;
@@ -19,7 +19,7 @@ struct Event {
     std::string event_type;
     std::string ts;
 
-    ActorRef actor;
+    arcs::artifact::ActorRef actor;
     std::vector<EventRef> refs;
 
     std::string stream_key;
@@ -28,4 +28,4 @@ struct Event {
     std::string prev_hash;
 };
 
-} // namespace arcs
+} // namespace arcs::event

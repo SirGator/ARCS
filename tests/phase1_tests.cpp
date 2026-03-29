@@ -20,7 +20,7 @@ void require(bool condition, const std::string& message)
 
 void test_artifact_roundtrip()
 {
-    arcs::ArtifactVersion artifact;
+    arcs::artifact::ArtifactVersion artifact;
     artifact.artifact_id = "a_test";
     artifact.version_id = "v_test";
     artifact.version = 2;
@@ -40,7 +40,7 @@ void test_artifact_roundtrip()
     artifact.provenance.transform = "reason";
 
     const nlohmann::json encoded = artifact;
-    const arcs::ArtifactVersion decoded = encoded.get<arcs::ArtifactVersion>();
+    const arcs::artifact::ArtifactVersion decoded = encoded.get<arcs::artifact::ArtifactVersion>();
 
     require(decoded.artifact_id == artifact.artifact_id, "artifact_id mismatch");
     require(decoded.created_by.actor_type == "human", "created_by mismatch");
@@ -52,7 +52,7 @@ void test_artifact_roundtrip()
 
 void test_event_roundtrip()
 {
-    arcs::Event event;
+    arcs::event::Event event;
     event.event_id = "e_test";
     event.event_type = "artifact_committed";
     event.ts = "2026-03-22T12:30:01Z";
@@ -63,7 +63,7 @@ void test_event_roundtrip()
     event.prev_hash = "hash_123";
 
     const nlohmann::json encoded = event;
-    const arcs::Event decoded = encoded.get<arcs::Event>();
+    const arcs::event::Event decoded = encoded.get<arcs::event::Event>();
 
     require(decoded.event_id == event.event_id, "event_id mismatch");
     require(decoded.actor.id == event.actor.id, "event actor mismatch");
@@ -94,7 +94,7 @@ void test_invalid_actor_type_rejected()
     bool threw = false;
     try
     {
-        static_cast<void>(invalid.get<arcs::ArtifactVersion>());
+        static_cast<void>(invalid.get<arcs::artifact::ArtifactVersion>());
     }
     catch (const std::invalid_argument&)
     {
@@ -125,7 +125,7 @@ void test_missing_required_field_rejected()
     bool threw = false;
     try
     {
-        static_cast<void>(invalid.get<arcs::ArtifactVersion>());
+        static_cast<void>(invalid.get<arcs::artifact::ArtifactVersion>());
     }
     catch (const nlohmann::json::out_of_range&)
     {
@@ -137,7 +137,7 @@ void test_missing_required_field_rejected()
 
 void test_provenance_roundtrip_explicit()
 {
-    arcs::Provenance provenance;
+    arcs::artifact::Provenance provenance;
     provenance.parents = {"a_1", "a_2"};
     provenance.rules_applied = {"rule_permission_check", "rule_scope"};
     provenance.models_used = {
@@ -146,7 +146,7 @@ void test_provenance_roundtrip_explicit()
     provenance.transform = "verify";
 
     const nlohmann::json encoded = provenance;
-    const arcs::Provenance decoded = encoded.get<arcs::Provenance>();
+    const arcs::artifact::Provenance decoded = encoded.get<arcs::artifact::Provenance>();
 
     require(decoded.parents == provenance.parents, "provenance parents mismatch");
     require(decoded.rules_applied == provenance.rules_applied, "provenance rules mismatch");
@@ -178,7 +178,7 @@ void test_invalid_source_kind_rejected()
     bool threw = false;
     try
     {
-        static_cast<void>(invalid.get<arcs::ArtifactVersion>());
+        static_cast<void>(invalid.get<arcs::artifact::ArtifactVersion>());
     }
     catch (const std::invalid_argument&)
     {

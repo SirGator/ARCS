@@ -3,7 +3,7 @@
 
 #include "artifact/artifact.hpp"
 
-namespace arcs {
+namespace arcs::artifact {
 
 using nlohmann::json;
 
@@ -25,4 +25,4 @@ void from_json(const json& j, Provenance& v);
 void to_json(json& j, const ArtifactVersion& v);
 void from_json(const json& j, ArtifactVersion& v);
 
-}
+} // namespace arcs::artifact
