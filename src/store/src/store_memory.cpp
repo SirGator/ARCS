@@ -14,7 +14,7 @@ namespace {
 using arcs::artifact::ArtifactVersion;
 using arcs::event::Event;
 
-void ensure_version_insertable(
+void ensure_version_insertable_impl(
     const ArtifactVersion& version,
     const std::unordered_map<std::string, ArtifactVersion>& versions_by_version_id)
 {
@@ -32,7 +32,7 @@ void ensure_version_insertable(
     }
 }
 
-void append_artifact_to_state(
+void append_artifact_to_state_impl(
     const ArtifactVersion& version,
     std::unordered_map<std::string, ArtifactVersion>& versions_by_version_id,
     std::unordered_map<std::string, std::vector<std::string>>& version_ids_by_artifact_id)
@@ -41,7 +41,7 @@ void append_artifact_to_state(
     version_ids_by_artifact_id[version.artifact_id].push_back(version.version_id);
 }
 
-void ensure_event_insertable(
+void ensure_event_insertable_impl(
     const Event& event,
     const std::unordered_set<std::string>& known_event_ids)
 {
@@ -60,7 +60,7 @@ void ensure_event_insertable(
     }
 }
 
-void ensure_bundle_locally_consistent(const arcs::store::CommitBundle& bundle)
+void ensure_bundle_locally_consistent_impl(const arcs::store::CommitBundle& bundle)
 {
     if (bundle.versions.empty()) {
         throw arcs::store::CommitRejectedError("commit rejected: no versions");
@@ -95,6 +95,38 @@ void ensure_bundle_locally_consistent(const arcs::store::CommitBundle& bundle)
 } // namespace
 
 namespace arcs::store {
+
+void StoreMemory::ensure_version_insertable(
+    const ArtifactVersion& version,
+    const std::unordered_map<std::string, ArtifactVersion>& versions_by_version_id)
+{
+    ensure_version_insertable_impl(version, versions_by_version_id);
+}
+
+void StoreMemory::ensure_version_insertable(const ArtifactVersion& version) const
+{
+    ensure_version_insertable_impl(version, versions_by_version_id_);
+}
+
+void StoreMemory::append_artifact_to_state(
+    const ArtifactVersion& version,
+    std::unordered_map<std::string, ArtifactVersion>& versions_by_version_id,
+    std::unordered_map<std::string, std::vector<std::string>>& version_ids_by_artifact_id)
+{
+    append_artifact_to_state_impl(version, versions_by_version_id, version_ids_by_artifact_id);
+}
+
+void StoreMemory::ensure_event_insertable(
+    const Event& event,
+    const std::unordered_set<std::string>& known_event_ids)
+{
+    ensure_event_insertable_impl(event, known_event_ids);
+}
+
+void StoreMemory::ensure_bundle_locally_consistent(const CommitBundle& bundle) const
+{
+    ensure_bundle_locally_consistent_impl(bundle);
+}
 
 StoreMemory::StoreMemory() = default;
 

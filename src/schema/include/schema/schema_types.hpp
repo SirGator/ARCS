@@ -1,19 +1,19 @@
 #pragma once
-    
-#include<string>
-#include<filesystem>
+
+#include <filesystem>
+#include <string>
 
 #include <nlohmann/json.hpp>
-    
-namespace arcs::schema{
-    struct SchemaEntry{
 
-        // die schema id 
-        std::string id;
-        // das json document an sich  
-        nlohmann::json document;
-        // wo ist das jsom dukoment damit man später weiß wo man schauen soll
-        std::filesystem::path source_path;
-    };
+namespace arcs::schema {
 
-}
+struct SchemaEntry {
+    // The schema ID.
+    std::string id;
+    // The JSON document itself.
+    nlohmann::json document;
+    // Where the JSON document came from, so we know where to look later.
+    std::filesystem::path source_path;
+};
+
+} // namespace arcs::schema

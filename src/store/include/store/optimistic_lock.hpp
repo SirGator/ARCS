@@ -3,31 +3,30 @@
 #include "store/commit.hpp"
 #include "store/store.hpp"
 
-
 namespace arcs::store::optimistic_lock {
 
 using arcs::store::CommitBundle;
 using arcs::store::CommitRejectedError;
 using arcs::store::IStore;
-using arcs::store::PendingVersion;
+using arcs::store::commit::PendingVersion;
 
-// Prüft genau eine PendingVersion gegen den aktuellen Head im Store.
+// Validates a single `PendingVersion` against the current head in the store.
 //
-// Regeln:
-// - expected_head_version_id nicht gesetzt:
-//     -> kein Lock-Check
-// - expected_head_version_id gesetzt:
-//     -> aktueller Head muss existieren
-//     -> aktueller Head muss exakt expected_head_version_id entsprechen
+// Rules:
+// - `expected_head_version_id` not set:
+//     -> no lock check
+// - `expected_head_version_id` set:
+//     -> a current head must exist
+//     -> the current head must exactly match `expected_head_version_id`
 //
-// Bei Verstoß wird CommitRejectedError geworfen.
+// On violation, throws `CommitRejectedError`.
 void validate_pending_version(
     const PendingVersion& pending,
     const IStore& store);
 
-// Prüft alle PendingVersion-Einträge eines CommitBundles.
+// Validates all `PendingVersion` entries in a `CommitBundle`.
 //
-// Bei der ersten Verletzung wird CommitRejectedError geworfen.
+// Throws `CommitRejectedError` on the first violation.
 void validate_bundle(
     const CommitBundle& bundle,
     const IStore& store);

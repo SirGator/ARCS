@@ -16,6 +16,7 @@ if (NOT TARGET nlohmann_json::nlohmann_json)
     set(JSON_BuildTests OFF CACHE INTERNAL "" FORCE)
     FetchContent_Declare(nlohmann_json
         URL https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
     )
     FetchContent_MakeAvailable(nlohmann_json)
 endif()
@@ -31,12 +32,23 @@ set(valijson_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(valijson_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(valijson)
 
+FetchContent_Declare(googletest
+    URL https://github.com/google/googletest/archive/refs/tags/v1.16.0.zip
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+)
+
+set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
+set(BUILD_GMOCK OFF CACHE BOOL "" FORCE)
+set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(googletest)
+
 include(CTest)
 
 add_subdirectory(src/artifact)
 add_subdirectory(src/event)
 add_subdirectory(src/schema)
 add_subdirectory(src/store)
+add_subdirectory(src/reducer)
 add_subdirectory(app)
 
 if(BUILD_TESTING)

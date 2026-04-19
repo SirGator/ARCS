@@ -1,28 +1,28 @@
 #pragma once
 
-#include "artifact/artifact.hpp"
-#include "event/event.hpp"
-
 #include <optional>
 #include <string>
 #include <vector>
+
+#include "artifact/artifact.hpp"
+#include "event/event.hpp"
 
 namespace arcs::store::commit {
 
 using arcs::artifact::ArtifactVersion;
 using arcs::event::Event;
 
-// Eine geplante neue Version plus optionaler Optimistic-Lock-Kontext.
-// expected_head_version_id bedeutet:
-// "Ich darf diese neue Version nur committen, wenn der aktuelle Head
-//  dieses Artefakts genau diese Version ist."
+// A planned new version plus optional optimistic-lock context.
+// `expected_head_version_id` means:
+// "I may only commit this new version if the current head
+//  of this artifact is exactly this version."
 struct PendingVersion {
     ArtifactVersion version;
     std::optional<std::string> expected_head_version_id;
 };
 
-// Das atomare Schreib-Bundle für den Store.
-// Entweder alles wird übernommen, oder nichts.
+// The store's atomic write bundle.
+// Either everything is committed, or nothing is.
 struct CommitBundle {
     std::vector<PendingVersion> versions;
     std::vector<Event> events;

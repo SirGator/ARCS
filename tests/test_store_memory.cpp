@@ -32,7 +32,7 @@ Event make_head_advanced_event(
     e.event_type = "head_advanced";
     e.stream_key = stream_key;
 
-    EventRef ref{};
+    arcs::event::EventRef ref{};
     ref.artifact_id = artifact_id;
     ref.version_id = version_id;
     ref.role = "target";

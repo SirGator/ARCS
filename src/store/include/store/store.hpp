@@ -17,7 +17,7 @@ using commit::CommitBundle;
 using commit::PendingVersion;
 
 // ---------------------------------
-// Fehlerarten
+// Error Types
 // ---------------------------------
 
 class StoreError : public std::runtime_error {
@@ -39,7 +39,7 @@ public:
 };
 
 // ---------------------------------
-// Filter für list()
+// Filter for list()
 // ---------------------------------
 
 struct ListQuery {
@@ -55,37 +55,37 @@ class IStore {
 public:
     virtual ~IStore() = default;
 
-    // Append-only Einzeloperationen.
-    // WARNING: bypasses commit boundary - debug only.
+    // Append-only single operations.
+    // WARNING: bypasses the commit boundary; debug only.
     virtual void append_artifact(const ArtifactVersion& version) = 0;
     virtual void append_event(const Event& event) = 0;
 
-    // Zentrale atomare Operation:
-    // entweder alle Versionen + Events werden übernommen, oder nichts.
+    // Central atomic operation:
+    // either all versions and events are committed, or nothing is.
     virtual void commit(const store::CommitBundle& bundle) = 0;
 
-    // Aktueller Head eines Artefakts.
-    // Wichtig: Head ist nicht automatisch "neueste Version",
-    // sondern ergibt sich aus der Head-Semantik / head_advanced-Events.
+    // Current head of an artifact.
+    // Important: the head is not automatically the "latest version";
+    // it is derived from head semantics and `head_advanced` events.
     virtual ArtifactVersion get(const std::string& artifact_id) const = 0;
 
-    // Exakte Version über version_id.
+    // Exact version by `version_id`.
     virtual ArtifactVersion get_version(const std::string& version_id) const = 0;
 
-    // Alle Versionen, optional gefiltert.
-    // Deterministische Debug-/Test-Ausgabe, nicht Log-Reihenfolge.
+    // All versions, optionally filtered.
+    // Deterministic debug/test output, not log order.
     virtual std::vector<ArtifactVersion> list(const ListQuery& query = {}) const = 0;
 
-    // Alle Events in stabiler Log-Reihenfolge.
+    // All events in stable log order.
     virtual std::vector<Event> list_events(
         const std::optional<std::string>& stream_key = std::nullopt
     ) const = 0;
 
-    // Hilfsmethoden für Existenzprüfungen.
+    // Helper methods for existence checks.
     virtual bool has_artifact(const std::string& artifact_id) const = 0;
     virtual bool has_version(const std::string& version_id) const = 0;
 
-    // Optional, aber praktisch für Tests / Locking / Debugging.
+    // Optional, but useful for tests, locking, and debugging.
     virtual std::optional<std::string> current_head_version_id(
         const std::string& artifact_id
     ) const = 0;

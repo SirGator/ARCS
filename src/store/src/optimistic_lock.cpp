@@ -8,8 +8,8 @@ void validate_pending_version(
 {
     const std::optional<std::string>& expected = pending.expected_head_version_id;
 
-    // Kein expected_head_version_id gesetzt:
-    // -> kein Optimistic-Lock-Check
+    // No `expected_head_version_id` is set:
+    // -> skip the optimistic-lock check.
     if (!expected.has_value()) {
         return;
     }
@@ -18,7 +18,7 @@ void validate_pending_version(
     const std::optional<std::string> current =
         store.current_head_version_id(artifact_id);
 
-    // Es wurde ein bestimmter Head erwartet, aber aktuell gibt es keinen.
+    // An expected head was provided, but there is no current head.
     if (!current.has_value()) {
         throw CommitRejectedError(
             "optimistic lock rejected: artifact '" + artifact_id +
@@ -26,7 +26,7 @@ void validate_pending_version(
             *expected + "' was provided");
     }
 
-    // Aktueller Head stimmt nicht mit erwartetem Head überein.
+    // The current head does not match the expected head.
     if (*current != *expected) {
         throw CommitRejectedError(
             "optimistic lock rejected: artifact '" + artifact_id +

@@ -1,12 +1,12 @@
 #pragma once
 
-#include "store/store.hpp"
-
+#include <optional>
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
-#include <optional>
-#include <string>
+
+#include "store/store.hpp"
 
 namespace arcs::store {
 
@@ -17,7 +17,7 @@ public:
 
     // ---------------------------------
     // Write Operations
-    // WARNING: bypasses commit boundary - debug only.
+    // WARNING: bypasses the commit boundary; debug only.
     // ---------------------------------
 
     void append_artifact(const ArtifactVersion& version) override;
@@ -27,7 +27,7 @@ public:
 
     // ---------------------------------
     // Read Operations
-    // list() is deterministic for debugging/tests, not commit/log order.
+    // `list()` is deterministic for debugging/tests, not commit/log order.
     // ---------------------------------
 
     ArtifactVersion get(const std::string& artifact_id) const override;
@@ -40,7 +40,7 @@ public:
     ) const override;
 
     // ---------------------------------
-    // Existence Checks
+    // Existence checks.
     // ---------------------------------
 
     bool has_artifact(const std::string& artifact_id) const override;
@@ -52,7 +52,7 @@ public:
 
 private:
     // ---------------------------------
-    // Validation Helpers
+    // Validation helpers.
     // ---------------------------------
 
     static void ensure_version_insertable(
@@ -70,7 +70,7 @@ private:
     void ensure_bundle_locally_consistent(const CommitBundle& bundle) const;
 
     // ---------------------------------
-    // State Mutation Helpers
+    // State mutation helpers.
     // ---------------------------------
 
     static void append_artifact_to_state(
@@ -81,22 +81,22 @@ private:
 
 private:
     // ---------------------------------
-    // Internal State (append-only)
+    // Internal state (append-only).
     // ---------------------------------
 
-    // version_id -> ArtifactVersion
+    // `version_id` -> `ArtifactVersion`
     std::unordered_map<std::string, ArtifactVersion> versions_by_version_id_;
 
-    // artifact_id -> [version_id...]
+    // `artifact_id` -> `[version_id...]`
     std::unordered_map<std::string, std::vector<std::string>> version_ids_by_artifact_id_;
 
-    // Event Log (append-only, Reihenfolge wichtig!)
+    // Event log (append-only, order matters!).
     std::vector<Event> event_log_;
 
-    // schnelle Duplicate-Prüfung für Events
+    // Fast duplicate check for events.
     std::unordered_set<std::string> event_ids_;
 
-    // artifact_id -> current head version_id
+    // `artifact_id` -> current head `version_id`
     std::unordered_map<std::string, std::string> head_by_artifact_id_;
 };
 
