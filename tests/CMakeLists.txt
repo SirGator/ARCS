@@ -34,6 +34,43 @@ target_link_libraries(arcs_store_memory_tests
 
 add_test(NAME arcs_store_memory_tests COMMAND $<TARGET_FILE:arcs_store_memory_tests>)
 
+add_executable(arcs_approval_tests
+    test_approval.cpp
+)
+
+target_link_libraries(arcs_approval_tests
+    PRIVATE
+        arcs_approval
+        GTest::gtest_main
+)
+
+add_test(NAME arcs_approval_tests COMMAND $<TARGET_FILE:arcs_approval_tests>)
+
+add_executable(arcs_materializer_tests
+    test_materializer.cpp
+)
+
+target_link_libraries(arcs_materializer_tests
+    PRIVATE
+        arcs_execution
+        GTest::gtest_main
+)
+
+add_test(NAME arcs_materializer_tests COMMAND $<TARGET_FILE:arcs_materializer_tests>)
+
+add_executable(arcs_policy_drift_tests
+    test_policy_drift.cpp
+)
+
+target_link_libraries(arcs_policy_drift_tests
+    PRIVATE
+        arcs_approval
+        arcs_artifact
+        GTest::gtest_main
+)
+
+add_test(NAME arcs_policy_drift_tests COMMAND $<TARGET_FILE:arcs_policy_drift_tests>)
+
 add_executable(arcs_task_state_reducer_tests
     test_task_state_reducer.cpp
 )

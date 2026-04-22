@@ -5,7 +5,12 @@
 #include "artifact/artifact.hpp"
 #include "verification/verifier.hpp"
 
-namespace arcs {
+using arcs::artifact::ActorRef;
+using arcs::artifact::ArtifactVersion;
+using arcs::artifact::SourceRef;
+using arcs::artifact::TrustInfo;
+using namespace arcs::verification;
+
 namespace {
 
 class StubVerifier final : public IVerifier {
@@ -73,11 +78,8 @@ bool can_materialize_action(const VerificationReportData& report) {
 }
 
 } // namespace
-} // namespace arcs
 
 TEST(UnknownBlocksTest, UnknownAggregateMeansBlocked) {
-    using namespace arcs;
-
     VerificationEngine engine;
     engine.add_verifier(std::make_shared<StubVerifier>(
         VerificationCheck{.name = "schema", .status = CheckStatus::Pass, .detail = "schema valid"}));
@@ -100,8 +102,6 @@ TEST(UnknownBlocksTest, UnknownAggregateMeansBlocked) {
 }
 
 TEST(UnknownBlocksTest, UnknownFromScopeVerifierBlocksOption) {
-    using namespace arcs;
-
     ScopeVerifier verifier;
 
     auto target = make_option_with_ambiguous_scope();
@@ -118,8 +118,6 @@ TEST(UnknownBlocksTest, UnknownFromScopeVerifierBlocksOption) {
 }
 
 TEST(UnknownBlocksTest, UnknownTakesPriorityOverPassAndStillBlocks) {
-    using namespace arcs;
-
     const std::vector<VerificationCheck> checks = {
         VerificationCheck{.name = "schema", .status = CheckStatus::Pass, .detail = "ok"},
         VerificationCheck{.name = "reference_integrity", .status = CheckStatus::Pass, .detail = "ok"},
@@ -132,8 +130,6 @@ TEST(UnknownBlocksTest, UnknownTakesPriorityOverPassAndStillBlocks) {
 }
 
 TEST(UnknownBlocksTest, FailStillWinsOverUnknownInAggregation) {
-    using namespace arcs;
-
     const std::vector<VerificationCheck> checks = {
         VerificationCheck{.name = "schema", .status = CheckStatus::Pass, .detail = "ok"},
         VerificationCheck{.name = "scope", .status = CheckStatus::Unknown, .detail = "ambiguous scope"},

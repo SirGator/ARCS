@@ -2,7 +2,7 @@
 
 #include <string>
 
-namespace arcs {
+namespace arcs::verification {
 
 VerificationCheck ApprovalVerifier::check(
     const ArtifactVersion& target,
@@ -41,4 +41,4 @@ VerificationCheck ApprovalVerifier::check(
     return result;
 }
 
-} // namespace arcs
+} // namespace arcs::verification

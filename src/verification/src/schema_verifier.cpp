@@ -4,7 +4,7 @@
 
 #include <string>
 
-namespace arcs {
+namespace arcs::verification {
 
 VerificationCheck SchemaVerifier::check(
     const ArtifactVersion& target,
@@ -63,4 +63,4 @@ VerificationCheck SchemaVerifier::check(
     return result;
 }
 
-} // namespace arcs
+} // namespace arcs::verification

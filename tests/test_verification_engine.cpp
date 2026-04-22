@@ -7,7 +7,12 @@
 #include "artifact/artifact.hpp"
 #include "verification/verifier.hpp"
 
-namespace arcs {
+using arcs::artifact::ActorRef;
+using arcs::artifact::ArtifactVersion;
+using arcs::artifact::SourceRef;
+using arcs::artifact::TrustInfo;
+using namespace arcs::verification;
+
 namespace {
 
 class StubVerifier final : public IVerifier {
@@ -56,11 +61,8 @@ ArtifactVersion make_target() {
 }
 
 } // namespace
-} // namespace arcs
 
 TEST(VerificationEngineTest, AggregateStatusReturnsPassWhenAllChecksPass) {
-    using namespace arcs;
-
     const std::vector<VerificationCheck> checks = {
         VerificationCheck{.name = "schema", .status = CheckStatus::Pass, .detail = "ok"},
         VerificationCheck{.name = "permission", .status = CheckStatus::Pass, .detail = "ok"},
@@ -71,8 +73,6 @@ TEST(VerificationEngineTest, AggregateStatusReturnsPassWhenAllChecksPass) {
 }
 
 TEST(VerificationEngineTest, AggregateStatusReturnsFailWhenAnyCheckFails) {
-    using namespace arcs;
-
     const std::vector<VerificationCheck> checks = {
         VerificationCheck{.name = "schema", .status = CheckStatus::Pass, .detail = "ok"},
         VerificationCheck{.name = "permission", .status = CheckStatus::Fail, .detail = "capability exec:report_emit fehlt"},
@@ -83,8 +83,6 @@ TEST(VerificationEngineTest, AggregateStatusReturnsFailWhenAnyCheckFails) {
 }
 
 TEST(VerificationEngineTest, AggregateStatusReturnsUnknownWhenNoFailButUnknownExists) {
-    using namespace arcs;
-
     const std::vector<VerificationCheck> checks = {
         VerificationCheck{.name = "schema", .status = CheckStatus::Pass, .detail = "ok"},
         VerificationCheck{.name = "scope", .status = CheckStatus::Unknown, .detail = "scope ambiguous"},
@@ -94,8 +92,6 @@ TEST(VerificationEngineTest, AggregateStatusReturnsUnknownWhenNoFailButUnknownEx
 }
 
 TEST(VerificationEngineTest, RunAllReturnsPassWhenAllVerifiersPass) {
-    using namespace arcs;
-
     VerificationEngine engine;
     engine.add_verifier(std::make_shared<StubVerifier>(
         VerificationCheck{.name = "schema", .status = CheckStatus::Pass, .detail = "schema valid"}));
@@ -117,8 +113,6 @@ TEST(VerificationEngineTest, RunAllReturnsPassWhenAllVerifiersPass) {
 }
 
 TEST(VerificationEngineTest, RunAllReturnsFailAndAddsBlockersWhenAnyVerifierFails) {
-    using namespace arcs;
-
     VerificationEngine engine;
     engine.add_verifier(std::make_shared<StubVerifier>(
         VerificationCheck{.name = "schema", .status = CheckStatus::Pass, .detail = "schema valid"}));
@@ -139,8 +133,6 @@ TEST(VerificationEngineTest, RunAllReturnsFailAndAddsBlockersWhenAnyVerifierFail
 }
 
 TEST(VerificationEngineTest, RunAllReturnsUnknownWhenNoFailButUnknownExists) {
-    using namespace arcs;
-
     VerificationEngine engine;
     engine.add_verifier(std::make_shared<StubVerifier>(
         VerificationCheck{.name = "schema", .status = CheckStatus::Pass, .detail = "schema valid"}));
@@ -159,16 +151,12 @@ TEST(VerificationEngineTest, RunAllReturnsUnknownWhenNoFailButUnknownExists) {
 }
 
 TEST(VerificationEngineTest, AddVerifierRejectsNullVerifier) {
-    using namespace arcs;
-
     VerificationEngine engine;
 
     EXPECT_THROW(engine.add_verifier(nullptr), std::invalid_argument);
 }
 
 TEST(VerificationEngineTest, MakeVerificationReportArtifactBuildsVerificationArtifact) {
-    using namespace arcs;
-
     const auto target = make_target();
 
     VerificationReportData report{};

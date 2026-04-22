@@ -7,7 +7,7 @@
 
 #include <nlohmann/json.hpp>
 
-namespace arcs {
+namespace arcs::verification {
 
 namespace {
 
@@ -99,4 +99,4 @@ VerificationCheck ReferenceIntegrityVerifier::check(
     return result;
 }
 
-} // namespace arcs
+} // namespace arcs::verification

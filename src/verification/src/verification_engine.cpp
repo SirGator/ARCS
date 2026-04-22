@@ -6,7 +6,7 @@
 
 #include <nlohmann/json.hpp>
 
-namespace arcs {
+namespace arcs::verification {
 
 namespace {
 
@@ -216,4 +216,4 @@ void from_json(const nlohmann::json& j, VerificationReportData& report) {
     }
 }
 
-} // namespace arcs
+} // namespace arcs::verification

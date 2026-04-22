@@ -2,7 +2,6 @@
 
 #include "store/store_memory.hpp"
 
-namespace arcs {
 namespace {
 
 using namespace arcs::store;
@@ -319,4 +318,3 @@ TEST(StoreMemoryTest, TwoHeadAdvancedEventsInSameCommitLastOneWins)
 }
 
 } // namespace
-} // namespace arcs

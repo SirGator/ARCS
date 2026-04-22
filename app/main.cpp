@@ -153,20 +153,20 @@ void run_verification_smoke_test()
         {"required_scopes", {"task_id:t_demo"}}
     };
 
-    arcs::VerificationEngine engine;
-    engine.add_verifier(std::make_shared<arcs::SchemaVerifier>());
-    engine.add_verifier(std::make_shared<arcs::ReferenceIntegrityVerifier>());
-    engine.add_verifier(std::make_shared<arcs::PermissionVerifier>());
-    engine.add_verifier(std::make_shared<arcs::ScopeVerifier>());
-    engine.add_verifier(std::make_shared<arcs::ApprovalVerifier>());
+    arcs::verification::VerificationEngine engine;
+    engine.add_verifier(std::make_shared<arcs::verification::SchemaVerifier>());
+    engine.add_verifier(std::make_shared<arcs::verification::ReferenceIntegrityVerifier>());
+    engine.add_verifier(std::make_shared<arcs::verification::PermissionVerifier>());
+    engine.add_verifier(std::make_shared<arcs::verification::ScopeVerifier>());
+    engine.add_verifier(std::make_shared<arcs::verification::ApprovalVerifier>());
 
-    arcs::VerificationContext context;
+    arcs::verification::VerificationContext context;
     context.schema_registry = &registry;
     context.permissions.capabilities = {"exec:report_emit"};
     context.permissions.scopes = {"task_id:t_demo"};
 
     const auto report = engine.run_all(target, context);
-    require(report.status == arcs::CheckStatus::Pass, "verification engine should pass smoke test");
+    require(report.status == arcs::verification::CheckStatus::Pass, "verification engine should pass smoke test");
 }
 
 void run_smoke_tests()

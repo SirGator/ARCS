@@ -10,24 +10,24 @@
 #include "artifact/artifact.hpp"
 #include "schema/validation_result.hpp"
 
-namespace arcs {
+namespace arcs::schema {
+class SchemaRegistry;
+}
+
+namespace arcs::store {
+class IStore;
+}
+
+namespace arcs::reducer {
+class ITimeSource;
+}
+
+namespace arcs::verification {
 
 using arcs::artifact::ActorRef;
 using arcs::artifact::ArtifactVersion;
 using arcs::artifact::SourceRef;
 using arcs::artifact::TrustInfo;
-
-namespace schema {
-class SchemaRegistry;
-} // namespace schema
-
-namespace store {
-class IStore;
-} // namespace store
-
-namespace reducer {
-class ITimeSource;
-} // namespace reducer
 
 // -----------------------------
 // Basis-Enums
@@ -116,9 +116,9 @@ struct VerificationContext {
     const ArtifactVersion* policy{nullptr};
     EffectivePermissions permissions{};
 
-    const schema::SchemaRegistry* schema_registry{nullptr};
-    const store::IStore* store{nullptr};
-    const reducer::ITimeSource* time_source{nullptr};
+    const arcs::schema::SchemaRegistry* schema_registry{nullptr};
+    const arcs::store::IStore* store{nullptr};
+    const arcs::reducer::ITimeSource* time_source{nullptr};
 
     // Actor, für Permission/Authority-Checks später nützlich
     std::optional<ActorRef> principal{};
@@ -227,4 +227,4 @@ void from_json(const nlohmann::json& j, VerificationCheck& check);
 void to_json(nlohmann::json& j, const VerificationReportData& report);
 void from_json(const nlohmann::json& j, VerificationReportData& report);
 
-} // namespace arcs
+} // namespace arcs::verification
