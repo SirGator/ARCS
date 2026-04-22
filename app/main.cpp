@@ -1,5 +1,6 @@
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <iostream>
 #include <optional>
 #include <stdexcept>
@@ -15,6 +16,7 @@
 #include "schema/schema_registry.hpp"
 #include "schema/validator.hpp"
 #include "store/store_memory.hpp"
+#include "verification/verifier.hpp"
 
 namespace {
 
@@ -128,11 +130,51 @@ void run_reducer_smoke_test()
     require(approval_state.policy_ref == "p_demo", "approval reducer should extract policy ref");
 }
 
+void run_verification_smoke_test()
+{
+    arcs::schema::SchemaRegistry registry;
+    arcs::schema::SchemaEntry entry;
+    entry.id = "arcs.demo.option.v1";
+    entry.document = {{"$id", entry.id}, {"type", "object"}};
+    entry.source_path = "inline";
+
+    require(registry.register_schema(entry), "verification schema registration should succeed");
+
+    arcs::artifact::ArtifactVersion target;
+    target.artifact_id = "a_option_demo";
+    target.version_id = "v_option_demo";
+    target.type = "option";
+    target.schema_id = entry.id;
+    target.schema_version = 1;
+    target.stream_key = "task_id:t_demo";
+    target.payload = {
+        {"title", "Verification Demo"},
+        {"requires_permissions", {"exec:report_emit"}},
+        {"required_scopes", {"task_id:t_demo"}}
+    };
+
+    arcs::VerificationEngine engine;
+    engine.add_verifier(std::make_shared<arcs::SchemaVerifier>());
+    engine.add_verifier(std::make_shared<arcs::ReferenceIntegrityVerifier>());
+    engine.add_verifier(std::make_shared<arcs::PermissionVerifier>());
+    engine.add_verifier(std::make_shared<arcs::ScopeVerifier>());
+    engine.add_verifier(std::make_shared<arcs::ApprovalVerifier>());
+
+    arcs::VerificationContext context;
+    context.schema_registry = &registry;
+    context.permissions.capabilities = {"exec:report_emit"};
+    context.permissions.scopes = {"task_id:t_demo"};
+
+    const auto report = engine.run_all(target, context);
+    require(report.status == arcs::CheckStatus::Pass, "verification engine should pass smoke test");
+}
+
 void run_smoke_tests()
 {
     run_schema_registry_smoke_test();
     run_store_smoke_test();
     run_reducer_smoke_test();
+    run_verification_smoke_test();
 }
 
 } // namespace

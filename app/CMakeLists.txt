@@ -9,6 +9,7 @@ target_link_libraries(arcs_app
         arcs_reducer
         arcs_store
         arcs_schema
+        arcs_verification
         nlohmann_json::nlohmann_json
 )
 

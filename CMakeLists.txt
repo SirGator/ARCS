@@ -49,6 +49,7 @@ add_subdirectory(src/event)
 add_subdirectory(src/schema)
 add_subdirectory(src/store)
 add_subdirectory(src/reducer)
+add_subdirectory(src/verification)
 add_subdirectory(app)
 
 if(BUILD_TESTING)

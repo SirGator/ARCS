@@ -69,3 +69,27 @@ target_link_libraries(arcs_replay_tests
 )
 
 add_test(NAME arcs_replay_tests COMMAND $<TARGET_FILE:arcs_replay_tests>)
+
+add_executable(arcs_verification_engine_tests
+    test_verification_engine.cpp
+)
+
+target_link_libraries(arcs_verification_engine_tests
+    PRIVATE
+        arcs_verification
+        GTest::gtest_main
+)
+
+add_test(NAME arcs_verification_engine_tests COMMAND $<TARGET_FILE:arcs_verification_engine_tests>)
+
+add_executable(arcs_unknown_blocks_tests
+    test_unknown_blocks.cpp
+)
+
+target_link_libraries(arcs_unknown_blocks_tests
+    PRIVATE
+        arcs_verification
+        GTest::gtest_main
+)
+
+add_test(NAME arcs_unknown_blocks_tests COMMAND $<TARGET_FILE:arcs_unknown_blocks_tests>)
