@@ -6,6 +6,8 @@ target_link_libraries(arcs_app
     PRIVATE
         arcs_artifact
         arcs_event
+        arcs_approval
+        arcs_execution
         arcs_reducer
         arcs_store
         arcs_schema

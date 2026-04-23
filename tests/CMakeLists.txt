@@ -130,3 +130,42 @@ target_link_libraries(arcs_unknown_blocks_tests
 )
 
 add_test(NAME arcs_unknown_blocks_tests COMMAND $<TARGET_FILE:arcs_unknown_blocks_tests>)
+
+add_executable(arcs_happy_path_tests
+    test_happy_path.cpp
+)
+
+target_link_libraries(arcs_happy_path_tests
+    PRIVATE
+        arcs_execution
+)
+
+add_test(NAME arcs_happy_path_tests COMMAND $<TARGET_FILE:arcs_happy_path_tests>)
+
+add_executable(arcs_idempotency_tests
+    test_idempotency.cpp
+)
+
+target_link_libraries(arcs_idempotency_tests
+    PRIVATE
+        arcs_execution
+)
+
+add_test(NAME arcs_idempotency_tests COMMAND $<TARGET_FILE:arcs_idempotency_tests>)
+
+add_executable(arcs_revocation_tests
+    test_revocation.cpp
+)
+
+target_link_libraries(arcs_revocation_tests
+    PRIVATE
+        arcs_execution
+)
+
+add_test(NAME arcs_revocation_tests COMMAND $<TARGET_FILE:arcs_revocation_tests>)
+
+add_executable(arcs_llm_isolation_tests
+    test_llm_isolation.cpp
+)
+
+add_test(NAME arcs_llm_isolation_tests COMMAND $<TARGET_FILE:arcs_llm_isolation_tests>)
