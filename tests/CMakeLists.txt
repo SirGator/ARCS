@@ -169,3 +169,52 @@ add_executable(arcs_llm_isolation_tests
 )
 
 add_test(NAME arcs_llm_isolation_tests COMMAND $<TARGET_FILE:arcs_llm_isolation_tests>)
+
+add_executable(arcs_authority_verifier_tests
+    test_authority_verifier.cpp
+)
+
+target_link_libraries(arcs_authority_verifier_tests
+    PRIVATE
+        arcs_artifact
+        arcs_verification
+)
+
+add_test(NAME arcs_authority_verifier_tests COMMAND $<TARGET_FILE:arcs_authority_verifier_tests>)
+
+add_executable(arcs_permission_ttl_tests
+    test_permission_ttl.cpp
+)
+
+target_link_libraries(arcs_permission_ttl_tests
+    PRIVATE
+        arcs_artifact
+        arcs_reducer
+)
+
+add_test(NAME arcs_permission_ttl_tests COMMAND $<TARGET_FILE:arcs_permission_ttl_tests>)
+
+add_executable(arcs_policy_change_control_tests
+    test_policy_change_control.cpp
+)
+
+target_link_libraries(arcs_policy_change_control_tests
+    PRIVATE
+        arcs_artifact
+        arcs_verification
+)
+
+add_test(NAME arcs_policy_change_control_tests COMMAND $<TARGET_FILE:arcs_policy_change_control_tests>)
+
+add_executable(arcs_adapter_registry_tests
+    test_adapter_registry.cpp
+)
+
+target_link_libraries(arcs_adapter_registry_tests
+    PRIVATE
+        arcs_artifact
+        arcs_execution
+        GTest::gtest_main
+)
+
+add_test(NAME arcs_adapter_registry_tests COMMAND $<TARGET_FILE:arcs_adapter_registry_tests>)

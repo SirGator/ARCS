@@ -3,6 +3,8 @@
 #include <string>
 #include <optional>
 
+#include <nlohmann/json.hpp>
+
 namespace arcs::artifact {
 struct ArtifactVersion;
 }
@@ -31,5 +33,8 @@ struct PermissionGrantPayload {
     PermissionScope scope;
     TTL ttl;
 };
+
+PermissionGrantPayload permission_grant_from_json(const nlohmann::json& j);
+nlohmann::json permission_grant_to_json(const PermissionGrantPayload& grant);
 
 } // namespace arcs::policy

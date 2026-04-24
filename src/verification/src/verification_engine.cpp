@@ -54,6 +54,10 @@ CheckStatus check_status_from_string(const std::string& value) {
     throw std::invalid_argument("invalid check status string: " + value);
 }
 
+} // namespace arcs::verification
+
+namespace arcs::reducer {
+
 bool EffectivePermissions::has_capability(const std::string& capability) const {
     return std::find(capabilities.begin(), capabilities.end(), capability) != capabilities.end();
 }
@@ -61,6 +65,10 @@ bool EffectivePermissions::has_capability(const std::string& capability) const {
 bool EffectivePermissions::has_scope(const std::string& scope) const {
     return std::find(scopes.begin(), scopes.end(), scope) != scopes.end();
 }
+
+} // namespace arcs::reducer
+
+namespace arcs::verification {
 
 void VerificationEngine::add_verifier(std::shared_ptr<IVerifier> verifier) {
     if (!verifier) {

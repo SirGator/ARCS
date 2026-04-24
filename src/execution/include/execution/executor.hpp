@@ -1,8 +1,9 @@
 #pragma once
 
-#include <memory>
 #include <string>
 #include <vector>
+
+#include "execution/execution_adapter.hpp"
 
 namespace arcs::execution {
 
@@ -17,15 +18,6 @@ struct ExecutionContext {
     std::vector<std::string> granted_permissions;
 };
 
-class IExecutor {
-public:
-    virtual ~IExecutor() = default;
-
-    virtual ExecutionResult execute(
-        const Action& action,
-        const ExecutionContext& ctx) = 0;
-
-    virtual std::string handles_action_type() const = 0;
-};
+using IExecutor = IExecutionAdapter;
 
 } // namespace arcs::execution

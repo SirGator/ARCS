@@ -8,6 +8,7 @@
 #include <nlohmann/json.hpp>
 
 #include "artifact/artifact.hpp"
+#include "reducer/effective_permissions.hpp"
 #include "schema/validation_result.hpp"
 
 namespace arcs::schema {
@@ -76,18 +77,7 @@ struct VerificationCheck {
 // Effektive Permissions
 // -----------------------------
 
-struct EffectivePermissions {
-    std::vector<std::string> capabilities;
-    std::vector<std::string> scopes;
-
-    bool has_capability(const std::string& capability) const;
-    bool has_scope(const std::string& scope) const;
-
-    bool operator==(const EffectivePermissions& other) const
-    {
-        return capabilities == other.capabilities && scopes == other.scopes;
-    }
-};
+using EffectivePermissions = arcs::reducer::EffectivePermissions;
 
 // -----------------------------
 // Verification Report Payload
