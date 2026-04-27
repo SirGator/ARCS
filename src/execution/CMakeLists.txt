@@ -1,6 +1,7 @@
 add_library(arcs_execution
     src/adapter_executor.cpp
     src/adapter_registry.cpp
+    src/cli_output_adapter.cpp
     src/action_materializer.cpp
     src/emit_report_step.cpp
     src/final_guards.cpp

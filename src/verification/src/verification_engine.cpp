@@ -6,6 +6,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include "artifact/factory.hpp"
+
 namespace arcs::verification {
 
 namespace {
@@ -145,18 +147,19 @@ ArtifactVersion make_verification_report_artifact(
     const std::string& version_id,
     const std::string& stream_key,
     const std::string& created_at) {
-    ArtifactVersion artifact{};
+    ArtifactVersion artifact = arcs::artifact::factory::make_base_artifact(
+        "verification_report",
+        "arcs.verification_report.v1",
+        stream_key,
+        created_by.actor_type,
+        created_by.id,
+        source.kind,
+        source.ref,
+        trust.level,
+        trust.source_class,
+        created_at);
     artifact.artifact_id = artifact_id;
     artifact.version_id = version_id;
-    artifact.version = 1;
-    artifact.type = "verification_report";
-    artifact.schema_id = "arcs.verification_report.v1";
-    artifact.schema_version = 1;
-    artifact.created_at = created_at;
-    artifact.created_by = created_by;
-    artifact.source = source;
-    artifact.trust = trust;
-    artifact.stream_key = stream_key;
     artifact.payload = nlohmann::json(report);
 
     artifact.provenance.parents.push_back(target.artifact_id);

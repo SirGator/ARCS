@@ -1,10 +1,6 @@
 #pragma once
 
-#include <memory>
-
-#include "execution/action.hpp"
 #include "execution/adapter_registry.hpp"
-#include "execution/executor.hpp"
 
 namespace arcs::execution {
 

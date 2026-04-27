@@ -69,10 +69,10 @@ static void policy_change_without_policy_edit_is_blocked()
     auto action = make_policy_update_action();
     auto ctx = make_ctx_without_authority();
 
-    auto report = verifier.check(action, ctx);
+    auto check = verifier.check(action, ctx);
 
-    assert(report.status == "fail");
-    assert(!report.blockers.empty());
+    assert(check.status == verification::CheckStatus::Fail);
+    assert(!check.detail.empty());
 
     std::cout << "[PASS] policy change without policy:edit is blocked\n";
 }
@@ -84,10 +84,10 @@ static void policy_change_with_policy_edit_is_allowed()
     auto action = make_policy_update_action();
     auto ctx = make_ctx_with_authority();
 
-    auto report = verifier.check(action, ctx);
+    auto check = verifier.check(action, ctx);
 
-    assert(report.status == "pass");
-    assert(report.blockers.empty());
+    assert(check.status == verification::CheckStatus::Pass);
+    assert(!check.detail.empty());
 
     std::cout << "[PASS] policy change with policy:edit is allowed\n";
 }

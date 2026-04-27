@@ -45,6 +45,8 @@ FetchContent_MakeAvailable(googletest)
 include(CTest)
 
 add_subdirectory(src/artifact)
+add_subdirectory(src/core)
+add_subdirectory(src/adapters)
 add_subdirectory(src/event)
 add_subdirectory(src/schema)
 add_subdirectory(src/store)

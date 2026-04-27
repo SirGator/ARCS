@@ -1,6 +1,7 @@
 #include "execution/policy_update_executor.hpp"
 
 #include "artifact/artifact.hpp"
+#include "artifact/factory.hpp"
 #include "artifact/ids.hpp"
 #include "execution/action.hpp"
 #include "execution/execution_result.hpp"
@@ -60,18 +61,24 @@ ExecutionResult PolicyUpdateExecutor::execute(
             throw std::invalid_argument("missing params.new_policy object");
         }
 
-        arcs::artifact::ArtifactVersion policy{};
+        arcs::artifact::ArtifactVersion policy = arcs::artifact::factory::make_base_artifact(
+            "policy",
+            "arcs.policy.v1",
+            "policy:core",
+            "system",
+            "policy_update_executor",
+            "internal",
+            "policy_update",
+            "high",
+            "system");
         policy.artifact_id = require_string(params, "policy_artifact_id");
-        policy.version_id  = require_string(params, "policy_version_id");
-        policy.version     = params.value("policy_version", 1);
-
-        policy.type = "policy";
-        policy.schema_id = "arcs.policy.v1";
-        policy.schema_version = 1;
-
-        policy.stream_key = "policy:core";
+        policy.version_id = require_string(params, "policy_version_id");
+        policy.version = params.value("policy_version", 1);
 
         policy.payload = params.at("new_policy");
+        policy.provenance.parents = {action.artifact_id};
+        policy.provenance.rules_applied = {"policy_update_executor"};
+        policy.provenance.transform = "policy_update";
 
         arcs::event::Event event{};
         event.event_id = require_string(params, "event_id");

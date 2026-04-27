@@ -4,9 +4,17 @@
 #include <string>
 #include <unordered_map>
 
-#include "execution/execution_adapter.hpp"
+#include "execution/executor.hpp"
 
 namespace arcs::execution {
+
+class IExecutionAdapter {
+public:
+    virtual ~IExecutionAdapter() = default;
+
+    virtual std::string handles_action_type() const = 0;
+    virtual ExecutionResult execute(const Action& action, const ExecutionContext& ctx) = 0;
+};
 
 class AdapterRegistry {
 public:

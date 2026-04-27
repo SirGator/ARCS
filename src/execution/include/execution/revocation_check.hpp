@@ -2,9 +2,9 @@
 
 #include <string>
 
-namespace arcs::execution {
+#include "execution/executor.hpp"
 
-struct ExecutionContext;
+namespace arcs::execution {
 
 bool is_revoked(const ExecutionContext& ctx, std::string& reason);
 

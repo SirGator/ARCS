@@ -218,3 +218,54 @@ target_link_libraries(arcs_adapter_registry_tests
 )
 
 add_test(NAME arcs_adapter_registry_tests COMMAND $<TARGET_FILE:arcs_adapter_registry_tests>)
+
+add_executable(arcs_text_flow_tests
+    test_text_flow.cpp
+)
+
+target_link_libraries(arcs_text_flow_tests
+    PRIVATE
+        arcs_core
+        GTest::gtest_main
+)
+
+add_test(NAME arcs_text_flow_tests COMMAND $<TARGET_FILE:arcs_text_flow_tests>)
+
+add_executable(arcs_cli_adapters_tests
+    test_cli_adapters.cpp
+)
+
+target_link_libraries(arcs_cli_adapters_tests
+    PRIVATE
+        arcs_core
+        arcs_input_adapter
+        arcs_execution
+        GTest::gtest_main
+)
+
+add_test(NAME arcs_cli_adapters_tests COMMAND $<TARGET_FILE:arcs_cli_adapters_tests>)
+
+add_executable(arcs_input_artifact_tests
+    test_input_artifact.cpp
+)
+
+target_link_libraries(arcs_input_artifact_tests
+    PRIVATE
+        arcs_artifact
+        arcs_input_adapter
+        GTest::gtest_main
+)
+
+add_test(NAME arcs_input_artifact_tests COMMAND $<TARGET_FILE:arcs_input_artifact_tests>)
+
+add_executable(arcs_artifact_factory_tests
+    test_artifact_factory.cpp
+)
+
+target_link_libraries(arcs_artifact_factory_tests
+    PRIVATE
+        arcs_artifact
+        GTest::gtest_main
+)
+
+add_test(NAME arcs_artifact_factory_tests COMMAND $<TARGET_FILE:arcs_artifact_factory_tests>)

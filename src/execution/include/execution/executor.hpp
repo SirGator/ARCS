@@ -1,23 +1,18 @@
 #pragma once
 
 #include <string>
-#include <vector>
 
-#include "execution/execution_adapter.hpp"
+#include "execution/action.hpp"
+#include "execution/execution_result.hpp"
 
 namespace arcs::execution {
 
-struct Action;
-struct ExecutionResult;
+class IExecutor {
+public:
+    virtual ~IExecutor() = default;
 
-struct ExecutionContext {
-    std::string approval_id;
-    std::string verification_id;
-    bool approval_valid;
-    bool verification_passed;
-    std::vector<std::string> granted_permissions;
+    virtual ExecutionResult execute(const Action& action, const ExecutionContext& ctx) = 0;
+    virtual std::string handles_action_type() const = 0;
 };
-
-using IExecutor = IExecutionAdapter;
 
 } // namespace arcs::execution

@@ -46,14 +46,6 @@ ExecutionResult ReportEmitExecutor::execute(
 {
     const std::string& action_id = action.payload.action_id;
 
-    // 1) Idempotenz zuerst prüfen
-    if (auto existing = idempotency_store_.get(action_id); existing.has_value()) {
-      ExecutionResult replayed = *existing;
-      replayed.logs.push_back(
-          make_log("Idempotent replay: existing execution_result returned."));
-      return replayed;
-    }
-
     // Referenz für Resultat aufbauen
     ActionRef ref{
         .artifact_id = action.artifact_id,
@@ -90,7 +82,15 @@ ExecutionResult ReportEmitExecutor::execute(
       }
     }
 
-    // 3) Executor kann nur report_emit
+    // 3) Idempotenz erst nach erfolgreichem Guard-Check prüfen.
+    if (auto existing = idempotency_store_.get(action_id); existing.has_value()) {
+      ExecutionResult replayed = *existing;
+      replayed.logs.push_back(
+          make_log("Idempotent replay: existing execution_result returned."));
+      return replayed;
+    }
+
+    // 4) Executor kann nur report_emit
     if (action.payload.type != handles_action_type()) {
       auto result = ExecutionResult::fail(
           ref,
@@ -100,7 +100,7 @@ ExecutionResult ReportEmitExecutor::execute(
       return result;
     }
 
-    // 4) Report-Logik (MVP: deterministisch, ohne Shell/Netz)
+    // 5) Report-Logik (MVP: deterministisch, ohne Shell/Netz)
     try {
       std::ostringstream log_stream;
       log_stream << "ReportEmitExecutor executed action_id=" << action_id;
@@ -120,7 +120,7 @@ ExecutionResult ReportEmitExecutor::execute(
       result.logs.push_back(make_log(log_stream.str()));
       result.logs.push_back(make_log("Report generated successfully."));
 
-      // 5) Erst nach erfolgreicher Ausführung speichern
+      // 6) Erst nach erfolgreicher Ausführung speichern
       idempotency_store_.put(action_id, result);
       return result;
 

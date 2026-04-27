@@ -1,0 +1,16 @@
+{
+  "$id": "arcs.input.v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ARCS Input Artifact",
+  "type": "object",
+  "required": ["raw_text", "source"],
+  "properties": {
+    "raw_text": {
+      "type": "string"
+    },
+    "source": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": true
+}

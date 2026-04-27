@@ -53,10 +53,10 @@ static void policy_update_without_capability_fails()
     auto action = make_policy_update_action();
     auto ctx = make_ctx_without_policy_edit();
 
-    auto report = verifier.check(action, ctx);
+    auto check = verifier.check(action, ctx);
 
-    assert(report.status == "fail");
-    assert(!report.blockers.empty());
+    assert(check.status == verification::CheckStatus::Fail);
+    assert(!check.detail.empty());
 
     std::cout << "[PASS] policy_update without policy:edit fails\n";
 }
@@ -68,10 +68,10 @@ static void policy_update_with_capability_passes()
     auto action = make_policy_update_action();
     auto ctx = make_ctx_with_policy_edit();
 
-    auto report = verifier.check(action, ctx);
+    auto check = verifier.check(action, ctx);
 
-    assert(report.status == "pass");
-    assert(report.blockers.empty());
+    assert(check.status == verification::CheckStatus::Pass);
+    assert(!check.detail.empty());
 
     std::cout << "[PASS] policy_update with policy:edit passes\n";
 }

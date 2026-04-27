@@ -16,14 +16,12 @@ bool AuthorityVerifier::has_capability(
     ) != permissions.capabilities.end();
 }
 
-VerificationReport AuthorityVerifier::check(
+VerificationCheck AuthorityVerifier::check(
     const arcs::artifact::ArtifactVersion& target,
     const VerificationContext& ctx) const
 {
-    VerificationReport report{};
-    report.target_artifact_id = target.artifact_id;
-    report.target_version_id = target.version_id;
-    report.verifier_name = "AuthorityVerifier";
+    VerificationCheck result{};
+    result.name = "authority";
 
     bool needs_policy_edit = false;
     bool needs_perm_grant = false;
@@ -49,45 +47,27 @@ VerificationReport AuthorityVerifier::check(
     }
 
     if (!needs_policy_edit && !needs_perm_grant) {
-        report.status = "pass";
-        report.checks.push_back({
-            "authority",
-            "pass",
-            "target does not require authority capability"
-        });
-        return report;
+        result.status = CheckStatus::Pass;
+        result.detail = "target does not require authority capability";
+        return result;
     }
 
     if (needs_policy_edit && !has_capability(ctx.permissions, "policy:edit")) {
-        report.status = "fail";
-        report.checks.push_back({
-            "authority",
-            "fail",
-            "missing capability: policy:edit"
-        });
-        report.blockers.push_back("missing capability: policy:edit");
-        return report;
+        result.status = CheckStatus::Fail;
+        result.detail = "missing capability: policy:edit";
+        return result;
     }
 
     if (needs_perm_grant && !has_capability(ctx.permissions, "perm:grant")) {
-        report.status = "fail";
-        report.checks.push_back({
-            "authority",
-            "fail",
-            "missing capability: perm:grant"
-        });
-        report.blockers.push_back("missing capability: perm:grant");
-        return report;
+        result.status = CheckStatus::Fail;
+        result.detail = "missing capability: perm:grant";
+        return result;
     }
 
-    report.status = "pass";
-    report.checks.push_back({
-        "authority",
-        "pass",
-        "required authority capability present"
-    });
+    result.status = CheckStatus::Pass;
+    result.detail = "required authority capability present";
 
-    return report;
+    return result;
 }
 
 } // namespace arcs::verification

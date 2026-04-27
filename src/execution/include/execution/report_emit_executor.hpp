@@ -1,6 +1,5 @@
 #pragma once
 
-#include "execution/action.hpp"
 #include "execution/executor.hpp"
 #include "execution/idempotency.hpp"
 

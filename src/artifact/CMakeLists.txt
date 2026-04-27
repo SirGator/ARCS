@@ -1,5 +1,6 @@
 add_library(arcs_artifact
     src/ids.cpp
+    src/factory.cpp
     src/json.cpp
 )
 

@@ -16,6 +16,10 @@ TEST(ActionMaterializerTest, EmitReportStepBecomesReportEmitAction) {
     option.stream_key = "task_id:t_01";
 
     option.payload = {
+        {"policy_ref", {
+            {"artifact_id", "a_policy_1"},
+            {"version_id", "v_policy_1"}
+        }},
         {"steps", {{
             {"kind", "emit_report"},
             {"params", {
@@ -28,6 +32,8 @@ TEST(ActionMaterializerTest, EmitReportStepBecomesReportEmitAction) {
     ArtifactVersion policy{};
     policy.type = "policy";
     policy.schema_id = "arcs.policy.v1";
+    policy.artifact_id = "a_policy_1";
+    policy.version_id = "v_policy_1";
     policy.payload = {
         {"capabilities", {"exec:report_emit"}},
         {"approval_required_for", {"exec:report_emit"}}
@@ -52,6 +58,10 @@ TEST(ActionMaterializerTest, UnsupportedStepThrows) {
     ArtifactVersion option{};
     option.type = "option";
     option.payload = {
+        {"policy_ref", {
+            {"artifact_id", "a_policy_1"},
+            {"version_id", "v_policy_1"}
+        }},
         {"steps", {{
             {"kind", "unknown_step"},
             {"params", {{"x", 1}}}
@@ -60,6 +70,8 @@ TEST(ActionMaterializerTest, UnsupportedStepThrows) {
 
     ArtifactVersion policy{};
     policy.type = "policy";
+    policy.artifact_id = "a_policy_1";
+    policy.version_id = "v_policy_1";
 
     ActionMaterializer materializer;
     EXPECT_THROW(materializer.materialize(option, policy), std::runtime_error);
@@ -70,6 +82,10 @@ TEST(ActionMaterializerTest, MaterializeIsDeterministic) {
     option.type = "option";
     option.stream_key = "task_id:t_01";
     option.payload = {
+        {"policy_ref", {
+            {"artifact_id", "a_policy_1"},
+            {"version_id", "v_policy_1"}
+        }},
         {"steps", {{
             {"kind", "emit_report"},
             {"params", {
@@ -81,6 +97,8 @@ TEST(ActionMaterializerTest, MaterializeIsDeterministic) {
 
     ArtifactVersion policy{};
     policy.type = "policy";
+    policy.artifact_id = "a_policy_1";
+    policy.version_id = "v_policy_1";
     policy.payload = {
         {"capabilities", {"exec:report_emit"}}
     };

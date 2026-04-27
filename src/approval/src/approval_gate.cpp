@@ -1,5 +1,6 @@
 #include "approval.hpp"
 #include "artifact/artifact.hpp"
+#include "artifact/factory.hpp"
 #include "artifact/ids.hpp"
 
 namespace arcs::approval {
@@ -26,20 +27,17 @@ std::string to_string(ApprovalDecision decision)
 
 ApprovalArtifact ApprovalGate::submit(const ApprovalPayload& in)
 {
-    ApprovalArtifact a{};
-    a.artifact_id = arcs::artifact::ids::new_artifact_id();
-    a.version_id = arcs::artifact::ids::new_version_id();
-    a.version = 1;
-    a.type = "approval";
-    a.schema_id = "arcs.approval.v1";
-    a.schema_version = 1;
-
-    a.created_at = in.timestamp;
-    a.created_by = {
-        .actor_type = in.actor.actor_type,
-        .id = in.actor.id,
-    };
-    a.stream_key = in.target_option.artifact_id;
+    ApprovalArtifact a = arcs::artifact::factory::make_base_artifact(
+        "approval",
+        "arcs.approval.v1",
+        in.target_option.artifact_id,
+        in.actor.actor_type,
+        in.actor.id,
+        "internal",
+        "approval_gate",
+        "high",
+        "human",
+        in.timestamp);
     a.payload = nlohmann::json{
         {"target_option", {
             {"artifact_id", in.target_option.artifact_id},
@@ -58,6 +56,9 @@ ApprovalArtifact ApprovalGate::submit(const ApprovalPayload& in)
         {"timestamp", in.timestamp},
         {"expires_at", in.expires_at}
     };
+    a.provenance.parents = {in.target_option.artifact_id, in.policy_ref.artifact_id};
+    a.provenance.rules_applied = {"approval_gate"};
+    a.provenance.transform = "submit_approval";
 
     return a;
 }

@@ -1,3 +1,4 @@
+#include <nlohmann/json.hpp>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -5,12 +6,62 @@
 #include "materializer.hpp"
 #include "step.hpp"
 #include "artifact/artifact.hpp"
-#include "policy/policy.hpp"
+#include "artifact/factory.hpp"
 #include "artifact/ids.hpp"
+#include "policy/policy.hpp"
 
 namespace arcs::execution {
 
 namespace {
+
+bool json_array_contains_string(const nlohmann::json& value, const std::string& needle)
+{
+    if (!value.is_array()) {
+        return false;
+    }
+
+    for (const auto& entry : value) {
+        if (entry.is_string() && entry.get<std::string>() == needle) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+void validate_policy_binding(const OptionArtifact& option, const PolicyArtifact& policy)
+{
+    if (!option.payload.is_object() || !option.payload.contains("policy_ref")) {
+        throw std::runtime_error("option.policy_ref missing");
+    }
+
+    const auto& policy_ref = option.payload.at("policy_ref");
+    if (!policy_ref.is_object() ||
+        !policy_ref.contains("artifact_id") ||
+        !policy_ref.contains("version_id")) {
+        throw std::runtime_error("option.policy_ref malformed");
+    }
+
+    const auto option_policy_artifact_id = policy_ref.at("artifact_id").get<std::string>();
+    const auto option_policy_version_id = policy_ref.at("version_id").get<std::string>();
+
+    if (option_policy_artifact_id != policy.artifact_id ||
+        option_policy_version_id != policy.version_id) {
+        throw std::runtime_error("policy drift detected");
+    }
+}
+
+void validate_policy_allows_report_emit(const PolicyArtifact& policy)
+{
+    if (!policy.payload.is_object() || !policy.payload.contains("capabilities")) {
+        throw std::runtime_error("policy.capabilities missing");
+    }
+
+    const auto& capabilities = policy.payload.at("capabilities");
+    if (!json_array_contains_string(capabilities, "exec:report_emit")) {
+        throw std::runtime_error("policy does not allow exec:report_emit");
+    }
+}
 
 std::vector<Step> extract_steps(const OptionArtifact& option)
 {
@@ -60,8 +111,11 @@ namespace {
 
 void validate_step_against_policy(const Step& step, const PolicyArtifact& policy)
 {
-    (void)step;
-    (void)policy;
+    if (!std::holds_alternative<EmitReportStep>(step)) {
+        throw std::runtime_error("unsupported step.kind");
+    }
+
+    validate_policy_allows_report_emit(policy);
 }
 
 ActionArtifact step_to_action(const Step& step,
@@ -73,14 +127,16 @@ ActionArtifact step_to_action(const Step& step,
     if (std::holds_alternative<EmitReportStep>(step)) {
         const auto& s = std::get<EmitReportStep>(step);
 
-        ActionArtifact action{};
-        action.artifact_id = arcs::artifact::ids::new_artifact_id();
-        action.version_id = arcs::artifact::ids::new_version_id();
-        action.version = 1;
-        action.type = "action";
-        action.schema_id = "arcs.action.v1";
-        action.schema_version = 1;
-        action.stream_key = option.stream_key;
+        ActionArtifact action = arcs::artifact::factory::make_base_artifact(
+            "action",
+            "arcs.action.v1",
+            option.stream_key,
+            "system",
+            "action_materializer",
+            "internal",
+            "option_to_action",
+            "high",
+            "system");
 
         const auto action_id = arcs::artifact::ids::new_event_id();
         auto required_permissions = nlohmann::json::array();
@@ -98,6 +154,9 @@ ActionArtifact step_to_action(const Step& step,
             {"safety_level", "low"},
             {"idempotency_key", action_id}
         };
+        action.provenance.parents = {option.artifact_id};
+        action.provenance.rules_applied = {"materialize_emit_report"};
+        action.provenance.transform = "materialize_action";
 
         return action;
     }
@@ -112,6 +171,8 @@ std::vector<ActionArtifact> ActionMaterializer::materialize(
     const PolicyArtifact& policy) const
 {
     std::vector<ActionArtifact> actions;
+
+    validate_policy_binding(option, policy);
 
     const auto steps = extract_steps(option);
 

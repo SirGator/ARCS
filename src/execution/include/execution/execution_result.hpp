@@ -1,21 +1,17 @@
 #pragma once
 
 #include <string>
-#include <utility>
 #include <vector>
 
-namespace arcs::execution {
+#include "execution/action.hpp"
 
-struct ActionRef {
-    std::string artifact_id;
-    std::string version_id;
-};
+namespace arcs::execution {
 
 enum class ExecutionStatus {
     Success,
     Fail,
-    Cancelled,
-    Timeout
+    Timeout,
+    Cancelled
 };
 
 struct ExecutionLog {
@@ -25,26 +21,28 @@ struct ExecutionLog {
 
 struct ExecutionResult {
     ActionRef action_ref;
-    ExecutionStatus status;
-    std::vector<ExecutionLog> logs;
-    int exit_code = 0;
+    ExecutionStatus status{ExecutionStatus::Fail};
+    int exit_code{1};
     std::string error_message;
+    std::vector<ExecutionLog> logs;
 
-    static ExecutionResult success(const ActionRef& ref) {
-        return ExecutionResult{
-            .action_ref = ref,
-            .status = ExecutionStatus::Success,
-            .exit_code = 0
-        };
+    static ExecutionResult success(const ActionRef& ref)
+    {
+        ExecutionResult result{};
+        result.action_ref = ref;
+        result.status = ExecutionStatus::Success;
+        result.exit_code = 0;
+        return result;
     }
 
-    static ExecutionResult fail(const ActionRef& ref, std::string err) {
-        return ExecutionResult{
-            .action_ref = ref,
-            .status = ExecutionStatus::Fail,
-            .exit_code = 1,
-            .error_message = std::move(err)
-        };
+    static ExecutionResult fail(const ActionRef& ref, const std::string& message)
+    {
+        ExecutionResult result{};
+        result.action_ref = ref;
+        result.status = ExecutionStatus::Fail;
+        result.exit_code = 1;
+        result.error_message = message;
+        return result;
     }
 };
 
