@@ -46,3 +46,15 @@ TEST(TextFlowTest, BlocksWhenPolicyDrifts)
     EXPECT_NE(output.find("decision: blocked"), std::string::npos);
     EXPECT_NE(output.find("policy_drift: option.policy_ref does not match current policy head"), std::string::npos);
 }
+
+TEST(TextFlowTest, RoutesFreeTextThroughNlu)
+{
+    const auto output = arcs::core::run_text_flow("erinnere mich morgen an x");
+
+    EXPECT_NE(output.find("step: parse input -> OK | free text routed to nlu"), std::string::npos);
+    EXPECT_NE(output.find("step: nlu_interpretation -> OK | parsed"), std::string::npos);
+    EXPECT_NE(output.find("step: task -> OK | artifact created"), std::string::npos);
+    EXPECT_NE(output.find("step: routing -> OK | task-only ingestion"), std::string::npos);
+    EXPECT_NE(output.find("decision: ingested"), std::string::npos);
+    EXPECT_EQ(output.find("step: option -> OK"), std::string::npos);
+}

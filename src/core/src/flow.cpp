@@ -23,6 +23,8 @@
 #include "materializer.hpp"
 #include "execution/report_emit_executor.hpp"
 #include "execution/idempotency.hpp"
+#include "nlu/nlu_to_task_mapper.hpp"
+#include "nlu/rule_based_nlu_parser.hpp"
 #include "store/commit.hpp"
 #include "store/store_memory.hpp"
 #include "verification/authority_verifier.hpp"
@@ -43,6 +45,49 @@ struct ParsedInput {
     bool permission_yes{false};
     bool policy_drift{false};
 };
+
+ArtifactVersion make_artifact(
+    const std::string& type,
+    const std::string& schema_id,
+    const std::string& stream_key,
+    const std::string& actor_type,
+    const std::string& actor_id,
+    const std::string& source_kind,
+    const std::string& source_ref,
+    const std::string& trust_level,
+    const std::string& trust_source_class);
+
+ArtifactVersion make_nlu_artifact(
+    const std::string& stream_key,
+    const ArtifactVersion& parent,
+    const arcs::nlu::NluResult& result)
+{
+    ArtifactVersion artifact = make_artifact(
+        "nlu_interpretation",
+        "arcs.nlu_interpretation.v1",
+        stream_key,
+        "system",
+        result.parser_name.empty() ? "nlu" : result.parser_name,
+        "internal",
+        "nlu",
+        "low",
+        "model");
+
+    artifact.payload = nlohmann::json{
+        {"status", result.status == arcs::nlu::NluStatus::Parsed ? "parsed" :
+                    result.status == arcs::nlu::NluStatus::Ambiguous ? "ambiguous" :
+                    "unknown"},
+        {"intent", result.intent},
+        {"confidence", result.confidence},
+        {"entities", result.entities},
+        {"raw_text", result.raw_text},
+        {"parser_name", result.parser_name},
+    };
+    artifact.provenance.parents = {parent.artifact_id};
+    artifact.provenance.rules_applied = {"nlu_parse"};
+    artifact.provenance.transform = "parse_nlu";
+    return artifact;
+}
 
 class KernelIdempotencyStore final : public arcs::execution::IIdempotencyStore {
 public:
@@ -301,20 +346,20 @@ std::string run_text_flow(const std::string& input)
     }
 
     const auto values = parse_key_values(input);
-    if (values.empty()) {
-        logger.fail("parse input", "no key=value pairs found");
-        output << logger.format();
-        output << "decision: blocked\n";
-        output << "reason: missing approval or permission\n";
-        return output.str();
+    const bool free_text = values.empty();
+    if (free_text) {
+        logger.ok("parse input", "free text routed to nlu");
+    } else {
+        logger.ok("parse input", "key=value pairs parsed");
     }
 
-    logger.ok("parse input", "key=value pairs parsed");
+    arcs::nlu::RuleBasedNluParser nlu_parser;
+    const auto nlu_result = nlu_parser.parse(input);
 
-    const auto parsed = parse_input(input);
-    const bool approval_ok = parsed.approval_yes;
-    const bool permission_ok = parsed.permission_yes;
-    const bool policy_drift = parsed.policy_drift;
+    std::optional<ParsedInput> parsed_input;
+    if (!free_text) {
+        parsed_input = parse_input(input);
+    }
 
     arcs::store::StoreMemory store;
     CommitBundle bundle{};
@@ -329,40 +374,58 @@ std::string run_text_flow(const std::string& input)
         "cli",
         "high",
         "human");
-    const auto ingress_payload = nlohmann::json{
+    nlohmann::json ingress_payload = {
         {"raw_text", input},
-        {"approval", approval_ok ? "yes" : "no"},
-        {"permission", permission_ok ? "yes" : "no"},
-        {"policy_drift", policy_drift ? "yes" : "no"},
     };
+
+    if (!free_text) {
+        const auto& parsed = *parsed_input;
+        ingress_payload["approval"] = parsed.approval_yes ? "yes" : "no";
+        ingress_payload["permission"] = parsed.permission_yes ? "yes" : "no";
+        ingress_payload["policy_drift"] = parsed.policy_drift ? "yes" : "no";
+    } else {
+        ingress_payload["mode"] = "free_text";
+    }
 
     ArtifactVersion ingress_event = ingress;
     ingress_event.payload = ingress_payload;
     ingress_event.provenance.rules_applied = {"ingress_normalized"};
     ingress_event.provenance.transform = "normalize_ingress";
 
-    const auto task = make_artifact(
-        "task",
-        "arcs.task.v1",
-        ingress.stream_key,
-        "system",
-        "kernel",
-        "internal",
-        "ingress_event",
-        "high",
-        "system");
-    ArtifactVersion task_artifact = task;
-    task_artifact.payload = {
-        {"request", input},
-        {"ingress_ref", {
-            {"artifact_id", ingress_event.artifact_id},
-            {"version_id", ingress_event.version_id},
-        }},
-        {"policy_drift", policy_drift ? "yes" : "no"},
-    };
+    const auto nlu_artifact = make_nlu_artifact(ingress.stream_key, ingress_event, nlu_result);
+
+    arcs::nlu::NluToTaskMapper task_mapper;
+    ArtifactVersion task_artifact = task_mapper.map_to_task(nlu_result);
+    task_artifact.stream_key = ingress.stream_key;
     task_artifact.provenance.parents = {ingress_event.artifact_id};
-    task_artifact.provenance.rules_applied = {"task_from_ingress"};
-    task_artifact.provenance.transform = "derive_task";
+    task_artifact.provenance.rules_applied.push_back("task_from_nlu");
+    task_artifact.provenance.transform = "derive_task_from_nlu";
+
+    if (free_text) {
+        logger.ok("ingress_event", "artifact created");
+        logger.ok("nlu_interpretation", nlu_result.status == arcs::nlu::NluStatus::Parsed ? "parsed" :
+                                          nlu_result.status == arcs::nlu::NluStatus::Ambiguous ? "ambiguous" :
+                                          "unknown");
+        logger.ok("task", "artifact created");
+        logger.ok("routing", "task-only ingestion");
+
+        CommitBundle bundle{};
+        bundle.versions.reserve(3);
+        add_version(bundle, ingress_event);
+        add_version(bundle, nlu_artifact);
+        add_version(bundle, task_artifact);
+        store.commit(bundle);
+
+        output << logger.format();
+        output << "decision: ingested\n";
+        output << "reason: nlu intent " << (nlu_result.intent.empty() ? "unknown" : nlu_result.intent) << '\n';
+        return output.str();
+    }
+
+    const auto& parsed = *parsed_input;
+    const bool approval_ok = parsed.approval_yes;
+    const bool permission_ok = parsed.permission_yes;
+    const bool policy_drift = parsed.policy_drift;
 
     const auto current_policy = make_artifact(
         "policy",
@@ -428,6 +491,9 @@ std::string run_text_flow(const std::string& input)
     option.provenance.transform = "derive_option";
 
     logger.ok("ingress_event", "artifact created");
+    logger.ok("nlu_interpretation", nlu_result.status == arcs::nlu::NluStatus::Parsed ? "parsed" :
+                                      nlu_result.status == arcs::nlu::NluStatus::Ambiguous ? "ambiguous" :
+                                      "unknown");
     logger.ok("task", "artifact created");
     logger.ok("option", "artifact created");
 
@@ -580,6 +646,7 @@ std::string run_text_flow(const std::string& input)
 
     bundle.versions.reserve(8);
     add_version(bundle, ingress_event);
+    add_version(bundle, nlu_artifact);
     add_version(bundle, task_artifact);
     add_version(bundle, policy_previous);
     add_version(bundle, policy_current);

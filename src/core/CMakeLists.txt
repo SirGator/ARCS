@@ -13,6 +13,7 @@ target_link_libraries(arcs_core
         arcs_artifact
         arcs_event
         arcs_execution
+        arcs_nlu
         arcs_store
         arcs_verification
 )
