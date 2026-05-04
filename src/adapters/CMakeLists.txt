@@ -1,2 +1,1 @@
-add_subdirectory(input)
-add_subdirectory(nlu)
+add_subdirectory(interpretation)

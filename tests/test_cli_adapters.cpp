@@ -4,19 +4,23 @@
 #include <string>
 
 #include "core/flow.hpp"
-#include "input/input_adapter.hpp"
 #include "execution/cli_output_adapter.hpp"
+#include "ingress/ingress_normalizer.hpp"
+#include "ingress/cli_ingress_source.hpp"
 
 TEST(CliAdaptersTest, ReadInputAndWriteOutput)
 {
     std::istringstream in("approval=yes permission=no\n");
     std::ostringstream out;
 
-    arcs::input::CliTextInputAdapter input_adapter;
     arcs::execution::CliTextOutputAdapter output_adapter;
 
-    const auto input_artifact = input_adapter.read_artifact(in, "cli", "session:test");
-    const auto result = arcs::core::run_text_flow(input_artifact);
+    arcs::ingress::CliIngressSource source(in, "cli", "user:cli", "human");
+    auto raw_event = source.emit();
+    arcs::ingress::DefaultIngressNormalizer normalizer("session:test");
+    auto normalized = normalizer.normalize(raw_event);
+
+    const auto result = arcs::core::run_text_flow(normalized.artifact);
 
     output_adapter.write(out, result);
 

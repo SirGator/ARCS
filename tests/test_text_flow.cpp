@@ -47,14 +47,25 @@ TEST(TextFlowTest, BlocksWhenPolicyDrifts)
     EXPECT_NE(output.find("policy_drift: option.policy_ref does not match current policy head"), std::string::npos);
 }
 
-TEST(TextFlowTest, RoutesFreeTextThroughNlu)
+TEST(TextFlowTest, RoutesFreeTextThroughInterpretation)
 {
-    const auto output = arcs::core::run_text_flow("erinnere mich morgen an x");
+    const auto output = arcs::core::run_text_flow("bitte erstelle einen bericht als json ueber die letzten pruefergebnisse");
 
-    EXPECT_NE(output.find("step: parse input -> OK | free text routed to nlu"), std::string::npos);
-    EXPECT_NE(output.find("step: nlu_interpretation -> OK | parsed"), std::string::npos);
+    EXPECT_NE(output.find("step: parse input -> OK | free text routed to interpretation"), std::string::npos);
+    EXPECT_NE(output.find("step: interpretation_proposal -> OK | status=parsed"), std::string::npos);
     EXPECT_NE(output.find("step: task -> OK | artifact created"), std::string::npos);
     EXPECT_NE(output.find("step: routing -> OK | task-only ingestion"), std::string::npos);
     EXPECT_NE(output.find("decision: ingested"), std::string::npos);
     EXPECT_EQ(output.find("step: option -> OK"), std::string::npos);
+}
+
+TEST(TextFlowTest, SkipsTaskWhenInterpretationIsUnknown)
+{
+    const auto output = arcs::core::run_text_flow("termin morgen 18 uhr");
+
+    EXPECT_NE(output.find("step: interpretation_proposal -> OK | status=unknown"), std::string::npos);
+    EXPECT_NE(output.find("step: task -> OK | skipped | no safe task mapping"), std::string::npos);
+    EXPECT_NE(output.find("step: routing -> OK | interpretation-only ingestion"), std::string::npos);
+    EXPECT_NE(output.find("reason: interpretation unknown; no task created"), std::string::npos);
+    EXPECT_EQ(output.find("step: task -> OK | artifact created"), std::string::npos);
 }

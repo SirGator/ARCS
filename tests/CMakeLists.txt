@@ -238,25 +238,26 @@ add_executable(arcs_cli_adapters_tests
 target_link_libraries(arcs_cli_adapters_tests
     PRIVATE
         arcs_core
-        arcs_input_adapter
+        arcs_ingress
         arcs_execution
         GTest::gtest_main
 )
 
 add_test(NAME arcs_cli_adapters_tests COMMAND $<TARGET_FILE:arcs_cli_adapters_tests>)
 
-add_executable(arcs_input_artifact_tests
-    test_input_artifact.cpp
+
+
+add_executable(arcs_interpretation_tests
+    test_interpretation.cpp
 )
 
-target_link_libraries(arcs_input_artifact_tests
+target_link_libraries(arcs_interpretation_tests
     PRIVATE
-        arcs_artifact
-        arcs_input_adapter
+        arcs_interpretation
         GTest::gtest_main
 )
 
-add_test(NAME arcs_input_artifact_tests COMMAND $<TARGET_FILE:arcs_input_artifact_tests>)
+add_test(NAME arcs_interpretation_tests COMMAND $<TARGET_FILE:arcs_interpretation_tests>)
 
 add_executable(arcs_artifact_factory_tests
     test_artifact_factory.cpp
