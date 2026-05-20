@@ -27,16 +27,16 @@ Die aktuelle Spezifikation ist in der Projektdokumentation enthalten:
 | 6 | **Approval System** | Human-in-the-Loop | Zustimmung |
 | 7 | **Execution Engine** | Wirkung in der Welt | Hände |
 
-## Interpretation
+## External APIs
 
-Rohtext wird über den Interpretation-Worker bzw. Interpreter zu einem nicht-autoritativen `interpretation_proposal` verarbeitet. Erst danach entsteht bei ausreichender Sicherheit ein `task`-Artefakt; bei Unsicherheit wird der Task übersprungen.
+Rohtext wird nicht mehr intern interpretiert. ARCS stellt einen einzelnen `/interpret`-Auftrag und verarbeitet das zurückgegebene Interpretation-Proposal.
 
 ## Core Artefakt-Typen
 
 | Gruppe | Typ | Zweck |
 |--------|-----|-------|
 | Input | ingress_event | Roher eingehender Event |
-| Input | interpretation_proposal | Nicht-autoritativer Interpretationsvorschlag |
+| Input | raw input / config | Externe Schnittstellen steuern die Verarbeitung |
 | Input | task | User/System will X erreichen |
 | Input | claim | Wissensbehauptung (mit source) |
 | Input | evidence | Datei/URL/API-Snapshot |
@@ -93,7 +93,9 @@ option:draft
 
 ## MVP-Scope V1
 
-**Flow:** `ingress_event → interpretation_proposal → task (optional) → option (emit_report) → verification_report (pass) → approval (approve) → action (report_emit) → execution_result`
+**Flow:** `ingress_event → task (optional) → option (emit_report) → verification_report (pass) → approval (approve) → action (report_emit) → execution_result`
+
+**External contract:** input, schema, prompt, output
 
 **Constraints:** Kein Shell, kein Netzwerk, kein file_write. Nur `report_emit`.
 

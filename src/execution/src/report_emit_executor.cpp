@@ -5,6 +5,9 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <chrono>
+#include <ctime>
+#include <iomanip>
 
 #include "execution/action.hpp"
 #include "execution/execution_result.hpp"
@@ -30,7 +33,29 @@ bool has_permission(
       return true;
     }
   }
-  return false;
+    return false;
+}
+
+std::string utc_now()
+{
+  const auto now = std::chrono::system_clock::now();
+  const auto now_time_t = std::chrono::system_clock::to_time_t(now);
+  std::tm tm{};
+
+#if defined(_WIN32)
+  gmtime_s(&tm, &now_time_t);
+#else
+  gmtime_r(&now_time_t, &tm);
+#endif
+
+  std::ostringstream out;
+  out << std::put_time(&tm, "%Y-%m-%dT%H:%M:%SZ");
+  return out.str();
+}
+
+bool approval_is_expired(const ExecutionContext& ctx)
+{
+  return !ctx.approval_expires_at.empty() && utc_now() > ctx.approval_expires_at;
 }
 
 } // namespace
@@ -68,6 +93,15 @@ ExecutionResult ReportEmitExecutor::execute(
       result.status = ExecutionStatus::Cancelled;
       result.logs.push_back(
           make_log("Blocked by final guard: approval_valid=false."));
+      return result;
+    }
+
+    if (approval_is_expired(ctx)) {
+      auto result = ExecutionResult::fail(
+          ref, "Execution blocked: approval is invalid or expired.");
+      result.status = ExecutionStatus::Cancelled;
+      result.logs.push_back(
+          make_log("Blocked by final guard: approval_expires_at is in the past."));
       return result;
     }
 

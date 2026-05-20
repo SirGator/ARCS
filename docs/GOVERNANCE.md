@@ -6,7 +6,7 @@
 |-------|-------------|-----------------|------------|
 | **high** | human | Menschliche Freigabe, signierte Quellen | Kann Policy ändern, Approval erteilen |
 | **medium** | system | Bekannte interne Systeme | Kann Artefakte committen, keine Policy-Änderung |
-| **low** | model / external | LLM-Output, Web, unbekannte Externe, Interpretationsvorschläge | Nur Vorschläge, immer Verifier-Prüfung |
+| **low** | model / external | LLM-Output, Web, unbekannte Externe | Nur Vorschläge, immer Verifier-Prüfung |
 
 ## LLM-Commit-Regeln
 
@@ -14,7 +14,7 @@
 |-------------------|-------------------------|
 | claim (als claim, nicht fact) | policy |
 | option (als proposal, trust.level=low) | permission_grant |
-| interpretation_proposal (als Vorschlag, task optional) | task |
+| raw input + external API contract | task |
 | match_result (wenn deterministic engine) | approval |
 | assumption_set (als Vorschlag) | action |
 | | execution_result |

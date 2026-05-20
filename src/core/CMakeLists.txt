@@ -12,9 +12,9 @@ target_link_libraries(arcs_core
         arcs_approval
         arcs_artifact
         arcs_event
+        arcs_interpretation
         arcs_execution
         arcs_ingress
-        arcs_interpretation
         arcs_store
         arcs_verification
 )

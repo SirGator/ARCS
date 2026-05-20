@@ -1,4 +1,0 @@
-interpretation_api_url: http://127.0.0.1:8090/interpret
-interpretation_api_key: ""
-interpretation_model: gpt-4o-mini
-interpretation_system_prompt: ""

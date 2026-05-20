@@ -33,24 +33,9 @@ ctest --test-dir build --output-on-failure
 
 ### LLM-Konfiguration
 
-Die CLI liest optional `arcs.yaml` aus dem Projektroot. Starte am besten mit `cp arcs.yaml.example arcs.yaml`. Alternativ können die Werte per Startparameter gesetzt werden:
+Die CLI liest optional `config/arcs.yaml` aus dem Projektroot. Starte am besten mit `cp config/arcs.yaml.example config/arcs.yaml`.
 
-```bash
-./build/app/arcs_app --interpretation-api-url https://api.openai.com/v1/chat/completions --interpretation-api-key ...
-```
-
-Akzeptierte Umgebungsvariablen sind `ARCS_INTERPRETATION_API_URL` und `ARCS_INTERPRETER_API_URL`.
-
-Der lokale Worker startet mit:
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r tools/requirements.txt
-uvicorn tools.interpretation_worker.main:app --host 127.0.0.1 --port 8090
-```
-
-Der Worker nutzt einen lokalen Upstream und liefert `interpretation_proposal`-Antworten an den Core.
+Die vier externen APIs und die Prompt-Datei werden ausschließlich über `config/arcs.yaml` konfiguriert.
 
 ### Einzelnen Test ausführen
 
@@ -79,7 +64,7 @@ ARCS/
 │   ├── execution/              # IExecutor, Materializer, AdapterRegistry, Executors
 │   ├── policy/                 # Policy, PermissionGrant
 │   ├── core/                   # Orchestrierung: run_text_flow()
-│   └── adapters/               # Input (CLI), Interpretation (regelbasiert + API-Anbindung)
+│   └── adapters/               # Input (CLI), externe API-Verträge
 │
 ├── tests/                      # GoogleTest-basierte Tests
 └── schemas/                    # JSON Schema-Dateien
@@ -150,7 +135,6 @@ registry.register_executor(std::make_unique<SendReplyExecutor>());
 | `test_revocation.cpp` | Approval-Revocation während Execution |
 | `test_replay.cpp` | Event Log → Reducer → identischer State |
 | `test_llm_isolation.cpp` | LLM-Output mit falschem Schema → rejected |
-| `test_interpretation.cpp` | Rule-based Interpretation, Mapper und LLM-Response-Parsing |
 | `test_approval.cpp` | Approval-Decisionen und State-Übergänge |
 | `test_verification_engine.cpp` | Verifier-Aggregation und Report-Erstellung |
 | `test_authority_verifier.cpp` | Permission-Checks für Policy-Änderungen |

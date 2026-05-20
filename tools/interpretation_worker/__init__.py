@@ -1,1 +1,1 @@
-"""Interpretation worker package."""
+"""ARCS interpretation worker."""

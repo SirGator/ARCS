@@ -244,21 +244,6 @@ target_link_libraries(arcs_cli_adapters_tests
 )
 
 add_test(NAME arcs_cli_adapters_tests COMMAND $<TARGET_FILE:arcs_cli_adapters_tests>)
-
-
-
-add_executable(arcs_interpretation_tests
-    test_interpretation.cpp
-)
-
-target_link_libraries(arcs_interpretation_tests
-    PRIVATE
-        arcs_interpretation
-        GTest::gtest_main
-)
-
-add_test(NAME arcs_interpretation_tests COMMAND $<TARGET_FILE:arcs_interpretation_tests>)
-
 add_executable(arcs_artifact_factory_tests
     test_artifact_factory.cpp
 )

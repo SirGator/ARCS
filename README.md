@@ -16,7 +16,7 @@ The core defines rules, not product features:
 - every decision is replayable
 - unknown states block by default
 - LLMs may propose options, but they are never authority
-- interpretation can suggest tasks, but it is never authority
+- free text is interpreted through one external `/interpret` contract
 - execution only happens after verification, approval, and permission checks
 
 ## Key Features
@@ -61,22 +61,13 @@ cmake --build build
 ./build/app/arcs_app
 ```
 
-Setup tip: copy `arcs.yaml.example` to `arcs.yaml` and adjust the API URL if you use the local worker.
+Setup tip: copy `config/arcs.yaml.example` to `config/arcs.yaml` and set `interpret_api_url` if you use the local worker.
 
-Set `ARCS_INTERPRETATION_API_URL` or `ARCS_INTERPRETER_API_URL` (and optional `ARCS_INTERPRETATION_API_KEY`, `ARCS_INTERPRETATION_MODEL`) to route free-text interpretation through an OpenAI-kompatible LLM API.
+Start the worker with `python -m tools.interpretation_worker --config config/arcs.yaml`.
 
-You can also put the same values into `arcs.yaml` in the project root or pass them as CLI flags like `--interpretation-api-url ...`.
+The interpretation API is read from `config/arcs.yaml`.
 
-For the local worker, start:
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r tools/requirements.txt
-uvicorn tools.interpretation_worker.main:app --host 127.0.0.1 --port 8090
-```
-
-The worker returns `interpretation_proposal` results and the core will either create a safe task or skip it.
+Configure `interpret_api_url` in `config/arcs.yaml`.
 
 ### Run Tests
 
@@ -104,7 +95,7 @@ The minimal ARCS V1 flow is:
 
 ```text
 ingress_event
-  -> interpretation_proposal
+  -> task
   -> task (optional)
   -> option
   -> verification_report
@@ -114,7 +105,7 @@ ingress_event
 ```
 
 Every step is stored as an artifact and can be audited or replayed.
-The interpretation step is a proposal only; unsupported inputs are ingested without task creation.
+Unsupported free text is handled by the external interpretation contract.
 
 ## Safety Principles
 
@@ -193,7 +184,7 @@ ARCS is currently in active development.
 The current goal is a complete V1 MVP flow:
 
 ```text
-input -> ingress_event -> interpretation -> task -> option -> verification -> approval -> action -> execution_result
+input -> ingress_event -> task -> option -> verification -> approval -> action -> execution_result
 ```
 
 ## License

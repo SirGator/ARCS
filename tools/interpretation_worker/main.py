@@ -1,255 +1,253 @@
+from __future__ import annotations
+
+import argparse
 import json
-import os
-import urllib.error
-import urllib.request
-
-UPSTREAM_URL = os.getenv("ARCS_INTERPRETATION_UPSTREAM_URL", "http://127.0.0.1:11434/api/generate")
-MODEL = os.getenv("ARCS_INTERPRETATION_WORKER_MODEL", os.getenv("ARCS_INTERPRETATION_MODEL", "nuextract:latest"))
-
-
-def extract_raw_text(body: dict) -> str:
-    if isinstance(body.get("raw_text"), str):
-        return body["raw_text"]
-
-    messages = body.get("messages")
-    if isinstance(messages, list):
-        for message in reversed(messages):
-            if message.get("role") == "user" and isinstance(message.get("content"), str):
-                return message["content"]
-
-    return ""
+import re
+from dataclasses import dataclass
+from http import HTTPStatus
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from typing import Any
+from urllib.parse import urlparse
 
 
-def extract_json(text: str) -> dict:
-    start = text.find("{")
-    end = text.rfind("}")
-
-    if start == -1 or end == -1 or end <= start:
-        return {}
-
-    try:
-        return json.loads(text[start : end + 1])
-    except Exception:
-        return {}
+@dataclass(frozen=True)
+class WorkerConfig:
+    host: str = "127.0.0.1"
+    port: int = 8090
+    config_path: Path = Path("config/arcs.yaml")
 
 
-def normalize(value) -> str:
-    if value is None:
-        return ""
-    return str(value).lower().strip()
+def parse_simple_yaml(path: Path) -> dict[str, str]:
+    data: dict[str, str] = {}
+    if not path.exists():
+        return data
 
-
-def detect_format(raw_text: str, extracted: dict) -> str:
-    joined = " ".join([
-        raw_text,
-        str(extracted.get("requested_format", "")),
-        str(extracted.get("requested_object", "")),
-    ]).lower()
-
-    if "json" in joined:
-        return "json"
-    if "pdf" in joined:
-        return "pdf"
-    if "text" in joined or "txt" in joined:
-        return "text"
-
-    return "unknown"
-
-
-def is_question_request(joined: str) -> bool:
-    return any(token in joined for token in ["frage", "warum", "wie ", "was ist", "who is", "what is", "?"])
-
-
-def map_to_interpretation(raw_text: str, extracted: dict) -> dict:
-    action = normalize(extracted.get("requested_action", ""))
-    obj = normalize(extracted.get("requested_object", ""))
-    fmt = detect_format(raw_text, extracted)
-
-    joined = f"{raw_text} {action} {obj}".lower()
-
-    if any(token in joined for token in ["termin", "kalender", "meeting", "uhr"]):
-        return {
-            "status": "unknown",
-            "intent": "unknown",
-            "target": raw_text,
-            "format": "unknown",
-            "confidence": 0.0,
-            "raw_text": raw_text,
-            "reason": "calendar scheduling is not supported by current ARCS interpretation worker",
-        }
-
-    if (
-        ("bericht" in joined or "report" in joined or "prüfergebnis" in joined or "pruefergebnis" in joined or "auswertung" in joined or "zusammenfassung" in joined)
-        and ("erstelle" in joined or "erstell" in joined or "generiere" in joined or "mach" in joined or "schreib" in joined)
-    ):
-        return {
-            "status": "parsed",
-            "intent": "create_report",
-            "target": extracted.get("requested_object") or raw_text,
-            "format": fmt if fmt != "unknown" else "text",
-            "confidence": 0.80,
-            "raw_text": raw_text,
-            "reason": "worker extracted report request",
-        }
-
-    if is_question_request(joined):
-        return {
-            "status": "parsed",
-            "intent": "ask_question",
-            "target": extracted.get("requested_object") or raw_text,
-            "format": "text",
-            "confidence": 0.70,
-            "raw_text": raw_text,
-            "reason": "worker extracted question request",
-        }
-
-    return {
-        "status": "unknown",
-        "intent": "unknown",
-        "target": raw_text,
-        "format": "unknown",
-        "confidence": 0.0,
-        "raw_text": raw_text,
-        "reason": "no supported ARCS intent detected",
-    }
-
-
-def build_prompt(raw_text: str) -> str:
-    return f"""
-### Template:
-{{
-  "requested_action": "",
-  "requested_object": "",
-  "requested_format": "",
-  "time_expression": ""
-}}
-
-### Text:
-{raw_text}
-"""
-
-
-def call_upstream(raw_text: str) -> dict:
-    request_payload = {
-        "model": MODEL,
-        "prompt": build_prompt(raw_text),
-        "stream": False,
-        "options": {"temperature": 0},
-    }
-
-    request = urllib.request.Request(
-        UPSTREAM_URL,
-        data=json.dumps(request_payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-
-    with urllib.request.urlopen(request, timeout=30) as response:
-        response_text = response.read().decode("utf-8")
-
-    model_text = json.loads(response_text).get("response", "")
-    extracted = extract_json(model_text)
-
-    if not extracted:
-        return {
-            "status": "unknown",
-            "intent": "unknown",
-            "target": raw_text,
-            "format": "unknown",
-            "confidence": 0.0,
-            "raw_text": raw_text,
-            "reason": "upstream returned no valid json",
-        }
-
-    return map_to_interpretation(raw_text, extracted)
-
-
-def json_response(status: int, payload: dict):
-    body = json.dumps(payload).encode("utf-8")
-    headers = [
-        (b"content-type", b"application/json"),
-        (b"content-length", str(len(body)).encode("ascii")),
-    ]
-    return status, headers, body
-
-
-async def read_body(receive):
-    chunks = []
-    while True:
-        message = await receive()
-        if message["type"] != "http.request":
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
             continue
-
-        chunk = message.get("body", b"")
-        if chunk:
-            chunks.append(chunk)
-
-        if not message.get("more_body", False):
-            break
-
-    return b"".join(chunks)
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        data[key] = value
+    return data
 
 
-async def app(scope, receive, send):
-    if scope["type"] != "http":
+def load_prompt_text(config_dir: Path, config: dict[str, str]) -> str:
+    prompt_file = config.get("prompt_file", "")
+    if not prompt_file:
+        return "You are the ARCS interpretation worker. Return structured JSON only."
+
+    path = Path(prompt_file)
+    if not path.is_absolute():
+        path = (config_dir / path).resolve()
+
+    if not path.exists():
+        return "You are the ARCS interpretation worker. Return structured JSON only."
+
+    return path.read_text(encoding="utf-8")
+
+
+def parse_key_value_input(text: str) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for token in text.split():
+        if "=" not in token:
+            continue
+        key, value = token.split("=", 1)
+        if key:
+            result[key.strip()] = value.strip()
+    return result
+
+
+def parse_control_fields(text: str) -> dict[str, str]:
+    parsed = parse_key_value_input(text)
+    lowered = text.lower()
+
+    patterns = {
+        "approval": r"approval[^a-z0-9]+(yes|no|true|false)",
+        "permission": r"permission[^a-z0-9]+(yes|no|true|false)",
+        "policy_drift": r"policy(?:_|\s)?drift[^a-z0-9]+(yes|no|true|false)",
+    }
+    for key, pattern in patterns.items():
+        if key in parsed:
+            continue
+        match = re.search(pattern, lowered)
+        if match:
+            parsed[key] = match.group(1)
+
+    return parsed
+
+
+def json_response(ok: bool, payload: Any = None, error: str = "") -> bytes:
+    body = {"ok": ok, "payload": payload, "error": error}
+    return json.dumps(body, ensure_ascii=True).encode("utf-8")
+
+
+class InterpretationHandler(BaseHTTPRequestHandler):
+    server_version = "ARCSInterpretationWorker/1.0"
+
+    def do_GET(self) -> None:  # noqa: N802
+        route = urlparse(self.path).path
+        if route == "/health":
+            self._send_json(HTTPStatus.OK, {"ok": True})
+            return
+        self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "error": "not found"})
+
+    def do_POST(self) -> None:  # noqa: N802
+        route = urlparse(self.path).path
+        body = self._read_json_body()
+        if body is None:
+            self._send_json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": "invalid json"})
+            return
+
+        if route == "/input":
+            self._handle_input(body)
+            return
+        if route == "/schema":
+            self._handle_schema(body)
+            return
+        if route == "/prompt":
+            self._handle_prompt(body)
+            return
+        if route == "/output":
+            self._handle_output(body)
+            return
+
+        self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "error": "not found"})
+
+    def _handle_input(self, body: dict[str, Any]) -> None:
+        raw_input = str(body.get("raw_input", "")).strip()
+        if not raw_input:
+            self._send_json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": "raw_input missing"})
+            return
+
+        parsed = parse_control_fields(raw_input)
+        payload = {
+            "type": "ingress_event",
+            "request_id": body.get("request_id", ""),
+            "source_kind": body.get("source_kind", "chat"),
+            "source_ref": body.get("source_ref", "external"),
+            "raw_input": raw_input,
+            "schema_id": "interpretation/input/v1",
+            "parsed": parsed,
+        }
+        self._send_json(HTTPStatus.OK, {"ok": True, "payload": payload, "error": ""})
+
+    def _handle_schema(self, body: dict[str, Any]) -> None:
+        schema_id = str(body.get("schema_id", "")).strip() or "interpretation/input/v1"
+        payload = schema_registry().get(schema_id)
+        if payload is None:
+            self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "error": f"unknown schema: {schema_id}"})
+            return
+        self._send_json(HTTPStatus.OK, {"ok": True, "payload": payload, "error": ""})
+
+    def _handle_prompt(self, body: dict[str, Any]) -> None:
+        prompt_id = str(body.get("prompt_id", "")).strip() or "default"
+        prompt = self.server.worker_prompt if prompt_id == "default" else None
+        if prompt is None:
+            self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "error": f"unknown prompt: {prompt_id}"})
+            return
+        self._send_json(HTTPStatus.OK, {"ok": True, "payload": {"prompt_id": prompt_id, "prompt": prompt}, "error": ""})
+
+    def _handle_output(self, body: dict[str, Any]) -> None:
+        request_id = str(body.get("request_id", "")).strip()
+        interpreted_payload = body.get("interpreted_payload")
+        if not request_id:
+            self._send_json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": "request_id missing"})
+            return
+        if interpreted_payload is None:
+            self._send_json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": "interpreted_payload missing"})
+            return
+        payload = {
+            "type": "interpreted_output",
+            "request_id": request_id,
+            "accepted": True,
+            "interpreted_payload": interpreted_payload,
+        }
+        self._send_json(HTTPStatus.OK, {"ok": True, "payload": payload, "error": ""})
+
+    def _read_json_body(self) -> dict[str, Any] | None:
+        content_length = int(self.headers.get("Content-Length", "0"))
+        raw = self.rfile.read(content_length) if content_length > 0 else b"{}"
+        try:
+            decoded = raw.decode("utf-8")
+            value = json.loads(decoded)
+            return value if isinstance(value, dict) else None
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return None
+
+    def _send_json(self, status: HTTPStatus, payload: dict[str, Any]) -> None:
+        body = json.dumps(payload, ensure_ascii=True).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, fmt: str, *args: Any) -> None:
         return
 
-    path = scope.get("path", "")
-    method = scope.get("method", "GET").upper()
 
-    if method == "GET" and path == "/health":
-        status, headers, body = json_response(200, {
-            "ok": True,
-            "model": MODEL,
-            "upstream_url": UPSTREAM_URL,
-        })
-    elif method == "POST" and path == "/interpret":
-        raw_body = await read_body(receive)
+def schema_registry() -> dict[str, dict[str, Any]]:
+    return {
+        "interpretation/input/v1": {
+            "type": "object",
+            "required": ["type", "request_id", "source_kind", "source_ref", "raw_input"],
+            "properties": {
+                "type": {"const": "ingress_event"},
+                "request_id": {"type": "string"},
+                "source_kind": {"type": "string"},
+                "source_ref": {"type": "string"},
+                "raw_input": {"type": "string"},
+                "schema_id": {"type": "string"},
+                "parsed": {"type": "object"},
+            },
+        },
+        "interpretation/output/v1": {
+            "type": "object",
+            "required": ["type", "request_id", "accepted", "interpreted_payload"],
+            "properties": {
+                "type": {"const": "interpreted_output"},
+                "request_id": {"type": "string"},
+                "accepted": {"type": "boolean"},
+                "interpreted_payload": {},
+            },
+        },
+    }
 
-        try:
-            request_body = json.loads(raw_body.decode("utf-8") or "{}")
-        except Exception:
-            request_body = {}
 
-        raw_text = extract_raw_text(request_body)
+def build_server(cfg: WorkerConfig) -> ThreadingHTTPServer:
+    config_data = parse_simple_yaml(cfg.config_path)
+    prompt_text = load_prompt_text(cfg.config_path.parent, config_data)
+    server = ThreadingHTTPServer((cfg.host, cfg.port), InterpretationHandler)
+    server.worker_prompt = prompt_text  # type: ignore[attr-defined]
+    return server
 
-        if not raw_text:
-            status, headers, body = json_response(200, {
-                "status": "failed",
-                "intent": "unknown",
-                "target": "",
-                "format": "unknown",
-                "confidence": 0.0,
-                "raw_text": "",
-                "reason": "request contained no raw_text or user message",
-            })
-        else:
-            try:
-                payload = call_upstream(raw_text)
-            except urllib.error.URLError as e:
-                payload = {
-                    "status": "failed",
-                    "intent": "unknown",
-                    "target": raw_text,
-                    "format": "unknown",
-                    "confidence": 0.0,
-                    "raw_text": raw_text,
-                    "reason": f"worker request failed: {e}",
-                }
-            except Exception as e:
-                payload = {
-                    "status": "failed",
-                    "intent": "unknown",
-                    "target": raw_text,
-                    "format": "unknown",
-                    "confidence": 0.0,
-                    "raw_text": raw_text,
-                    "reason": f"worker request failed: {e}",
-                }
 
-            status, headers, body = json_response(200, payload)
-    else:
-        status, headers, body = json_response(404, {"detail": "not found"})
+def parse_args() -> WorkerConfig:
+    parser = argparse.ArgumentParser(description="ARCS interpretation worker")
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", default=8090, type=int)
+    parser.add_argument("--config", default="config/arcs.yaml")
+    args = parser.parse_args()
+    return WorkerConfig(host=args.host, port=args.port, config_path=Path(args.config))
 
-    await send({"type": "http.response.start", "status": status, "headers": headers})
-    await send({"type": "http.response.body", "body": body})
+
+def main() -> int:
+    cfg = parse_args()
+    server = build_server(cfg)
+    print(f"ARCS interpretation worker listening on http://{cfg.host}:{cfg.port}")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

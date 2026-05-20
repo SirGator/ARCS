@@ -1,0 +1,4 @@
+Return one JSON object only. No markdown, no code fences, no prose.
+
+The object must match the active schema and be driven by the configured APIs.
+If the request cannot be processed safely, return a blocked result.

@@ -66,6 +66,7 @@ int main() {
       .approval_id = "a_approval_01",
       .verification_id = "a_verification_01",
       .approval_valid = false,
+      .approval_expires_at = "2026-02-09T11:00:00Z",
       .verification_passed = true,
       .granted_permissions = {"exec:report_emit"},
   };
@@ -80,6 +81,19 @@ int main() {
 
   // Wichtiger Punkt:
   // Revoked/invalid approval darf NICHT als ausgeführt gespeichert werden
+  assert(!idempotency_store.has("x_action_revoked"));
+
+  ExecutionContext expired_ctx{
+      .approval_id = "a_approval_02",
+      .verification_id = "a_verification_02",
+      .approval_valid = true,
+      .approval_expires_at = "2000-01-01T00:00:00Z",
+      .verification_passed = true,
+      .granted_permissions = {"exec:report_emit"},
+  };
+
+  ExecutionResult expired_result = executor.execute(action, expired_ctx);
+  assert(expired_result.status == ExecutionStatus::Cancelled);
   assert(!idempotency_store.has("x_action_revoked"));
 
   std::cout << "[PASS] Revocation: revoked approval blocks execution\n";

@@ -25,6 +25,7 @@
 #include "event/event.hpp"
 #include "event/json.hpp"
 #include "core/system_logger.hpp"
+#include "interpretation/worker_client.hpp"
 #include "execution/action.hpp"
 #include "materializer.hpp"
 #include "execution/report_emit_executor.hpp"
@@ -35,9 +36,6 @@
 #include "ingress/ingress_validator.hpp"
 #include "ingress/ingress_router.hpp"
 #include "ingress/quarantine.hpp"
-#include "interpretation/api_interpreter.hpp"
-#include "interpretation/interpretation_to_task_mapper.hpp"
-#include "interpretation/rule_based_interpreter.hpp"
 #include "store/commit.hpp"
 #include "store/store_memory.hpp"
 #include "verification/authority_verifier.hpp"
@@ -52,6 +50,8 @@ using CommitBundle = arcs::store::commit::CommitBundle;
 using PendingVersion = arcs::store::commit::PendingVersion;
 using Event = arcs::event::Event;
 using EventRef = arcs::event::EventRef;
+
+std::string utc_now();
 
 std::filesystem::path artifacts_base_dir()
 {
@@ -214,16 +214,6 @@ std::string finalize_output(std::ostringstream& output, const std::filesystem::p
     return output.str();
 }
 
-std::unique_ptr<arcs::interpretation::IInputInterpreter> make_input_interpreter()
-{
-    const auto config = arcs::interpretation::api_interpreter_config_from_environment();
-    if (!config.endpoint_url.empty()) {
-        return std::make_unique<arcs::interpretation::ApiInterpreter>(std::move(config));
-    }
-
-    return std::make_unique<arcs::interpretation::RuleBasedInterpreter>();
-}
-
 // ---- Ingress Pipeline ----
 
 struct IngressResult {
@@ -315,6 +305,153 @@ struct ParsedInput {
     bool policy_drift{false};
 };
 
+std::optional<ParsedInput> parsed_input_from_json(const nlohmann::json& json_value)
+{
+    if (!json_value.is_object()) {
+        return std::nullopt;
+    }
+
+    const auto& parsed = json_value.contains("parsed") ? json_value.at("parsed") : json_value;
+    if (!parsed.is_object()) {
+        return std::nullopt;
+    }
+
+    ParsedInput result;
+    bool has_any = false;
+
+    if (parsed.contains("approval") && parsed["approval"].is_string()) {
+        const auto approval = parsed["approval"].get<std::string>();
+        result.approval_yes = approval == "yes" || approval == "true";
+        has_any = true;
+    }
+
+    if (parsed.contains("permission") && parsed["permission"].is_string()) {
+        const auto permission = parsed["permission"].get<std::string>();
+        result.permission_yes = permission == "yes" || permission == "true";
+        has_any = true;
+    }
+
+    if (parsed.contains("policy_drift") && parsed["policy_drift"].is_string()) {
+        const auto policy_drift = parsed["policy_drift"].get<std::string>();
+        result.policy_drift = policy_drift == "yes" || policy_drift == "true";
+        has_any = true;
+    }
+
+    if (!has_any && (json_value.contains("status") || json_value.contains("intent"))) {
+        result.approval_yes = true;
+        result.permission_yes = true;
+        result.policy_drift = false;
+        return result;
+    }
+
+    if (!has_any) {
+        return std::nullopt;
+    }
+
+    return result;
+}
+
+std::optional<ParsedInput> parsed_input_from_interpretation_artifact(const nlohmann::json& json_value)
+{
+    if (!json_value.is_object()) {
+        return std::nullopt;
+    }
+
+    if (json_value.contains("interpreted_payload") && json_value["interpreted_payload"].is_string()) {
+        try {
+            const auto interpreted_payload = nlohmann::json::parse(json_value["interpreted_payload"].get<std::string>());
+            return parsed_input_from_json(interpreted_payload);
+        } catch (const std::exception&) {
+            return std::nullopt;
+        }
+    }
+
+    return parsed_input_from_json(json_value);
+}
+
+std::optional<ParsedInput> interpret_free_text(
+    const std::string& input,
+    const arcs::interpretation::InterpretationApiConfig* interpretation_config,
+    SystemLogger& logger,
+    std::ostringstream& output)
+{
+    if (interpretation_config == nullptr) {
+        return std::nullopt;
+    }
+
+    if (!interpretation_config->interpret_api_url.has_value()) {
+        return std::nullopt;
+    }
+
+    arcs::interpretation::WorkerInterpretationClient client(*interpretation_config);
+    const arcs::interpretation::InterpretationRequest input_request{
+        .request_id = "req_free_text",
+        .raw_input = input,
+        .schema_id = "arcs.interpretation_proposal.v1",
+        .schema = nlohmann::json::parse(R"({
+          "$id": "arcs.interpretation_proposal.v1",
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "title": "ARCS Interpretation Proposal",
+          "type": "object",
+          "required": ["status", "intent", "confidence", "slots", "missing_required_fields", "next_step"],
+          "properties": {
+            "status": { "type": "string" },
+            "intent": {
+              "type": "object",
+              "required": ["name", "category", "description"],
+              "properties": {
+                "name": { "type": "string" },
+                "category": { "type": "string" },
+                "description": { "type": "string" }
+              },
+              "additionalProperties": true
+            },
+            "confidence": { "type": "number" },
+            "slots": { "type": "object" },
+            "missing_required_fields": { "type": "array", "items": { "type": "string" } },
+            "next_step": { "type": "string" }
+          },
+          "additionalProperties": true
+        })"),
+        .context = nlohmann::json{
+            {"timezone", "Europe/Berlin"},
+            {"language", "de"},
+            {"current_time", utc_now()},
+        },
+        .prompt_config = nlohmann::json{
+            {"mode", "strict_json"},
+            {"temperature", 0.0},
+        },
+    };
+
+    const auto input_response = client.interpret(input_request);
+    if (!input_response.ok) {
+        const auto error = input_response.error.value_or("unknown error");
+        logger.fail("interpret", error);
+        output << "step: interpret -> FAIL | " << error << '\n';
+        return std::nullopt;
+    }
+
+    output << "step: interpret -> OK\n";
+
+    if (!input_response.request_id.empty()) {
+        output << "interpretation request_id: " << input_response.request_id << '\n';
+    }
+    if (!input_response.schema_id.empty()) {
+        output << "interpretation schema_id: " << input_response.schema_id << '\n';
+    }
+
+    const auto parsed = parsed_input_from_interpretation_artifact(input_response.payload);
+    if (!parsed.has_value()) {
+        logger.fail("interpretation artifact", "payload not understood");
+        output << "step: interpretation artifact -> FAIL | payload not understood\n";
+        return std::nullopt;
+    }
+
+    output << "step: interpretation artifact -> OK\n";
+    return parsed;
+}
+
 ArtifactVersion make_artifact(
     const std::string& type,
     const std::string& schema_id,
@@ -325,88 +462,6 @@ ArtifactVersion make_artifact(
     const std::string& source_ref,
     const std::string& trust_level,
     const std::string& trust_source_class);
-
-ArtifactVersion make_interpretation_artifact(
-    const std::string& stream_key,
-    const ArtifactVersion& parent,
-    const arcs::interpretation::InterpretationProposal& proposal)
-{
-    ArtifactVersion artifact = make_artifact(
-        "interpretation_proposal",
-        "arcs.interpretation_proposal.v1",
-        stream_key,
-        "system",
-        "interpretation-mapper",
-        "internal",
-        "interpretation",
-        "low",
-        "rule");
-
-    artifact.payload = nlohmann::json::object();
-    artifact.payload["status"] = arcs::interpretation::to_string(proposal.status);
-    artifact.payload["intent"] = proposal.intent;
-    artifact.payload["target"] = proposal.target;
-    artifact.payload["format"] = proposal.format;
-    artifact.payload["confidence"] = proposal.confidence;
-    artifact.payload["raw_text"] = proposal.raw_text;
-    artifact.payload["reason"] = proposal.reason;
-
-    artifact.payload["entities"] = nlohmann::json::array();
-    for (const auto& entity : proposal.entities) {
-        artifact.payload["entities"].push_back({
-            {"name", entity.name},
-            {"value", entity.value},
-        });
-    }
-    artifact.provenance.parents = {parent.artifact_id};
-    artifact.provenance.rules_applied = {"interpretation_parse"};
-    artifact.provenance.transform = "parse_interpretation";
-    return artifact;
-}
-
-ArtifactVersion make_task_artifact_from_interpretation(
-    const std::string& stream_key,
-    const ArtifactVersion& parent,
-    const arcs::interpretation::InterpretationProposal& proposal,
-    const std::optional<arcs::interpretation::TaskDraft>& task_draft)
-{
-    const auto draft = task_draft.has_value()
-        ? *task_draft
-        : arcs::interpretation::TaskDraft{
-            .title = "Unknown",
-            .intent = proposal.intent,
-            .target = proposal.target.empty() ? proposal.raw_text : proposal.target,
-            .format = proposal.format,
-            .source_text = proposal.raw_text,
-        };
-
-    ArtifactVersion artifact = make_artifact(
-        "task",
-        "arcs.task.v1",
-        stream_key,
-        "system",
-        "interpretation-mapper",
-        "internal",
-        "interpretation",
-        "low",
-        "rule");
-
-    artifact.payload = nlohmann::json{
-        {"title", draft.title},
-        {"description", draft.source_text},
-    };
-
-    if (!draft.target.empty()) {
-        artifact.payload["scope"] = draft.target;
-    }
-
-    artifact.provenance.parents = {parent.artifact_id};
-    artifact.provenance.rules_applied = task_draft.has_value()
-        ? std::vector<std::string>{"interpretation_to_task_mapper", "task_from_interpretation"}
-        : std::vector<std::string>{"interpretation_fallback", "task_from_interpretation"};
-    artifact.provenance.transform = "derive_task_from_interpretation";
-    return artifact;
-}
 
 class KernelIdempotencyStore final : public arcs::execution::IIdempotencyStore {
 public:
@@ -482,7 +537,19 @@ ParsedInput parse_input(const std::string& input)
 
 std::string utc_now()
 {
-    return "2026-04-26T00:00:00Z";
+    const auto now = std::chrono::system_clock::now();
+    const auto now_time_t = std::chrono::system_clock::to_time_t(now);
+    std::tm tm{};
+
+#if defined(_WIN32)
+    gmtime_s(&tm, &now_time_t);
+#else
+    gmtime_r(&now_time_t, &tm);
+#endif
+
+    std::ostringstream out;
+    out << std::put_time(&tm, "%Y-%m-%dT%H:%M:%SZ");
+    return out.str();
 }
 
 ArtifactVersion make_artifact(
@@ -649,7 +716,7 @@ ArtifactVersion make_decision_artifact(
 
 } // namespace
 
-std::string run_text_flow(const std::string& input)
+std::string run_text_flow(const std::string& input, const arcs::interpretation::InterpretationApiConfig* interpretation_config)
 {
     SystemLogger logger;
     std::ostringstream output;
@@ -676,19 +743,26 @@ std::string run_text_flow(const std::string& input)
     }
 
     if (free_text) {
-        logger.ok("parse input", "free text routed to interpretation | stream_key=session:cli");
-    } else {
-        logger.ok(
-            "parse input",
-            std::string("key=value pairs parsed | approval=") + (parsed_input->approval_yes ? "yes" : "no") +
-            " permission=" + (parsed_input->permission_yes ? "yes" : "no") +
-            " policy_drift=" + (parsed_input->policy_drift ? "yes" : "no"));
-    }
+        logger.ok("parse input", "free text routed through ingress and external interpretation artifact");
+        output << logger.format();
 
-    const auto interpretation = make_input_interpreter();
-    const auto interpretation_proposal = interpretation->interpret(input);
-    arcs::interpretation::InterpretationToTaskMapper task_mapper;
-    const auto task_draft = task_mapper.map(interpretation_proposal);
+        const auto interpreted = interpret_free_text(input, interpretation_config, logger, output);
+        if (!interpreted.has_value()) {
+            output << "decision: blocked\n";
+            output << "reason: free text interpretation unavailable\n";
+            const auto final_output = finalize_output(output, run_dir);
+            persist_run_artifacts(run_dir, CommitBundle{}, ingress::QuarantineStore{}, input, final_output);
+            return final_output;
+        }
+
+        parsed_input = interpreted;
+        output << "interpretation: external worker accepted\n";
+    }
+    logger.ok(
+        "parse input",
+        std::string("key=value pairs parsed | approval=") + (parsed_input->approval_yes ? "yes" : "no") +
+        " permission=" + (parsed_input->permission_yes ? "yes" : "no") +
+        " policy_drift=" + (parsed_input->policy_drift ? "yes" : "no"));
 
     // --- Ingress Pipeline ---
     ingress::QuarantineStore quarantine;
@@ -709,66 +783,32 @@ std::string run_text_flow(const std::string& input)
         "ingress_event",
         "artifact created | stream_key=" + ingress_event.stream_key +
         " source=" + ingress_event.source.kind + "/" + ingress_event.source.ref);
-    const auto interpretation_artifact = make_interpretation_artifact(
+
+    ArtifactVersion task_artifact = make_artifact(
+        "task",
+        "arcs.task.v1",
         ingress_event.stream_key,
-        ingress_event,
-        interpretation_proposal);
+        "system",
+        "kernel",
+        "internal",
+        "input",
+        "high",
+        "system");
+    task_artifact.payload = nlohmann::json{
+        {"title", "Input task"},
+        {"description", input},
+        {"approval", parsed_input->approval_yes},
+        {"permission", parsed_input->permission_yes},
+        {"policy_drift", parsed_input->policy_drift},
+    };
+    task_artifact.provenance.parents = {ingress_event.artifact_id};
+    task_artifact.provenance.rules_applied = {"task_from_input"};
+    task_artifact.provenance.transform = "derive_task_from_input";
 
-    ArtifactVersion task_artifact = make_task_artifact_from_interpretation(
-        ingress_event.stream_key,
-        ingress_event,
-        interpretation_proposal,
-        task_draft);
-
-    if (free_text) {
-        logger.ok(
-            "interpretation_proposal",
-            std::string("status=") + arcs::interpretation::to_string(interpretation_proposal.status) +
-            " | intent=" + (interpretation_proposal.intent.empty() ? "unknown" : interpretation_proposal.intent) +
-            " confidence=" + std::to_string(interpretation_proposal.confidence) +
-            " reason=" + (interpretation_proposal.reason.empty() ? "rule based interpretation" : interpretation_proposal.reason));
-
-        arcs::store::StoreMemory store;
-        CommitBundle bundle{};
-        bundle.versions.reserve(task_draft.has_value() ? 3 : 2);
-        add_version(bundle, ingress_event);
-        add_version(bundle, interpretation_artifact);
-
-        if (task_draft.has_value()) {
-            add_version(bundle, task_artifact);
-
-            logger.ok(
-                "task",
-                "artifact created | task_id=" + task_artifact.artifact_id +
-                " version=" + task_artifact.version_id);
-
-            logger.ok(
-                "routing",
-                "task-only ingestion | stream_key=" + task_artifact.stream_key);
-        } else {
-            logger.ok("task", "skipped | no safe task mapping");
-            logger.ok(
-                "routing",
-                "interpretation-only ingestion | stream_key=" + ingress_event.stream_key);
-        }
-
-        store.commit(bundle);
-
-        output << logger.format();
-        output << "decision: ingested\n";
-
-        if (task_draft.has_value()) {
-            output << "reason: interpretation intent "
-                   << (interpretation_proposal.intent.empty() ? "unknown" : interpretation_proposal.intent)
-                   << '\n';
-        } else {
-            output << "reason: interpretation unknown; no task created\n";
-        }
-
-        const auto final_output = finalize_output(output, run_dir);
-        persist_run_artifacts(run_dir, bundle, quarantine, input, final_output);
-        return final_output;
-    }
+    logger.ok(
+        "task",
+        "artifact created | task_id=" + task_artifact.artifact_id +
+        " version=" + task_artifact.version_id);
 
     const auto& parsed = *parsed_input;
     const bool approval_ok = parsed.approval_yes;
@@ -838,11 +878,7 @@ std::string run_text_flow(const std::string& input)
     option.provenance.rules_applied = {"materialize_option"};
     option.provenance.transform = "derive_option";
 
-        logger.ok("task", "artifact created | task_id=" + task_artifact.artifact_id + " version=" + task_artifact.version_id);
-        logger.ok(
-            "option",
-            "artifact created | policy_ref=" + policy_ref.artifact_id + ":" + policy_ref.version_id +
-            " action=report_emit");
+    logger.ok("option", "artifact created | policy_ref=" + policy_ref.artifact_id + ":" + policy_ref.version_id + " action=report_emit");
 
     if (approval_ok) {
         logger.ok("check approval", "approval=yes");
@@ -966,6 +1002,7 @@ std::string run_text_flow(const std::string& input)
             execution_context.approval_id = approval_artifact.artifact_id;
             execution_context.verification_id = report_artifact.artifact_id;
             execution_context.approval_valid = true;
+            execution_context.approval_expires_at = approval_artifact.payload.value("expires_at", std::string{});
             execution_context.verification_passed = true;
             execution_context.granted_permissions = verification_context.permissions.capabilities;
 
@@ -1003,7 +1040,6 @@ std::string run_text_flow(const std::string& input)
     CommitBundle bundle{};
     bundle.versions.reserve(12);
     add_version(bundle, ingress_event);
-    add_version(bundle, interpretation_artifact);
     add_version(bundle, task_artifact);
     add_version(bundle, policy_previous);
     add_version(bundle, policy_current);
@@ -1043,7 +1079,7 @@ std::string run_text_flow(const std::string& input)
 std::string run_text_flow(const arcs::artifact::ArtifactVersion& input_artifact)
 {
     const auto raw_text = input_artifact.payload.value("raw_text", std::string{});
-    return run_text_flow(raw_text);
+    return run_text_flow(raw_text, nullptr);
 }
 
 } // namespace arcs::core

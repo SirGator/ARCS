@@ -31,6 +31,7 @@ struct ExecutionContext {
     std::string approval_id;
     std::string verification_id;
     bool approval_valid{false};
+    std::string approval_expires_at;
     bool verification_passed{false};
     std::vector<std::string> granted_permissions;
 };

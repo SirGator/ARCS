@@ -1,0 +1,28 @@
+{
+  "$id": "arcs.interpretation_proposal.v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ARCS Interpretation Proposal",
+  "type": "object",
+  "required": ["status", "intent", "confidence", "slots", "missing_required_fields", "next_step"],
+  "properties": {
+    "status": { "type": "string" },
+    "intent": {
+      "type": "object",
+      "required": ["name", "category", "description"],
+      "properties": {
+        "name": { "type": "string" },
+        "category": { "type": "string" },
+        "description": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "confidence": { "type": "number" },
+    "slots": { "type": "object" },
+    "missing_required_fields": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "next_step": { "type": "string" }
+  },
+  "additionalProperties": true
+}
