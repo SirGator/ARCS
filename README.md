@@ -61,13 +61,33 @@ cmake --build build
 ./build/app/arcs_app
 ```
 
-Setup tip: copy `config/arcs.yaml.example` to `config/arcs.yaml` and set `interpret_api_url` if you use the local worker.
+Setup tip: copy `config/arcs.yaml.example` to `config/arcs.yaml`.
 
-Start the worker with `python -m tools.interpretation_worker --config config/arcs.yaml`.
+ARCS uses a two-stage interpretation pipeline:
 
-The interpretation API is read from `config/arcs.yaml`.
+1. **text-to-json-parser** (FastAPI, Python) — translates free text into
+   schema-conformant JSON. Lives in the sibling directory
+   `../text-to-json-parser/` and is started as its own service.
+2. **interpretation_worker** (stdlib HTTP, Python) — bridges the ARCS Core
+   (C++) and the parser. Exposes the `/interpret` endpoint the C++ client
+   calls, and forwards the request to the parser.
 
-Configure `interpret_api_url` in `config/arcs.yaml`.
+### Start both services
+
+```bash
+# 1. Parser (in ../text-to-json-parser)
+cd ../text-to-json-parser
+uvicorn main:app --host 127.0.0.1 --port 8000
+
+# 2. ARCS interpretation worker (in this directory)
+python -m tools.interpretation_worker --config config/arcs.yaml
+```
+
+The worker reads `parser_url` (default `http://127.0.0.1:8000`) and
+`interpret_api_url` (default `http://127.0.0.1:8090/interpret`) from
+`config/arcs.yaml`. Both can be overridden via environment variables
+(`ARCS_PARSER_URL`, `ARCS_PARSER_TIMEOUT`,
+`ARCS_PARSER_PROMPT_FILE`).
 
 ### Run Tests
 
@@ -106,6 +126,34 @@ ingress_event
 
 Every step is stored as an artifact and can be audited or replayed.
 Unsupported free text is handled by the external interpretation contract.
+
+### Free-text interpretation pipeline
+
+When the input is free text instead of a typed control line, ARCS routes it
+through the external interpretation contract:
+
+```text
+ARCS Core (C++)
+    │  POST /interpret
+    ▼
+interpretation_worker (Python, stdlib HTTP)
+    │  POST /generate-json
+    ▼
+text-to-json-parser (Python, FastAPI)
+    │  Ollama / OpenAI / etc.
+    ▼
+schema-conformant JSON (interpretation_proposal)
+    ▲
+    │  response
+    └── ARCS Core interprets the proposal
+```
+
+- ARCS never talks to the parser directly. The C++ client only knows
+  `interpret_api_url` (the worker).
+- The worker is the single place that knows the parser contract
+  (`/generate-json`, `{text, schema, context, prompt}`).
+- The worker falls back to the built-in `arcs.interpretation_proposal.v1`
+  schema if the ARCS caller doesn't pass one.
 
 ## Safety Principles
 
@@ -154,7 +202,13 @@ ARCS/
 ├── src/                  # Core implementation
 ├── schemas/              # JSON schemas
 │   └── v1/
-├── tests/                # Unit and integration tests
+├── tests/                # C++ unit and integration tests
+├── tools/
+│   └── interpretation_worker/
+│       ├── main.py              # HTTP server + bridge to text-to-json-parser
+│       ├── parser_client.py     # HTTP client for the parser service
+│       └── tests/
+│           └── test_parser_bridge.py  # bridge unit tests
 ├── docs/                 # Project documentation
 │   ├── ARCHITECTURE.md
 │   ├── DEVELOPMENT.md
@@ -162,6 +216,11 @@ ARCS/
 │   └── SPECIFICATION.md
 └── CMakeLists.txt
 ```
+
+The external text-to-json-parser lives in the sibling directory
+`../text-to-json-parser/`. It is its own Python project and a separate
+Git repository. ARCS depends on it at runtime over HTTP, not via a
+submodule.
 
 ## Development Principle
 

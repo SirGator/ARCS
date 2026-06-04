@@ -1,1 +1,18 @@
-uvicorn
+# ARCS interpretation_worker
+# -----------------------
+# httpx spricht mit dem text-to-json-parser Service.
+httpx>=0.27
+# uvicorn wird nur gebraucht, wenn der text-to-json-parser lokal über
+# dieses Repo mitgestartet wird (siehe text-to-json-parser/README.md).
+uvicorn>=0.30
+
+# text-to-json-parser (FastAPI Service)
+# -------------------------------------
+# Der Parser läuft als eigenständiger Service im Verzeichnis
+# ../text-to-json-parser. Diese Dependencies müssen in dessen
+# virtuellem Environment installiert sein (siehe README dort).
+# Sie sind hier nur dokumentiert, damit klar ist, was der Worker
+# am anderen Ende erwartet.
+# fastapi>=0.110
+# jsonschema>=4.21
+# pydantic>=2.6

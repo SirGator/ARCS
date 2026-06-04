@@ -155,6 +155,10 @@ events[]          – Event[]
 - `reducer/` — TaskState, ApprovalState, Permission-Reducer, MockTimeSource
 - `verification/` — Engine + 6 Verifier (Schema, Permission, Scope, Approval, Authority, ReferenceIntegrity)
 - `execution/` — `ReportEmitExecutor`, `PolicyUpdateExecutor`, Materializer, AdapterRegistry, Idempotenz
+- `adapters/interpretation/` — C++-Client, der `POST /interpret` an den
+  `interpretation_worker` schickt
+- `tools/interpretation_worker/` — HTTP-Bridge zum text-to-json-parser
+  inkl. `parser_client.py` und Bridge-Tests
 
 ### Teilweise / Stub
 
@@ -172,3 +176,25 @@ events[]          – Event[]
 ## Vollständige Spec
 
 Siehe [`SPECIFICATION.md`](SPECIFICATION.md) für die formale Übersicht und [`README.md`](../README.md) für den Projektüberblick.
+
+## Interpretation-Pipeline (text → interpretation_proposal)
+
+ARCS hält den LLM nie selbst. Die Trennung ist dreistufig:
+
+| Stufe | Komponente | Verantwortung |
+|-------|-----------|---------------|
+| 1 | `WorkerInterpretationClient` (C++) | Spricht mit dem Worker. Kennt nur `interpret_api_url` und das ARCS-Request-Schema. |
+| 2 | `interpretation_worker` (Python, stdlib HTTP) | Brücke. Validiert den Request, leitet an den Parser, mappt das Resultat zurück. |
+| 3 | `text-to-json-parser` (Python, FastAPI) | LLM-gestützter Schema-Extraktor. Nimmt `text` + `schema` und liefert schema-konformes JSON. |
+
+Konfiguriert wird das ausschließlich über `config/arcs.yaml`:
+
+- `interpret_api_url` — wohin der C++-Client schickt (Worker, default `http://127.0.0.1:8090/interpret`)
+- `parser_url` — wohin der Worker schickt (Parser, default `http://127.0.0.1:8000`)
+- `parser_timeout` — HTTP-Timeout für Parser-Aufrufe
+- `parser_prompt_file` — optionaler Default-Prompt, falls der ARCS-Caller keinen eigenen mitgibt
+
+Der Worker fällt automatisch auf das eingebaute Schema
+`arcs.interpretation_proposal.v1` zurück, wenn der ARCS-Caller keines
+mitgibt. Damit ist der C++-Client unabhängig von der Parser-Implementierung
+austauschbar.

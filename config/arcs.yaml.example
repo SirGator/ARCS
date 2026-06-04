@@ -1,1 +1,32 @@
+# ARCS Konfiguration
+#
+# ARCS Core (C++) spricht mit dem interpretation_worker über `interpret_api_url`.
+# Der interpretation_worker wiederum delegiert an den text-to-json-parser.
+#
+# Reihenfolge der Auflösung für jeden Wert:
+#   1. Umgebungsvariable
+#   2. Wert in dieser YAML-Datei
+#   3. Eingebauter Default des Workers
+
+# --- ARCS Core -----------------------------------------------------------
+# Wohin der ARCS Core `/interpret` schickt (lokaler interpretation_worker).
 interpret_api_url: http://127.0.0.1:8090/interpret
+
+# --- Interpretation Worker → text-to-json-parser -------------------------
+# URL des text-to-json-parser Service (FastAPI).
+# Überschreibbar per ARCS_PARSER_URL.
+parser_url: http://127.0.0.1:8000
+
+# HTTP-Timeout für Parser-Aufrufe in Sekunden.
+# Überschreibbar per ARCS_PARSER_TIMEOUT.
+parser_timeout: 120
+
+# Optionaler Default-Prompt, der an den Parser weitergereicht wird,
+# wenn der ARCS-Aufrufer keinen eigenen Prompt mitgibt.
+# Wenn leer, wird der ARCS Default-Prompt (prompt_file) verwendet.
+# parser_prompt_file: config/prompts/default_adapter_prompt.txt
+
+# --- ARCS interner Prompt ------------------------------------------------
+# Pfad zum Standard-Prompt für den ARCS Adapter. Der Inhalt wird vom
+# interpretation_worker als Default-Prompt an den Parser weitergereicht.
+prompt_file: config/prompts/default_adapter_prompt.txt

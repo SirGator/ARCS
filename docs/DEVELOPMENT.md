@@ -37,6 +37,42 @@ Die CLI liest optional `config/arcs.yaml` aus dem Projektroot. Starte am besten 
 
 Die vier externen APIs und die Prompt-Datei werden ausschließlich über `config/arcs.yaml` konfiguriert.
 
+### text-to-json-parser als externer Interpretation-Service
+
+ARCS erwartet, dass der text-to-json-parser (sibling repository
+`../text-to-json-parser/`) als eigener FastAPI-Service läuft. Der
+`interpretation_worker` delegiert dorthin.
+
+Setup:
+
+```bash
+# 1. Parser-Service starten
+cd ../text-to-json-parser
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt    # siehe ../text-to-json-parser/README.md
+uvicorn main:app --host 127.0.0.1 --port 8000
+
+# 2. ARCS interpretation_worker starten (eigene Shell)
+cd ../ARCS
+python -m venv .venv && source .venv/bin/activate
+pip install -r tools/requirements.txt
+python -m tools.interpretation_worker --config config/arcs.yaml
+```
+
+Der ARCS Core ruft `POST /interpret` auf `127.0.0.1:8090` auf. Der
+Worker mappt das intern auf `POST /generate-json` auf
+`127.0.0.1:8000`. Stoppe den Parser, schlägt `/interpret` mit HTTP 502
+fehl — fail-closed.
+
+### Nur die Bridge-Tests laufen lassen (kein C++-Build nötig)
+
+```bash
+cd ARCS
+python -m venv .venv && source .venv/bin/activate
+pip install httpx
+python -m unittest tools.interpretation_worker.tests.test_parser_bridge -v
+```
+
 ### Einzelnen Test ausführen
 
 ```bash
