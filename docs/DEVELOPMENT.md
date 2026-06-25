@@ -73,6 +73,17 @@ pip install httpx
 python -m unittest tools.interpretation_worker.tests.test_parser_bridge -v
 ```
 
+### Full-Stack-E2E-Test der Interpretation laufen lassen
+
+Der Test startet den echten Parser mit `LLM_BACKEND=echo`, startet den
+echten Worker und ruft danach `arcs_app` gegen diesen Stack auf.
+
+```bash
+cmake -S . -B build
+cmake --build build --target arcs_app
+ctest --test-dir build -R arcs_full_stack_e2e_tests --output-on-failure
+```
+
 ### Einzelnen Test ausführen
 
 ```bash
@@ -182,6 +193,8 @@ registry.register_executor(std::make_unique<SendReplyExecutor>());
 | `test_permission_ttl.cpp` | Permission TTL und Gültigkeit |
 | `test_policy_change_control.cpp` | Governance für Policy-Änderungen |
 | `phase1_tests.cpp` | Phase-1-Integrationstests |
+| `tools/interpretation_worker/tests/test_parser_bridge.py` | Worker-Bridge isoliert ohne C++-Build |
+| `tools/interpretation_worker/tests/test_full_stack_e2e.py` | Echter Stack: Parser + Worker + `arcs_app` |
 
 ### Test-Prinzipien
 

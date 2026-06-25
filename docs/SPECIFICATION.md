@@ -1,9 +1,24 @@
 # SPECIFICATION
 
-## Vollständige Dokumentation
+## Rolle dieser Datei
 
-Die aktuelle Spezifikation ist in der Projektdokumentation enthalten:
-→ [`ARCHITECTURE.md`](ARCHITECTURE.md) und [`README.md`](../README.md)
+Diese Datei beschreibt den Kernvertrag von ARCS.
+
+Sie ist absichtlich knapper und stabiler als Status- oder Phase-Dokumente.
+
+Die angrenzenden Dokumente haben andere Rollen:
+
+- [`README.md`](../README.md): Einstieg und aktueller Scope
+- [`ARCHITECTURE.md`](ARCHITECTURE.md): Struktur und Modulaufteilung
+- [`SCHEMA_CONTRACT.md`](SCHEMA_CONTRACT.md): harte Schema- und Commit-Gates
+- [`MVP_FLOW.md`](MVP_FLOW.md): aktueller echter V1-Flow
+- [`TEST_MATRIX.md`](TEST_MATRIX.md): welcher Test welche Garantie belegt
+
+Diese Datei beantwortet vor allem die Frage:
+
+```text
+Was muss ARCS als Core garantieren?
+```
 
 ## Kern-Prinzipien
 
@@ -13,7 +28,16 @@ Die aktuelle Spezifikation ist in der Projektdokumentation enthalten:
 | **Fail-Closed** | unknown = BLOCK — keine Ausnahmen |
 | **LLM ist nie Autorität** | LLM-Output = trust.level low, immer verifiziert |
 | **Immutable Logs** | Append-only, Replay-garantiert |
-| **Schema First** | Kein untypisierter Payload nach Ingress |
+| **Schema First** | Kein untypisierter Payload nach Ingress und kein relevanter Commit ohne bekannte `schema_id` |
+
+## V1-Lesart dieser Prinzipien
+
+Fuer V1 bedeuten die Prinzipien konkret:
+
+- `Schema First` ist nicht nur Stil, sondern ein Commit-Gate
+- `Fail-Closed` gilt fuer Verification und Interpretation
+- LLMs duerfen Vorschlaege erzeugen, aber keine Autoritaetsartefakte direkt committen
+- Replay und Reducer duerfen keine verdeckte Laufzeitlogik voraussetzen
 
 ## Die 7 Kern-Komponenten
 
@@ -30,6 +54,12 @@ Die aktuelle Spezifikation ist in der Projektdokumentation enthalten:
 ## External APIs
 
 Rohtext wird nicht mehr intern interpretiert. ARCS stellt einen einzelnen `/interpret`-Auftrag und verarbeitet das zurückgegebene Interpretation-Proposal.
+
+Wichtig fuer V1:
+
+- der Interpretationspfad ist extern und entkoppelt
+- Interpretation erzeugt maximal Vorschlaege
+- Action, Approval, Policy und ExecutionResult bleiben ausserhalb des LLM-Vertrauenspfads
 
 ## Core Artefakt-Typen
 
@@ -101,6 +131,23 @@ option:draft
 
 **Store:** StoreMemory für Tests, StoreSQLite für V1, StorePostgres für Production.
 
+Der aktuelle implementierte und getestete Flow ist in [`MVP_FLOW.md`](MVP_FLOW.md) beschrieben.
+
+Die Tests, die diesen Scope heute belegen oder noch nicht voll belegen, stehen in [`TEST_MATRIX.md`](TEST_MATRIX.md).
+
+## Harte V1-Regeln
+
+### Regel 0: Schema- und Commit-Gate
+
+Kein relevantes Artefakt darf committed werden, wenn:
+
+- `schema_id` fehlt
+- `schema_id` unbekannt ist
+- das Payload das referenzierte Schema nicht erfuellt
+- die zugehoerigen Governance-Gates nicht greifen
+
+Die praezise Vertragsform steht in [`SCHEMA_CONTRACT.md`](SCHEMA_CONTRACT.md).
+
 ## Drei harte Betriebsregeln
 
 ### Regel 1: Commit-Boundary
@@ -111,3 +158,14 @@ Head ist nicht "latest row". Head ist das Ergebnis eines deterministischen Reduc
 
 ### Regel 3: At-least-once + Idempotenz
 action_id ist der Idempotency-Key. Doppelte Ausführung = no-op oder safe replay.
+
+## Nicht Teil dieser Datei
+
+Diese Datei sagt nicht automatisch, dass jede Regel bereits vollstaendig im
+heutigen Repo erzwungen wird.
+
+Dafuer gelten die anderen Dokumente:
+
+- `SCHEMA_CONTRACT.md`: Zielvertrag plus aktueller Durchsetzungsstand
+- `MVP_FLOW.md`: echter Ist-Flow
+- `TEST_MATRIX.md`: Testbeweis oder Luecke

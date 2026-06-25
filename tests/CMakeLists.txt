@@ -1,3 +1,5 @@
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+
 add_executable(arcs_phase1_tests
     phase1_tests.cpp
 )
@@ -244,6 +246,16 @@ target_link_libraries(arcs_cli_adapters_tests
 )
 
 add_test(NAME arcs_cli_adapters_tests COMMAND $<TARGET_FILE:arcs_cli_adapters_tests>)
+
+add_test(
+    NAME arcs_full_stack_e2e_tests
+    COMMAND
+        ${Python3_EXECUTABLE}
+        ${PROJECT_SOURCE_DIR}/tools/interpretation_worker/tests/test_full_stack_e2e.py
+        $<TARGET_FILE:arcs_app>
+)
+set_tests_properties(arcs_full_stack_e2e_tests PROPERTIES WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+
 add_executable(arcs_artifact_factory_tests
     test_artifact_factory.cpp
 )
@@ -255,3 +267,53 @@ target_link_libraries(arcs_artifact_factory_tests
 )
 
 add_test(NAME arcs_artifact_factory_tests COMMAND $<TARGET_FILE:arcs_artifact_factory_tests>)
+
+# ---- Phase 0 additions ---------------------------------------------------
+
+# ID-Generator property tests (Kollisionsfreiheit, Concurrency).
+add_executable(arcs_id_generator_tests
+    test_id_generator.cpp
+)
+
+target_link_libraries(arcs_id_generator_tests
+    PRIVATE
+        arcs_artifact
+        GTest::gtest_main
+)
+
+add_test(NAME arcs_id_generator_tests COMMAND $<TARGET_FILE:arcs_id_generator_tests>)
+
+# IStore conformance tests — parameterized over every registered
+# implementation. Always built; the StoreSqlite instance is created
+# only when ARCS_HAS_STORE_SQLITE is true (the test skips otherwise).
+add_executable(arcs_store_conformance_tests
+    test_store_conformance.cpp
+)
+
+target_link_libraries(arcs_store_conformance_tests
+    PRIVATE
+        arcs_store
+        GTest::gtest_main
+)
+
+if (ARCS_HAS_STORE_SQLITE)
+    target_link_libraries(arcs_store_conformance_tests
+        PRIVATE
+            arcs_store_sqlite
+    )
+endif()
+
+add_test(NAME arcs_store_conformance_tests COMMAND $<TARGET_FILE:arcs_store_conformance_tests>)
+
+# StoreSqlite-specific tests (build only when SQLite is available).
+if (ARCS_HAS_STORE_SQLITE)
+    add_executable(arcs_store_sqlite_tests
+        test_store_sqlite.cpp
+    )
+    target_link_libraries(arcs_store_sqlite_tests
+        PRIVATE
+            arcs_store_sqlite
+            GTest::gtest_main
+    )
+    add_test(NAME arcs_store_sqlite_tests COMMAND $<TARGET_FILE:arcs_store_sqlite_tests>)
+endif()

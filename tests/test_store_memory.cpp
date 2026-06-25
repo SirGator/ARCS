@@ -15,8 +15,19 @@ ArtifactVersion make_artifact(
     ArtifactVersion a{};
     a.artifact_id = artifact_id;
     a.version_id = version_id;
+    a.version = 1;
     a.type = type;
+    a.schema_id = "arcs." + type + ".v1";
+    a.schema_version = 1;
+    a.created_at = "2026-06-01T12:00:00Z";
+    a.created_by = {"system", "test"};
+    a.source = {"internal", "test"};
+    a.trust = {"high", "system"};
     a.stream_key = stream_key;
+    a.payload = nlohmann::json::object();
+    if (type == "task") {
+        a.payload = nlohmann::json{{"title", "Test task"}};
+    }
     return a;
 }
 
@@ -225,6 +236,33 @@ TEST(StoreMemoryTest, CommitRejectsBundleWithoutVersions)
     StoreMemory store;
 
     CommitBundle bundle{};
+    bundle.events.push_back(make_head_advanced_event("e1", "a1", "v1", "task_id:t_1"));
+
+    EXPECT_THROW(store.commit(bundle), CommitRejectedError);
+}
+
+TEST(StoreMemoryTest, CommitRejectsMissingSchemaId)
+{
+    StoreMemory store;
+
+    ArtifactVersion v1 = make_artifact("a1", "v1", "task", "task_id:t_1");
+    v1.schema_id.clear();
+
+    CommitBundle bundle{};
+    bundle.versions.push_back(make_pending(v1));
+    bundle.events.push_back(make_head_advanced_event("e1", "a1", "v1", "task_id:t_1"));
+
+    EXPECT_THROW(store.commit(bundle), CommitRejectedError);
+}
+
+TEST(StoreMemoryTest, CommitRejectsEmptyStreamKey)
+{
+    StoreMemory store;
+
+    ArtifactVersion v1 = make_artifact("a1", "v1", "task", "");
+
+    CommitBundle bundle{};
+    bundle.versions.push_back(make_pending(v1));
     bundle.events.push_back(make_head_advanced_event("e1", "a1", "v1", "task_id:t_1"));
 
     EXPECT_THROW(store.commit(bundle), CommitRejectedError);

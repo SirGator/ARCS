@@ -208,7 +208,8 @@ ARCS/
 │       ├── main.py              # HTTP server + bridge to text-to-json-parser
 │       ├── parser_client.py     # HTTP client for the parser service
 │       └── tests/
-│           └── test_parser_bridge.py  # bridge unit tests
+│           ├── test_parser_bridge.py  # bridge unit tests
+│           └── test_full_stack_e2e.py # parser + worker + arcs_app E2E
 ├── docs/                 # Project documentation
 │   ├── ARCHITECTURE.md
 │   ├── DEVELOPMENT.md

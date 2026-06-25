@@ -1,9 +1,14 @@
 #include "store/store_memory.hpp"
 
+#include "artifact/json.hpp"
+#include "schema/schema_loader.hpp"
+#include "schema/schema_registry.hpp"
+#include "schema/validator.hpp"
 #include "store/head_tracker.hpp"
 #include "store/optimistic_lock.hpp"
 
 #include <algorithm>
+#include <filesystem>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -13,6 +18,43 @@ namespace {
 
 using arcs::artifact::ArtifactVersion;
 using arcs::event::Event;
+
+const arcs::schema::SchemaRegistry& artifact_base_registry()
+{
+    static const auto registry = [] {
+        arcs::schema::SchemaRegistry registry;
+        const auto schema_path = std::filesystem::path(__FILE__).parent_path()
+            .parent_path().parent_path().parent_path()
+            / "schemas" / "v1" / "artifact_base.schema.json";
+
+        const auto schema_entry = arcs::schema::SchemaLoader::load_from_file(schema_path);
+        if (!schema_entry.has_value() || !registry.register_schema(*schema_entry)) {
+            throw arcs::store::StoreError(
+                "store schema gate misconfigured: artifact_base schema could not be loaded");
+        }
+
+        return registry;
+    }();
+
+    return registry;
+}
+
+void ensure_base_artifact_valid(const ArtifactVersion& version)
+{
+    const nlohmann::json artifact_json = version;
+    const auto validation = arcs::schema::Validator::validate(
+        artifact_json,
+        "arcs.artifact_base.v1",
+        artifact_base_registry());
+
+    if (!validation.valid) {
+        std::string message = "artifact version rejected: base schema validation failed";
+        if (!validation.errors.empty()) {
+            message += " at " + validation.errors.front().path + ": " + validation.errors.front().message;
+        }
+        throw arcs::store::CommitRejectedError(message);
+    }
+}
 
 void ensure_version_insertable_impl(
     const ArtifactVersion& version,
@@ -30,6 +72,8 @@ void ensure_version_insertable_impl(
         throw arcs::store::CommitRejectedError(
             "artifact version rejected: duplicate version_id '" + version.version_id + "'");
     }
+
+    ensure_base_artifact_valid(version);
 }
 
 void append_artifact_to_state_impl(
