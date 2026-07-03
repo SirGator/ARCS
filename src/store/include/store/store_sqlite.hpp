@@ -11,7 +11,8 @@ namespace arcs::store {
 
 // Persistent implementation of IStore backed by a single SQLite file.
 //
-// Design goals (per Phase-0 plan in docs/phases/phase-0-foundation.md):
+// Design goals follow the repository's current ARCS Core specification and
+// append-only store rules.
 //   - Append-only artifact and event tables.
 //   - One DB-level transaction per commit() (commit-boundary rule).
 //   - Head table is derived from the `head_advanced` event log, not from

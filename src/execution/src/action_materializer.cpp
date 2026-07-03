@@ -1,4 +1,7 @@
 #include <nlohmann/json.hpp>
+#include <cstdint>
+#include <iomanip>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -7,7 +10,6 @@
 #include "step.hpp"
 #include "artifact/artifact.hpp"
 #include "artifact/factory.hpp"
-#include "artifact/ids.hpp"
 #include "policy/policy.hpp"
 
 namespace arcs::execution {
@@ -27,6 +29,54 @@ bool json_array_contains_string(const nlohmann::json& value, const std::string& 
     }
 
     return false;
+}
+
+std::string fnv1a_hex(std::string_view value)
+{
+    std::uint64_t hash = 14695981039346656037ull;
+    for (const unsigned char ch : value) {
+        hash ^= ch;
+        hash *= 1099511628211ull;
+    }
+
+    std::ostringstream out;
+    out << std::hex << hash;
+    return out.str();
+}
+
+std::string deterministic_action_key(const Step& step,
+                                     const OptionArtifact& option,
+                                     const PolicyArtifact& policy)
+{
+    nlohmann::json fingerprint = {
+        {"option_artifact_id", option.artifact_id},
+        {"option_version_id", option.version_id},
+        {"stream_key", option.stream_key},
+        {"policy_artifact_id", policy.artifact_id},
+        {"policy_version_id", policy.version_id},
+    };
+
+    if (std::holds_alternative<EmitReportStep>(step)) {
+        const auto& emit_report = std::get<EmitReportStep>(step);
+        fingerprint["step"] = {
+            {"kind", "emit_report"},
+            {"format", emit_report.params.format},
+            {"sections", emit_report.params.sections},
+        };
+    }
+
+    return std::string{"act_"} + fnv1a_hex(fingerprint.dump());
+}
+
+std::string deterministic_action_artifact_id(const std::string& action_id)
+{
+    return "a_" + action_id;
+}
+
+std::string deterministic_action_version_id(const std::string& action_id,
+                                            const PolicyArtifact& policy)
+{
+    return "v_" + action_id + "_" + policy.version_id;
 }
 
 void validate_policy_binding(const OptionArtifact& option, const PolicyArtifact& policy)
@@ -129,7 +179,7 @@ ActionArtifact step_to_action(const Step& step,
 
         ActionArtifact action = arcs::artifact::factory::make_base_artifact(
             "action",
-            "arcs.action.v1",
+            "arcs.action.report_emit.v1",
             option.stream_key,
             "system",
             "action_materializer",
@@ -138,14 +188,17 @@ ActionArtifact step_to_action(const Step& step,
             "high",
             "system");
 
-        const auto action_id = arcs::artifact::ids::new_event_id();
+        const auto action_id = deterministic_action_key(step, option, policy);
         auto required_permissions = nlohmann::json::array();
         required_permissions.push_back("exec:report_emit");
+        action.artifact_id = deterministic_action_artifact_id(action_id);
+        action.version_id = deterministic_action_version_id(action_id, policy);
 
         action.payload = nlohmann::json{
             {"action_id", action_id},
-            {"schema_id", "actions/report_emit@v1"},
             {"type", "report_emit"},
+            {"option_ref", {{"artifact_id", option.artifact_id}, {"version_id", option.version_id}}},
+            {"policy_ref", {{"artifact_id", policy.artifact_id}, {"version_id", policy.version_id}}},
             {"params", {
                 {"format", s.params.format},
                 {"sections", s.params.sections}

@@ -27,6 +27,16 @@ ArtifactVersion make_artifact(
     a.payload = nlohmann::json::object();
     if (type == "task") {
         a.payload = nlohmann::json{{"title", "Test task"}};
+    } else if (type == "option") {
+        a.payload = nlohmann::json{
+            {"title", "Test option"},
+            {"human_summary", "Summary"},
+            {"steps", nlohmann::json::array({
+                nlohmann::json{{"kind", "emit_report"}, {"params", nlohmann::json{{"format", "json"}}}}
+            })},
+            {"requires_permissions", nlohmann::json::array()},
+            {"safety_level", "low"},
+        };
     }
     return a;
 }
@@ -40,7 +50,10 @@ Event make_head_advanced_event(
     Event e{};
     e.event_id = event_id;
     e.event_type = "head_advanced";
+    e.ts = "2026-06-01T12:00:00Z";
     e.stream_key = stream_key;
+    e.actor = {"system", "test"};
+    e.payload = nlohmann::json::object();
 
     arcs::event::EventRef ref{};
     ref.artifact_id = artifact_id;
@@ -59,6 +72,21 @@ PendingVersion make_pending(
     p.version = version;
     p.expected_head_version_id = expected_head;
     return p;
+}
+
+TEST(StoreMemoryTest, CommitRejectsInvalidEventSchema)
+{
+    StoreMemory store;
+
+    ArtifactVersion v1 = make_artifact("a1", "v1", "task", "task_id:t_1");
+    Event e1 = make_head_advanced_event("e1", "a1", "v1", "task_id:t_1");
+    e1.ts.clear();
+
+    CommitBundle bundle{};
+    bundle.versions.push_back(make_pending(v1));
+    bundle.events.push_back(e1);
+
+    EXPECT_THROW(store.commit(bundle), CommitRejectedError);
 }
 
 TEST(StoreMemoryTest, CommitSingleVersionAndHeadAdvancedSetsHead)
@@ -247,6 +275,34 @@ TEST(StoreMemoryTest, CommitRejectsMissingSchemaId)
 
     ArtifactVersion v1 = make_artifact("a1", "v1", "task", "task_id:t_1");
     v1.schema_id.clear();
+
+    CommitBundle bundle{};
+    bundle.versions.push_back(make_pending(v1));
+    bundle.events.push_back(make_head_advanced_event("e1", "a1", "v1", "task_id:t_1"));
+
+    EXPECT_THROW(store.commit(bundle), CommitRejectedError);
+}
+
+TEST(StoreMemoryTest, CommitRejectsUnknownSchemaId)
+{
+    StoreMemory store;
+
+    ArtifactVersion v1 = make_artifact("a1", "v1", "task", "task_id:t_1");
+    v1.schema_id = "arcs.unknown.v1";
+
+    CommitBundle bundle{};
+    bundle.versions.push_back(make_pending(v1));
+    bundle.events.push_back(make_head_advanced_event("e1", "a1", "v1", "task_id:t_1"));
+
+    EXPECT_THROW(store.commit(bundle), CommitRejectedError);
+}
+
+TEST(StoreMemoryTest, CommitRejectsInvalidPayloadForSchema)
+{
+    StoreMemory store;
+
+    ArtifactVersion v1 = make_artifact("a1", "v1", "task", "task_id:t_1");
+    v1.payload = nlohmann::json{{"wrong", true}};
 
     CommitBundle bundle{};
     bundle.versions.push_back(make_pending(v1));

@@ -95,6 +95,49 @@ The worker reads `parser_url` (default `http://127.0.0.1:8000`) and
 ctest --test-dir build
 ```
 
+## Clean Handoff
+
+Do not ship generated local state as part of a handoff ZIP or source snapshot.
+
+Keep these paths out of deliverables:
+
+- `build/`
+- `.venv/`
+- `artifacts/`
+- `__pycache__/`
+- `arcs.log`
+
+For a clean repository export, prefer:
+
+```bash
+git archive --format=zip -o ARCS-clean.zip HEAD
+```
+
+## Documentation Workflow
+
+ARCS currently uses `spec and paper/Spec/` as the canonical specification tree.
+
+For day-to-day development, start with these files:
+
+1. `spec and paper/Spec/ARCS.md`
+2. `spec and paper/Spec/System_flow.md`
+3. `spec and paper/Spec/Core/Purpose.md`
+4. `spec and paper/Spec/Core/Behaviour.md`
+5. `spec and paper/Spec/Core/Technical Specification.md`
+6. `spec and paper/Spec/Adapter/Purpose.md`
+7. `spec and paper/Spec/Adapter/Behaviour.md`
+8. `spec and paper/Spec/Adapter/Technical Specification.md`
+9. `spec and paper/Spec/interface/interface & Contracts.md`
+
+Use `spec and paper/Spec/problem.md` as the current gap list between the intended architecture and the present MVP implementation.
+
+Typical workflow:
+
+1. read `ARCS.md` and `System_flow.md` first
+2. read the matching `Core/`, `Adapter/`, or `interface/` subtree next
+3. compare the current code path against the relevant spec section before changing behavior
+4. update the matching spec files when behavior or contracts change
+
 ## Architecture Overview
 
 ARCS Core consists of seven core components:
@@ -210,11 +253,14 @@ ARCS/
 │       └── tests/
 │           ├── test_parser_bridge.py  # bridge unit tests
 │           └── test_full_stack_e2e.py # parser + worker + arcs_app E2E
-├── docs/                 # Project documentation
-│   ├── ARCHITECTURE.md
-│   ├── DEVELOPMENT.md
-│   ├── GOVERNANCE.md
-│   └── SPECIFICATION.md
+├── spec and paper/
+│   └── Spec/             # Current specification tree
+│       ├── ARCS.md
+│       ├── System_flow.md
+│       ├── problem.md
+│       ├── Core/
+│       ├── Adapter/
+│       └── interface/
 └── CMakeLists.txt
 ```
 
@@ -232,10 +278,16 @@ Each phase should end with a running demo and tests that prove the slice works.
 
 ## Documentation
 
-- [Architecture](docs/ARCHITECTURE.md)
-- [Development Guide](docs/DEVELOPMENT.md)
-- [Governance Model](docs/GOVERNANCE.md)
-- [Core Specification](docs/SPECIFICATION.md)
+- [Overview](spec%20and%20paper/Spec/ARCS.md)
+- [System Flow](spec%20and%20paper/Spec/System_flow.md)
+- [Core Purpose](spec%20and%20paper/Spec/Core/Purpose.md)
+- [Core Behaviour](spec%20and%20paper/Spec/Core/Behaviour.md)
+- [Core Technical Specification](spec%20and%20paper/Spec/Core/Technical%20Specification.md)
+- [Adapter Purpose](spec%20and%20paper/Spec/Adapter/Purpose.md)
+- [Adapter Behaviour](spec%20and%20paper/Spec/Adapter/Behaviour.md)
+- [Adapter Technical Specification](spec%20and%20paper/Spec/Adapter/Technical%20Specification.md)
+- [Interfaces and Contracts](spec%20and%20paper/Spec/interface/interface%20%26%20Contracts.md)
+- [Problem List](spec%20and%20paper/Spec/problem.md)
 
 ## Status
 

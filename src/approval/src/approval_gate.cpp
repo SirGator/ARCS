@@ -47,6 +47,18 @@ ApprovalArtifact ApprovalGate::submit(const ApprovalPayload& in)
             {"artifact_id", in.policy_ref.artifact_id},
             {"version_id", in.policy_ref.version_id}
         }},
+        {"verification_ref", {
+            {"artifact_id", in.verification_ref.artifact_id},
+            {"version_id", in.verification_ref.version_id}
+        }},
+        {"request_ref", {
+            {"artifact_id", in.request_ref.artifact_id},
+            {"version_id", in.request_ref.version_id}
+        }},
+        {"action_ref", {
+            {"artifact_id", in.action_ref.artifact_id},
+            {"version_id", in.action_ref.version_id}
+        }},
         {"decision", to_string(in.decision)},
         {"reason", in.reason},
         {"actor", {
@@ -54,9 +66,18 @@ ApprovalArtifact ApprovalGate::submit(const ApprovalPayload& in)
             {"id", in.actor.id}
         }},
         {"timestamp", in.timestamp},
-        {"expires_at", in.expires_at}
+        {"expires_at", in.expires_at},
+        {"approval_scope", in.approval_scope},
+        {"store_head_at_approval", in.store_head_at_approval},
+        {"risk_summary", in.risk_summary}
     };
-    a.provenance.parents = {in.target_option.artifact_id, in.policy_ref.artifact_id};
+    a.provenance.parents = {
+        in.target_option.artifact_id,
+        in.policy_ref.artifact_id,
+        in.verification_ref.artifact_id,
+        in.request_ref.artifact_id,
+        in.action_ref.artifact_id,
+    };
     a.provenance.rules_applied = {"approval_gate"};
     a.provenance.transform = "submit_approval";
 

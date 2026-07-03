@@ -10,7 +10,10 @@
     "priority": {
       "type": "string",
       "enum": ["low", "medium", "high"]
-    }
+    },
+    "approval": { "type": "boolean" },
+    "permission": { "type": "boolean" },
+    "policy_drift": { "type": "boolean" }
   },
   "additionalProperties": false
 }

@@ -27,11 +27,17 @@ enum class ApprovalDecision {
 struct ApprovalPayload {
     ArtifactRef target_option;
     ArtifactRef policy_ref;
+    ArtifactRef verification_ref;
+    ArtifactRef request_ref;
+    ArtifactRef action_ref;
     ApprovalDecision decision;
     std::string reason;
     ActorRef actor;
     std::string timestamp;   // UTC ISO-8601
     std::string expires_at;  // UTC ISO-8601
+    std::string approval_scope;
+    std::string store_head_at_approval;
+    std::string risk_summary;
 };
 
 using ApprovalArtifact = arcs::artifact::ArtifactVersion;

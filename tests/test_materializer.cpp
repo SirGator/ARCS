@@ -44,9 +44,11 @@ TEST(ActionMaterializerTest, EmitReportStepBecomesReportEmitAction) {
 
     ASSERT_EQ(actions.size(), 1u);
     EXPECT_EQ(actions[0].type, "action");
-    EXPECT_EQ(actions[0].schema_id, "arcs.action.v1");
+    EXPECT_EQ(actions[0].schema_id, "arcs.action.report_emit.v1");
 
     EXPECT_EQ(actions[0].payload["type"], "report_emit");
+    EXPECT_EQ(actions[0].payload["option_ref"]["artifact_id"], option.artifact_id);
+    EXPECT_EQ(actions[0].payload["policy_ref"]["artifact_id"], policy.artifact_id);
     EXPECT_EQ(actions[0].payload["params"]["format"], "pdf");
     EXPECT_EQ(actions[0].payload["params"]["sections"][0], "summary");
     EXPECT_EQ(actions[0].payload["params"]["sections"][1], "risks");
@@ -111,6 +113,10 @@ TEST(ActionMaterializerTest, MaterializeIsDeterministic) {
     EXPECT_EQ(a1[0].payload["type"], a2[0].payload["type"]);
     EXPECT_EQ(a1[0].payload["params"], a2[0].payload["params"]);
     EXPECT_EQ(a1[0].payload["required_permissions"], a2[0].payload["required_permissions"]);
+    EXPECT_EQ(a1[0].payload["action_id"], a2[0].payload["action_id"]);
+    EXPECT_EQ(a1[0].payload["idempotency_key"], a2[0].payload["idempotency_key"]);
+    EXPECT_EQ(a1[0].artifact_id, a2[0].artifact_id);
+    EXPECT_EQ(a1[0].version_id, a2[0].version_id);
 }
 
 } // namespace

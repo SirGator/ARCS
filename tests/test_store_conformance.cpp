@@ -80,14 +80,16 @@ ArtifactVersion mk_artifact(
     a.version_id = version_id;
     a.version = version;
     a.type = type;
+    a.schema_id = "arcs.input.v1";
     a.stream_key = stream_key;
-    a.payload = nlohmann::json{{"i", version}};
+    a.payload = nlohmann::json{{"raw_text", "test"}, {"source", "test"}, {"i", version}};
     a.created_by.actor_type = "system";
     a.created_by.id = "test";
     a.source.kind = "internal";
     a.source.ref = "test";
     a.trust.level = "low";
     a.trust.source_class = "system";
+    a.created_at = "2024-01-01T00:00:00Z";
     return a;
 }
 
@@ -100,9 +102,11 @@ Event mk_head_advanced(
     Event e{};
     e.event_id = event_id;
     e.event_type = "head_advanced";
+    e.ts = "2024-01-01T00:00:00Z";
     e.stream_key = stream_key;
     e.actor.actor_type = "system";
     e.actor.id = "test";
+    e.payload = nlohmann::json::object();
     EventRef ref{};
     ref.artifact_id = artifact_id;
     ref.version_id = version_id;
@@ -283,11 +287,12 @@ TEST_P(IStoreConformance, JsonPayloadRoundTrip)
     v.artifact_id = "a_1";
     v.version_id = "v_1";
     v.version = 1;
-    v.type = "task";
-    v.schema_id = "arcs.task.v1";
+    v.type = "input";
+    v.schema_id = "arcs.input.v1";
     v.stream_key = "s_1";
     v.payload = nlohmann::json{
-        {"text", "hello"},
+        {"raw_text", "hello"},
+        {"source", "test"},
         {"nested", {{"k", "v"}, {"n", 1}}},
         {"arr", nlohmann::json::array({1, 2, 3})}
     };
@@ -297,6 +302,7 @@ TEST_P(IStoreConformance, JsonPayloadRoundTrip)
     v.source.ref = "test";
     v.trust.level = "low";
     v.trust.source_class = "system";
+    v.created_at = "2024-01-01T00:00:00Z";
     auto e = mk_head_advanced("e_1", "a_1", "v_1", "s_1");
     CommitBundle b{};
     b.versions.push_back(mk_pending(v));
@@ -304,10 +310,10 @@ TEST_P(IStoreConformance, JsonPayloadRoundTrip)
     store_->commit(b);
 
     auto loaded = store_->get("a_1");
-    EXPECT_EQ(loaded.payload["text"], "hello");
+    EXPECT_EQ(loaded.payload["raw_text"], "hello");
     EXPECT_EQ(loaded.payload["nested"]["k"], "v");
     EXPECT_EQ(loaded.payload["arr"].size(), 3u);
-    EXPECT_EQ(loaded.schema_id, "arcs.task.v1");
+    EXPECT_EQ(loaded.schema_id, "arcs.input.v1");
 }
 
 TEST_P(IStoreConformance, AppendArtifactBypassesCommitBoundary)

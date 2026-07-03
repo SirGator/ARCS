@@ -1,6 +1,7 @@
 #include "store/store_memory.hpp"
 
 #include "artifact/json.hpp"
+#include "event/json.hpp"
 #include "schema/schema_loader.hpp"
 #include "schema/schema_registry.hpp"
 #include "schema/validator.hpp"
@@ -39,6 +40,52 @@ const arcs::schema::SchemaRegistry& artifact_base_registry()
     return registry;
 }
 
+const arcs::schema::SchemaRegistry& artifact_payload_registry()
+{
+    static const auto registry = [] {
+        arcs::schema::SchemaRegistry registry;
+        const auto schemas_dir = std::filesystem::path(__FILE__).parent_path()
+            .parent_path().parent_path().parent_path()
+            / "schemas" / "v1";
+
+        for (const auto& entry : std::filesystem::directory_iterator(schemas_dir)) {
+            if (!entry.is_regular_file() || entry.path().extension() != ".json") {
+                continue;
+            }
+
+            const auto schema_entry = arcs::schema::SchemaLoader::load_from_file(entry.path());
+            if (!schema_entry.has_value() || !registry.register_schema(*schema_entry)) {
+                throw arcs::store::StoreError(
+                    "store schema gate misconfigured: payload schemas could not be loaded");
+            }
+        }
+
+        return registry;
+    }();
+
+    return registry;
+}
+
+const arcs::schema::SchemaRegistry& event_registry()
+{
+    static const auto registry = [] {
+        arcs::schema::SchemaRegistry registry;
+        const auto schema_path = std::filesystem::path(__FILE__).parent_path()
+            .parent_path().parent_path().parent_path()
+            / "schemas" / "v1" / "event.schema.json";
+
+        const auto schema_entry = arcs::schema::SchemaLoader::load_from_file(schema_path);
+        if (!schema_entry.has_value() || !registry.register_schema(*schema_entry)) {
+            throw arcs::store::StoreError(
+                "store schema gate misconfigured: event schema could not be loaded");
+        }
+
+        return registry;
+    }();
+
+    return registry;
+}
+
 void ensure_base_artifact_valid(const ArtifactVersion& version)
 {
     const nlohmann::json artifact_json = version;
@@ -49,6 +96,39 @@ void ensure_base_artifact_valid(const ArtifactVersion& version)
 
     if (!validation.valid) {
         std::string message = "artifact version rejected: base schema validation failed";
+        if (!validation.errors.empty()) {
+            message += " at " + validation.errors.front().path + ": " + validation.errors.front().message;
+        }
+        throw arcs::store::CommitRejectedError(message);
+    }
+}
+
+void ensure_payload_valid(const ArtifactVersion& version)
+{
+    const auto validation = arcs::schema::Validator::validate(
+        version.payload,
+        version.schema_id,
+        artifact_payload_registry());
+
+    if (!validation.valid) {
+        std::string message = "artifact version rejected: payload schema validation failed";
+        if (!validation.errors.empty()) {
+            message += " at " + validation.errors.front().path + ": " + validation.errors.front().message;
+        }
+        throw arcs::store::CommitRejectedError(message);
+    }
+}
+
+void ensure_event_valid(const Event& event)
+{
+    const nlohmann::json event_json = event;
+    const auto validation = arcs::schema::Validator::validate(
+        event_json,
+        "arcs.event.v1",
+        event_registry());
+
+    if (!validation.valid) {
+        std::string message = "event rejected: schema validation failed";
         if (!validation.errors.empty()) {
             message += " at " + validation.errors.front().path + ": " + validation.errors.front().message;
         }
@@ -74,6 +154,7 @@ void ensure_version_insertable_impl(
     }
 
     ensure_base_artifact_valid(version);
+    ensure_payload_valid(version);
 }
 
 void append_artifact_to_state_impl(
@@ -102,6 +183,8 @@ void ensure_event_insertable_impl(
         throw arcs::store::CommitRejectedError(
             "event rejected: duplicate event_id '" + event.event_id + "'");
     }
+
+    ensure_event_valid(event);
 }
 
 void ensure_bundle_locally_consistent_impl(const arcs::store::CommitBundle& bundle)

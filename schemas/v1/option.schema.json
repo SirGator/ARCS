@@ -51,6 +51,20 @@
     "safety_level": {
       "type": "string",
       "enum": ["low", "medium", "high"]
+    },
+    "policy_ref": {
+      "type": "object",
+      "required": ["artifact_id", "version_id"],
+      "properties": {
+        "artifact_id": { "type": "string" },
+        "version_id": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "request": { "type": "string" },
+    "required_scopes": {
+      "type": "array",
+      "items": { "type": "string" }
     }
   },
   "additionalProperties": false

@@ -17,11 +17,18 @@ std::vector<std::string> required_permissions_from_payload(const ArtifactVersion
         return out;
     }
 
-    if (!target.payload.contains("requires_permissions")) {
+    const char* field_name = nullptr;
+    if (target.payload.contains("requires_permissions")) {
+        field_name = "requires_permissions";
+    } else if (target.payload.contains("required_permissions")) {
+        field_name = "required_permissions";
+    }
+
+    if (field_name == nullptr) {
         return out;
     }
 
-    const auto& value = target.payload.at("requires_permissions");
+    const auto& value = target.payload.at(field_name);
     if (!value.is_array()) {
         return out;
     }

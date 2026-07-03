@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "$id": "arcs.decision.v1",
+  "type": "object",
+  "required": ["status", "reason", "verification_report"],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["blocked", "not_blocked"]
+    },
+    "reason": { "type": "string" },
+    "verification_report": {
+      "type": "object",
+      "required": ["artifact_id", "version_id", "status"],
+      "properties": {
+        "artifact_id": { "type": "string" },
+        "version_id": { "type": "string" },
+        "status": {
+          "type": "string",
+          "enum": ["pass", "fail", "unknown"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "approval_artifact_id": { "type": "string" },
+    "action_artifact_id": { "type": "string" },
+    "execution_result_artifact_id": { "type": "string" }
+  },
+  "additionalProperties": false
+}

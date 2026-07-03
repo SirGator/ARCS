@@ -44,6 +44,52 @@ const arcs::schema::SchemaRegistry& artifact_base_registry()
     return registry;
 }
 
+const arcs::schema::SchemaRegistry& artifact_payload_registry()
+{
+    static const auto registry = [] {
+        arcs::schema::SchemaRegistry registry;
+        const auto schemas_dir = std::filesystem::path(__FILE__).parent_path()
+            .parent_path().parent_path().parent_path()
+            / "schemas" / "v1";
+
+        for (const auto& entry : std::filesystem::directory_iterator(schemas_dir)) {
+            if (!entry.is_regular_file() || entry.path().extension() != ".json") {
+                continue;
+            }
+
+            const auto schema_entry = arcs::schema::SchemaLoader::load_from_file(entry.path());
+            if (!schema_entry.has_value() || !registry.register_schema(*schema_entry)) {
+                throw arcs::store::StoreError(
+                    "store schema gate misconfigured: payload schemas could not be loaded");
+            }
+        }
+
+        return registry;
+    }();
+
+    return registry;
+}
+
+const arcs::schema::SchemaRegistry& event_registry()
+{
+    static const auto registry = [] {
+        arcs::schema::SchemaRegistry registry;
+        const auto schema_path = std::filesystem::path(__FILE__).parent_path()
+            .parent_path().parent_path().parent_path()
+            / "schemas" / "v1" / "event.schema.json";
+
+        const auto schema_entry = arcs::schema::SchemaLoader::load_from_file(schema_path);
+        if (!schema_entry.has_value() || !registry.register_schema(*schema_entry)) {
+            throw arcs::store::StoreError(
+                "store schema gate misconfigured: event schema could not be loaded");
+        }
+
+        return registry;
+    }();
+
+    return registry;
+}
+
 void ensure_base_artifact_valid(const ArtifactVersion& version)
 {
     const nlohmann::json artifact_json = version;
@@ -54,6 +100,39 @@ void ensure_base_artifact_valid(const ArtifactVersion& version)
 
     if (!validation.valid) {
         std::string message = "artifact version rejected: base schema validation failed";
+        if (!validation.errors.empty()) {
+            message += " at " + validation.errors.front().path + ": " + validation.errors.front().message;
+        }
+        throw CommitRejectedError(message);
+    }
+}
+
+void ensure_payload_valid(const ArtifactVersion& version)
+{
+    const auto validation = arcs::schema::Validator::validate(
+        version.payload,
+        version.schema_id,
+        artifact_payload_registry());
+
+    if (!validation.valid) {
+        std::string message = "artifact version rejected: payload schema validation failed";
+        if (!validation.errors.empty()) {
+            message += " at " + validation.errors.front().path + ": " + validation.errors.front().message;
+        }
+        throw CommitRejectedError(message);
+    }
+}
+
+void ensure_event_valid(const Event& event)
+{
+    const nlohmann::json event_json = event;
+    const auto validation = arcs::schema::Validator::validate(
+        event_json,
+        "arcs.event.v1",
+        event_registry());
+
+    if (!validation.valid) {
+        std::string message = "event rejected: schema validation failed";
         if (!validation.errors.empty()) {
             message += " at " + validation.errors.front().path + ": " + validation.errors.front().message;
         }
@@ -274,6 +353,9 @@ void StoreSqlite::append_artifact(const ArtifactVersion& version)
         throw CommitRejectedError("artifact version rejected: version_id is empty");
     }
 
+    ensure_base_artifact_valid(version);
+    ensure_payload_valid(version);
+
     begin_immediate();
     try {
         // Check duplicate.
@@ -341,6 +423,8 @@ void StoreSqlite::append_event(const Event& event)
     if (event.event_type.empty()) {
         throw CommitRejectedError("event rejected: event_type is empty");
     }
+
+    ensure_event_valid(event);
 
     begin_immediate();
     try {
@@ -461,6 +545,9 @@ void StoreSqlite::commit(const CommitBundle& bundle)
         std::unordered_set<std::string> vids;
         std::unordered_set<std::string> eids;
         for (const auto& pv : bundle.versions) {
+            ensure_base_artifact_valid(pv.version);
+            ensure_payload_valid(pv.version);
+
             if (!vids.insert(pv.version.version_id).second) {
                 throw CommitRejectedError(
                     "commit rejected: duplicate version_id inside bundle '" +
@@ -468,6 +555,7 @@ void StoreSqlite::commit(const CommitBundle& bundle)
             }
         }
         for (const auto& e : bundle.events) {
+            ensure_event_valid(e);
             if (!eids.insert(e.event_id).second) {
                 throw CommitRejectedError(
                     "commit rejected: duplicate event_id inside bundle '" +

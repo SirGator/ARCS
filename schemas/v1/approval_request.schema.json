@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft-07/schema#",
-  "$id": "arcs.approval.v1",
+  "$id": "arcs.approval_request.v1",
   "type": "object",
-  "required": ["target_option", "policy_ref", "verification_ref", "request_ref", "action_ref", "decision", "reason", "actor", "timestamp", "expires_at", "approval_scope", "store_head_at_approval", "risk_summary"],
+  "required": ["target_option", "policy_ref", "verification_ref", "action_ref", "requested_scope", "requested_at", "store_head_at_request", "risk_summary"],
   "properties": {
     "target_option": {
       "type": "object",
@@ -31,15 +31,6 @@
       },
       "additionalProperties": false
     },
-    "request_ref": {
-      "type": "object",
-      "required": ["artifact_id", "version_id"],
-      "properties": {
-        "artifact_id": { "type": "string", "minLength": 1 },
-        "version_id": { "type": "string", "minLength": 1 }
-      },
-      "additionalProperties": false
-    },
     "action_ref": {
       "type": "object",
       "required": ["artifact_id", "version_id"],
@@ -49,27 +40,9 @@
       },
       "additionalProperties": false
     },
-    "decision": {
-      "type": "string",
-      "enum": ["approve", "reject", "modify", "revoke"]
-    },
-    "reason": { "type": "string", "minLength": 1 },
-    "actor": {
-      "type": "object",
-      "required": ["actor_type", "id"],
-      "properties": {
-        "actor_type": {
-          "type": "string",
-          "enum": ["human", "system", "model", "executor"]
-        },
-        "id": { "type": "string", "minLength": 1 }
-      },
-      "additionalProperties": false
-    },
-    "timestamp": { "type": "string", "format": "date-time" },
-    "expires_at": { "type": "string", "format": "date-time" },
-    "approval_scope": { "type": "string", "minLength": 1 },
-    "store_head_at_approval": { "type": "string", "minLength": 1 },
+    "requested_scope": { "type": "string", "minLength": 1 },
+    "requested_at": { "type": "string", "format": "date-time" },
+    "store_head_at_request": { "type": "string", "minLength": 1 },
     "risk_summary": { "type": "string", "minLength": 1 }
   },
   "additionalProperties": false

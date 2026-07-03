@@ -121,6 +121,21 @@ target_link_libraries(arcs_verification_engine_tests
 
 add_test(NAME arcs_verification_engine_tests COMMAND $<TARGET_FILE:arcs_verification_engine_tests>)
 
+add_executable(arcs_approval_verifier_tests
+    test_approval_verifier.cpp
+)
+
+target_link_libraries(arcs_approval_verifier_tests
+    PRIVATE
+        arcs_approval
+        arcs_store
+        arcs_verification
+        arcs_reducer
+        GTest::gtest_main
+)
+
+add_test(NAME arcs_approval_verifier_tests COMMAND $<TARGET_FILE:arcs_approval_verifier_tests>)
+
 add_executable(arcs_unknown_blocks_tests
     test_unknown_blocks.cpp
 )

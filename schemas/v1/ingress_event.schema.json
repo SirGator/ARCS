@@ -1,0 +1,22 @@
+{
+  "$id": "arcs.ingress_event.v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ARCS Ingress Event Artifact",
+  "type": "object",
+  "required": ["raw_text", "source_kind", "source_ref", "actor_id"],
+  "properties": {
+    "raw_text": {
+      "type": "string"
+    },
+    "source_kind": {
+      "type": "string"
+    },
+    "source_ref": {
+      "type": "string"
+    },
+    "actor_id": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false
+}

@@ -4,6 +4,7 @@
 #include <optional>
 #include <string>
 #include <utility>
+#include <cstdlib>
 
 #include "core/flow.hpp"
 #include "interpretation/config.hpp"
@@ -14,6 +15,19 @@ namespace {
 struct AppConfig {
     std::optional<std::string> interpret_api_url;
 };
+
+std::string trim(std::string value);
+
+bool env_flag_enabled(const char* name)
+{
+    const char* value = std::getenv(name);
+    if (value == nullptr) {
+        return false;
+    }
+
+    const std::string normalized = trim(value);
+    return normalized == "1" || normalized == "true" || normalized == "yes";
+}
 
 std::string trim(std::string value)
 {
@@ -77,22 +91,32 @@ std::optional<AppConfig> load_yaml_config(const std::filesystem::path& path)
 void print_usage()
 {
     std::cout << "Usage: arcs_app [options]\n"
-              << "  --config <file>                       Load YAML config\n";
+              << "  --config <file>                       Load YAML config\n"
+              << "  --demo-control                        Allow demo approval/permission flags\n";
 }
 
-std::optional<std::filesystem::path> parse_args(int argc, char* argv[], bool& show_help)
+struct ParsedArgs {
+    std::optional<std::filesystem::path> config_path;
+    bool demo_control{false};
+};
+
+ParsedArgs parse_args(int argc, char* argv[], bool& show_help)
 {
+    ParsedArgs parsed;
+
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
 
         if (arg == "--help" || arg == "-h") {
             show_help = true;
         } else if (arg == "--config" && i + 1 < argc) {
-            return std::filesystem::path(argv[++i]);
+            parsed.config_path = std::filesystem::path(argv[++i]);
+        } else if (arg == "--demo-control") {
+            parsed.demo_control = true;
         }
     }
 
-    return std::nullopt;
+    return parsed;
 }
 
 } // namespace
@@ -100,7 +124,7 @@ std::optional<std::filesystem::path> parse_args(int argc, char* argv[], bool& sh
 int main(int argc, char* argv[])
 {
     bool show_help = false;
-    const auto config_path = parse_args(argc, argv, show_help);
+    const auto args = parse_args(argc, argv, show_help);
 
     if (show_help) {
         print_usage();
@@ -108,8 +132,8 @@ int main(int argc, char* argv[])
     }
 
     std::optional<AppConfig> loaded_config;
-    if (config_path.has_value()) {
-        loaded_config = load_yaml_config(*config_path);
+    if (args.config_path.has_value()) {
+        loaded_config = load_yaml_config(*args.config_path);
     } else if (std::filesystem::exists("config/arcs.yaml")) {
         loaded_config = load_yaml_config("config/arcs.yaml");
     } else if (std::filesystem::exists("arcs.yaml")) {
@@ -117,10 +141,12 @@ int main(int argc, char* argv[])
     }
 
     const AppConfig config = loaded_config.value_or(AppConfig{});
+    const bool demo_control_enabled = args.demo_control || env_flag_enabled("ARCS_DEMO_MODE");
 
     std::cout << "ARCS CLI\n";
     std::cout << "Interpret API: " << (config.interpret_api_url.value_or("<unset>")) << '\n';
-    std::cout << "Enter input like: approval=yes permission=yes\n";
+    std::cout << "Demo controls: " << (demo_control_enabled ? "enabled" : "disabled") << '\n';
+    std::cout << "Enter input\n";
     std::cout << "> " << std::flush;
 
     std::string line;
@@ -130,7 +156,11 @@ int main(int argc, char* argv[])
         .interpret_api_url = config.interpret_api_url,
     };
 
-    const auto output = arcs::core::run_text_flow(line, &interpretation_config);
+    const arcs::core::FlowOptions flow_options{
+        .enable_demo_controls = demo_control_enabled,
+    };
+
+    const auto output = arcs::core::run_text_flow(line, &interpretation_config, flow_options);
 
     arcs::execution::CliTextOutputAdapter output_adapter;
     output_adapter.write(std::cout, output);

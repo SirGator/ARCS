@@ -58,6 +58,16 @@ ArtifactVersion make_artifact(
     a.payload = nlohmann::json::object();
     if (type == "task") {
         a.payload = nlohmann::json{{"title", "Test task"}};
+    } else if (type == "option") {
+        a.payload = nlohmann::json{
+            {"title", "Test option"},
+            {"human_summary", "Summary"},
+            {"steps", nlohmann::json::array({
+                nlohmann::json{{"kind", "emit_report"}, {"params", nlohmann::json{{"format", "json"}}}}
+            })},
+            {"requires_permissions", nlohmann::json::array()},
+            {"safety_level", "low"},
+        };
     }
     a.created_by.actor_type = "system";
     a.created_by.id = "test";
@@ -77,9 +87,11 @@ Event make_head_advanced_event(
     Event e{};
     e.event_id = event_id;
     e.event_type = "head_advanced";
+    e.ts = "2026-06-01T12:00:00Z";
     e.stream_key = stream_key;
     e.actor.actor_type = "system";
     e.actor.id = "test";
+    e.payload = nlohmann::json::object();
 
     EventRef ref{};
     ref.artifact_id = artifact_id;
@@ -97,6 +109,20 @@ PendingVersion make_pending(
     p.version = version;
     p.expected_head_version_id = expected_head;
     return p;
+}
+
+TEST_F(StoreSqliteTest, CommitRejectsInvalidEventSchema)
+{
+    StoreSqlite store(db_path_);
+
+    ArtifactVersion v1 = make_artifact("a_t_1", "v_t_1", "task", "s_1", 1);
+    Event e1 = make_head_advanced_event("e_1", "a_t_1", "v_t_1", "s_1");
+    e1.ts.clear();
+    CommitBundle b{};
+    b.versions.push_back(make_pending(v1));
+    b.events.push_back(e1);
+
+    EXPECT_THROW(store.commit(b), CommitRejectedError);
 }
 
 TEST_F(StoreSqliteTest, OpenCreatesSchema)
@@ -228,6 +254,34 @@ TEST_F(StoreSqliteTest, CommitRejectsMissingSchemaId)
     EXPECT_THROW(store.commit(b), CommitRejectedError);
 }
 
+TEST_F(StoreSqliteTest, CommitRejectsUnknownSchemaId)
+{
+    StoreSqlite store(db_path_);
+
+    ArtifactVersion v1 = make_artifact("a_t_1", "v_t_1", "task", "s_1", 1);
+    v1.schema_id = "arcs.unknown.v1";
+    Event e1 = make_head_advanced_event("e_1", "a_t_1", "v_t_1", "s_1");
+    CommitBundle b{};
+    b.versions.push_back(make_pending(v1));
+    b.events.push_back(e1);
+
+    EXPECT_THROW(store.commit(b), CommitRejectedError);
+}
+
+TEST_F(StoreSqliteTest, CommitRejectsInvalidPayloadForSchema)
+{
+    StoreSqlite store(db_path_);
+
+    ArtifactVersion v1 = make_artifact("a_t_1", "v_t_1", "task", "s_1", 1);
+    v1.payload = nlohmann::json{{"wrong", true}};
+    Event e1 = make_head_advanced_event("e_1", "a_t_1", "v_t_1", "s_1");
+    CommitBundle b{};
+    b.versions.push_back(make_pending(v1));
+    b.events.push_back(e1);
+
+    EXPECT_THROW(store.commit(b), CommitRejectedError);
+}
+
 TEST_F(StoreSqliteTest, CommitRejectsEmptyStreamKey)
 {
     StoreSqlite store(db_path_);
@@ -347,8 +401,8 @@ TEST_F(StoreSqliteTest, NonHeadAdvancedEventsDoNotChangeHead)
     // A second event that is NOT head_advanced must not move the head.
     ArtifactVersion v2 = make_artifact("a_t_2", "v_t_2", "task", "s_2", 1);
     Event e2 = make_head_advanced_event("e_2", "a_t_2", "v_t_2", "s_2");
-    // Override to a non-head_advanced event_type so head_tracker ignores it.
-    e2.event_type = "task_created";
+    // Override to a non-head_advanced but schema-valid event_type so head_tracker ignores it.
+    e2.event_type = "artifact_committed";
 
     CommitBundle b2{};
     b2.versions.push_back(make_pending(v2));

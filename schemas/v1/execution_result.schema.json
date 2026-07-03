@@ -2,14 +2,35 @@
   "$schema": "https://json-schema.org/draft-07/schema#",
   "$id": "arcs.execution_result.v1",
   "type": "object",
-  "required": ["action_id", "status"],
+  "required": ["action_ref", "status"],
   "properties": {
-    "action_id": { "type": "string", "minLength": 1 },
+    "action_ref": {
+      "type": "object",
+      "required": ["artifact_id", "version_id"],
+      "properties": {
+        "artifact_id": { "type": "string" },
+        "version_id": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
     "status": {
       "type": "string",
       "enum": ["success", "fail", "timeout", "cancelled"]
     },
-    "output": { "type": "string" }
+    "exit_code": { "type": "integer" },
+    "error_message": { "type": "string" },
+    "logs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["message", "timestamp"],
+        "properties": {
+          "message": { "type": "string" },
+          "timestamp": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    }
   },
   "additionalProperties": false
 }

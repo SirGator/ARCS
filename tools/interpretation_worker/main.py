@@ -139,7 +139,10 @@ INTERPRETATION_PROPOSAL_SCHEMA: dict[str, Any] = {
         "next_step",
     ],
     "properties": {
-        "status": {"type": "string"},
+        "status": {
+            "type": "string",
+            "enum": ["ok", "blocked", "needs_clarification"],
+        },
         "intent": {
             "type": "object",
             "required": ["name", "category", "description"],
@@ -150,13 +153,20 @@ INTERPRETATION_PROPOSAL_SCHEMA: dict[str, Any] = {
             },
             "additionalProperties": True,
         },
-        "confidence": {"type": "number"},
+        "confidence": {
+            "type": "number",
+            "minimum": 0.0,
+            "maximum": 1.0,
+        },
         "slots": {"type": "object"},
         "missing_required_fields": {
             "type": "array",
             "items": {"type": "string"},
         },
-        "next_step": {"type": "string"},
+        "next_step": {
+            "type": "string",
+            "enum": ["execute", "ask", "block"],
+        },
     },
     "additionalProperties": True,
 }

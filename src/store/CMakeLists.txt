@@ -27,13 +27,22 @@ if (SQLite3_FOUND)
         PUBLIC
             ${CMAKE_CURRENT_SOURCE_DIR}/include
     )
+    set(ARCS_SQLITE_TARGET "")
+    if (TARGET SQLite3::SQLite3)
+        set(ARCS_SQLITE_TARGET SQLite3::SQLite3)
+    elseif(TARGET SQLite::SQLite3)
+        set(ARCS_SQLITE_TARGET SQLite::SQLite3)
+    else()
+        message(FATAL_ERROR "SQLite was found but no supported imported target exists")
+    endif()
+
     target_link_libraries(arcs_store_sqlite
         PUBLIC
             arcs_store
             arcs_artifact
             arcs_event
             arcs_schema
-            SQLite3::SQLite3
+            ${ARCS_SQLITE_TARGET}
     )
     set(ARCS_HAS_STORE_SQLITE TRUE CACHE BOOL "Build ARCS StoreSQLite" FORCE)
 else()
