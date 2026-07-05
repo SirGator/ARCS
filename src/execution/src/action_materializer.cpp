@@ -1,3 +1,11 @@
+/**
+ * @file action_materializer.cpp
+ * @brief Implements ActionMaterializer: validates that an option artifact
+ *        is correctly bound to a policy artifact, extracts the option's
+ *        steps, checks each step against the policy's allowed
+ *        capabilities, and turns each into a deterministic action
+ *        artifact ready for execution.
+ */
 #include <nlohmann/json.hpp>
 #include <cstdint>
 #include <iomanip>
@@ -16,6 +24,12 @@ namespace arcs::execution {
 
 namespace {
 
+/**
+ * @brief Check whether a JSON array value contains a given string.
+ * @param value JSON value expected to be an array (returns false otherwise).
+ * @param needle String to search for among the array's string elements.
+ * @return True if @p value is an array containing @p needle.
+ */
 bool json_array_contains_string(const nlohmann::json& value, const std::string& needle)
 {
     if (!value.is_array()) {
@@ -31,6 +45,11 @@ bool json_array_contains_string(const nlohmann::json& value, const std::string& 
     return false;
 }
 
+/**
+ * @brief Compute the FNV-1a hash of a string and render it as hex.
+ * @param value Bytes to hash.
+ * @return Lowercase hexadecimal representation of the 64-bit FNV-1a hash.
+ */
 std::string fnv1a_hex(std::string_view value)
 {
     std::uint64_t hash = 14695981039346656037ull;
@@ -44,6 +63,15 @@ std::string fnv1a_hex(std::string_view value)
     return out.str();
 }
 
+/**
+ * @brief Derive a stable action id for a step from a fingerprint of the
+ *        option, policy, and step contents, so repeated materialization
+ *        of the same inputs yields the same action id.
+ * @param step Step being materialized into an action.
+ * @param option Option artifact the step originates from.
+ * @param policy Policy artifact bound to the option.
+ * @return A "act_"-prefixed deterministic action id.
+ */
 std::string deterministic_action_key(const Step& step,
                                      const OptionArtifact& option,
                                      const PolicyArtifact& policy)
@@ -68,17 +96,38 @@ std::string deterministic_action_key(const Step& step,
     return std::string{"act_"} + fnv1a_hex(fingerprint.dump());
 }
 
+/**
+ * @brief Build the artifact id for an action artifact from its action id.
+ * @param action_id Deterministic action id (see deterministic_action_key).
+ * @return An "a_"-prefixed artifact id.
+ */
 std::string deterministic_action_artifact_id(const std::string& action_id)
 {
     return "a_" + action_id;
 }
 
+/**
+ * @brief Build the version id for an action artifact, tying it to the
+ *        policy version it was materialized under.
+ * @param action_id Deterministic action id (see deterministic_action_key).
+ * @param policy Policy artifact the action was materialized against.
+ * @return A "v_"-prefixed version id combining the action id and policy version.
+ */
 std::string deterministic_action_version_id(const std::string& action_id,
                                             const PolicyArtifact& policy)
 {
     return "v_" + action_id + "_" + policy.version_id;
 }
 
+/**
+ * @brief Verify that an option artifact declares a policy_ref matching
+ *        the given policy artifact, throwing on any mismatch or malformed
+ *        data.
+ * @param option Option artifact expected to reference @p policy.
+ * @param policy Policy artifact the option should be bound to.
+ * @throws std::runtime_error if policy_ref is missing, malformed, or
+ *         does not match @p policy (policy drift).
+ */
 void validate_policy_binding(const OptionArtifact& option, const PolicyArtifact& policy)
 {
     if (!option.payload.is_object() || !option.payload.contains("policy_ref")) {
@@ -101,6 +150,13 @@ void validate_policy_binding(const OptionArtifact& option, const PolicyArtifact&
     }
 }
 
+/**
+ * @brief Verify that a policy artifact grants the "exec:report_emit"
+ *        capability.
+ * @param policy Policy artifact to check.
+ * @throws std::runtime_error if capabilities are missing or do not
+ *         include "exec:report_emit".
+ */
 void validate_policy_allows_report_emit(const PolicyArtifact& policy)
 {
     if (!policy.payload.is_object() || !policy.payload.contains("capabilities")) {
@@ -113,6 +169,15 @@ void validate_policy_allows_report_emit(const PolicyArtifact& policy)
     }
 }
 
+/**
+ * @brief Parse the "steps" array out of an option artifact's payload into
+ *        typed Step values. Currently only "emit_report" steps are
+ *        supported; any other kind is rejected.
+ * @param option Option artifact whose payload may contain a "steps" array.
+ * @return The parsed steps, or an empty vector if the option has no steps.
+ * @throws std::runtime_error if steps is present but not an array, if a
+ *         step is missing its "kind", or if a step's kind is unsupported.
+ */
 std::vector<Step> extract_steps(const OptionArtifact& option)
 {
     std::vector<Step> steps;
@@ -159,6 +224,14 @@ std::vector<Step> extract_steps(const OptionArtifact& option)
 
 namespace {
 
+/**
+ * @brief Validate that a step is of a supported kind and permitted by the
+ *        given policy.
+ * @param step Step to validate.
+ * @param policy Policy artifact the step must be permitted under.
+ * @throws std::runtime_error if the step kind is unsupported or the
+ *         policy does not grant the required capability.
+ */
 void validate_step_against_policy(const Step& step, const PolicyArtifact& policy)
 {
     if (!std::holds_alternative<EmitReportStep>(step)) {
@@ -168,6 +241,16 @@ void validate_step_against_policy(const Step& step, const PolicyArtifact& policy
     validate_policy_allows_report_emit(policy);
 }
 
+/**
+ * @brief Convert a validated step into a fully-populated action-candidate
+ *        artifact, filling in its deterministic ids, payload, and
+ *        provenance.
+ * @param step Step to convert; currently only EmitReportStep is supported.
+ * @param option Option artifact the step originates from.
+ * @param policy Policy artifact the option is bound to.
+ * @return The resulting action-candidate artifact.
+ * @throws std::runtime_error if the step kind is unsupported.
+ */
 ActionArtifact step_to_action(const Step& step,
                               const OptionArtifact& option,
                               const PolicyArtifact& policy)
@@ -178,13 +261,13 @@ ActionArtifact step_to_action(const Step& step,
         const auto& s = std::get<EmitReportStep>(step);
 
         ActionArtifact action = arcs::artifact::factory::make_base_artifact(
-            "action",
-            "arcs.action.report_emit.v1",
+            "action_candidate",
+            "arcs.action_candidate.report_emit.v1",
             option.stream_key,
             "system",
             "action_materializer",
             "internal",
-            "option_to_action",
+            "option_to_action_candidate",
             "high",
             "system");
 
@@ -209,7 +292,7 @@ ActionArtifact step_to_action(const Step& step,
         };
         action.provenance.parents = {option.artifact_id};
         action.provenance.rules_applied = {"materialize_emit_report"};
-        action.provenance.transform = "materialize_action";
+        action.provenance.transform = "materialize_action_candidate";
 
         return action;
     }
@@ -219,6 +302,17 @@ ActionArtifact step_to_action(const Step& step,
 
 } // namespace
 
+/**
+ * @brief Materialize an option's steps into action artifacts: validates
+ *        the option-policy binding, extracts the steps, validates each
+ *        against the policy, and converts each into an action artifact.
+ * @param option Option artifact whose steps are to be materialized.
+ * @param policy Policy artifact the option must be bound to and that
+ *               constrains which actions are permitted.
+ * @return The list of action artifacts derived from the option.
+ * @throws std::runtime_error on policy binding/capability violations or
+ *         malformed/unsupported steps.
+ */
 std::vector<ActionArtifact> ActionMaterializer::materialize(
     const OptionArtifact& option,
     const PolicyArtifact& policy) const

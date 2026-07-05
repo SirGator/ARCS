@@ -1,3 +1,8 @@
+/**
+ * @file permission_grant.cpp
+ * @brief Implements JSON (de)serialization for PermissionGrantPayload,
+ * declared in policy/permission_grant.hpp.
+ */
 #include "policy/permission_grant.hpp"
 
 #include <stdexcept>
@@ -7,6 +12,11 @@ namespace arcs::policy {
 
 namespace {
 
+/**
+ * @brief Throws std::invalid_argument if the given string is empty.
+ * @param value The string value to check.
+ * @param field Name of the field, used in the exception message.
+ */
 void require_not_empty(const std::string& value, const char* field) {
     if (value.empty()) {
         throw std::invalid_argument(std::string(field) + " must not be empty");

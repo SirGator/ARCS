@@ -13,11 +13,25 @@
 #include "execution/execution_result.hpp"
 #include "execution/idempotency.hpp"
 
+/**
+ * @file report_emit_executor.cpp
+ * @brief Implements ReportEmitExecutor::execute: runs final guard checks
+ *        (verification, approval validity/expiry, permissions), consults
+ *        the idempotency store for replay, and otherwise performs a
+ *        deterministic report-emission (MVP: no shell/network access).
+ */
+
 namespace arcs::execution {
 
 namespace {
 
 // Hilfsfunktion für Audit-Logs
+/**
+ * @brief Build an ExecutionLog entry.
+ * @param message Log message text.
+ * @param timestamp Optional timestamp string (defaults to empty).
+ * @return The constructed ExecutionLog.
+ */
 ExecutionLog make_log(std::string message, std::string timestamp = "") {
   return ExecutionLog{
       .message = std::move(message),
@@ -25,6 +39,12 @@ ExecutionLog make_log(std::string message, std::string timestamp = "") {
   };
 }
 
+/**
+ * @brief Check whether a required permission is present among granted ones.
+ * @param granted_permissions Permissions available in the execution context.
+ * @param required_permission Permission to look for.
+ * @return True if @p required_permission is present in @p granted_permissions.
+ */
 bool has_permission(
     const std::vector<std::string>& granted_permissions,
     const std::string& required_permission) {
@@ -36,6 +56,10 @@ bool has_permission(
     return false;
 }
 
+/**
+ * @brief Get the current UTC time formatted as an ISO-8601 timestamp.
+ * @return Timestamp string in "%Y-%m-%dT%H:%M:%SZ" format.
+ */
 std::string utc_now()
 {
   const auto now = std::chrono::system_clock::now();
@@ -53,6 +77,11 @@ std::string utc_now()
   return out.str();
 }
 
+/**
+ * @brief Check whether the context's approval has passed its expiry time.
+ * @param ctx Execution context whose approval_expires_at is compared to now.
+ * @return True if approval_expires_at is set and is in the past.
+ */
 bool approval_is_expired(const ExecutionContext& ctx)
 {
   return !ctx.approval_expires_at.empty() && utc_now() > ctx.approval_expires_at;
@@ -60,11 +89,28 @@ bool approval_is_expired(const ExecutionContext& ctx)
 
 } // namespace
 
+/** @brief Constructs the executor, retaining a reference to the idempotency store. */
 ReportEmitExecutor::ReportEmitExecutor(IIdempotencyStore& idempotency_store)
     : idempotency_store_(idempotency_store)
 {
 }
 
+/**
+ * @brief Executes a "report_emit" action after passing all final guards
+ *        (verification passed, approval valid and unexpired, required
+ *        permissions granted). Replays a previously stored result if the
+ *        action id is already known to the idempotency store; otherwise
+ *        performs the (deterministic, side-effect-free) report emission
+ *        and records the result for future replay.
+ * @param action Action to execute; payload.type must equal
+ *               handles_action_type() ("report_emit").
+ * @param ctx Execution context providing verification/approval/permission
+ *            state.
+ * @return Success result with audit logs on completion; a Cancelled
+ *         result if blocked by a guard; a Fail result on type mismatch or
+ *         unexpected exception; or the replayed prior result if the
+ *         action was already executed.
+ */
 ExecutionResult ReportEmitExecutor::execute(
     const Action& action,
     const ExecutionContext& ctx)
@@ -171,6 +217,7 @@ ExecutionResult ReportEmitExecutor::execute(
     }
 }
 
+/** @brief Returns "report_emit", the action type this executor handles. */
 std::string ReportEmitExecutor::handles_action_type() const
 {
     return "report_emit";

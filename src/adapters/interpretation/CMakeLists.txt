@@ -1,5 +1,6 @@
 add_library(arcs_interpretation
     src/interpretation_api.cpp
+    src/worker_adapter.cpp
     src/worker_client.cpp
 )
 
@@ -10,5 +11,6 @@ target_include_directories(arcs_interpretation
 
 target_link_libraries(arcs_interpretation
     PUBLIC
+        arcs_adapters
         nlohmann_json::nlohmann_json
 )

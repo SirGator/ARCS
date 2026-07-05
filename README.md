@@ -110,8 +110,13 @@ Keep these paths out of deliverables:
 For a clean repository export, prefer:
 
 ```bash
-git archive --format=zip -o ARCS-clean.zip HEAD
+./tools/export_clean.sh
 ```
+
+This uses `git archive` and now refuses to run on a dirty working tree.
+Generated local state such as `build/`, `.venv/`, `artifacts/`,
+`__pycache__/`, and `arcs.log` does not belong in the exported handoff
+snapshot.
 
 ## Documentation Workflow
 
@@ -130,6 +135,8 @@ For day-to-day development, start with these files:
 9. `spec and paper/Spec/interface/interface & Contracts.md`
 
 Use `spec and paper/Spec/problem.md` as the current gap list between the intended architecture and the present MVP implementation.
+Put temporary review notes or one-off planning files under `docs/planning/`
+instead of scattering them across the project root.
 
 Typical workflow:
 
@@ -159,9 +166,10 @@ The minimal ARCS V1 flow is:
 ```text
 ingress_event
   -> task
-  -> task (optional)
   -> option
   -> verification_report
+  -> action_candidate
+  -> approval_request
   -> approval
   -> action
   -> execution_result
@@ -296,7 +304,7 @@ ARCS is currently in active development.
 The current goal is a complete V1 MVP flow:
 
 ```text
-input -> ingress_event -> task -> option -> verification -> approval -> action -> execution_result
+input -> ingress_event -> task -> option -> verification_report -> action_candidate -> approval_request -> approval -> action -> execution_result
 ```
 
 ## License

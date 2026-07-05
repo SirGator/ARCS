@@ -1,3 +1,9 @@
+/**
+ * @file validator.cpp
+ * @brief Implements Validator::validate using the valijson library to
+ *        check a JSON document against a Draft-7 JSON Schema.
+ */
+
 #include "schema/validator.hpp"
 
 #include <valijson/adapters/nlohmann_json_adapter.hpp>

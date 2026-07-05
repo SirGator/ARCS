@@ -1,3 +1,9 @@
+/**
+ * @file ingress_normalizer.cpp
+ * @brief Implements DefaultIngressNormalizer, which converts a raw
+ *        IngressEvent into a base ArtifactVersion of type "ingress_event",
+ *        filling in defaults for missing metadata.
+ */
 #include "ingress/ingress_normalizer.hpp"
 
 #include <chrono>
@@ -11,6 +17,10 @@ namespace arcs::ingress {
 
 namespace {
 
+/**
+ * @brief Returns the current UTC time formatted as an ISO-8601 timestamp.
+ * @return The formatted UTC timestamp string.
+ */
 std::string utc_now()
 {
     const auto now = std::chrono::system_clock::now();
@@ -24,6 +34,11 @@ std::string utc_now()
 
 } // namespace
 
+/**
+ * @brief Constructs a normalizer with fallback defaults.
+ * @param default_stream_key Stream key to use when the raw event's is empty.
+ * @param default_actor_type Actor type to use when the raw event's is empty.
+ */
 DefaultIngressNormalizer::DefaultIngressNormalizer(
     const std::string& default_stream_key,
     const std::string& default_actor_type)
@@ -31,6 +46,16 @@ DefaultIngressNormalizer::DefaultIngressNormalizer(
       default_actor_type_(default_actor_type)
 {}
 
+/**
+ * @brief Converts a raw ingress event into an "ingress_event" artifact.
+ *        Rejects the event as EmptyInput if raw_payload is empty;
+ *        otherwise fills in defaults for missing stream key/actor
+ *        metadata, builds the base artifact via the artifact factory,
+ *        attaches the raw payload fields, and records provenance.
+ * @param raw The raw event to normalize.
+ * @return The normalization result: EmptyInput with a rejection reason,
+ *         or Ok with the populated artifact.
+ */
 NormalizedIngress DefaultIngressNormalizer::normalize(const IngressEvent& raw)
 {
     NormalizedIngress result;

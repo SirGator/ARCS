@@ -1,3 +1,10 @@
+/**
+ * @file approval_gate.cpp
+ * @brief Implements ApprovalGate::submit, which turns an ApprovalPayload
+ *        into a signed "approval" artifact carrying links to the artifacts
+ *        it approves/rejects/modifies/revokes.
+ */
+
 #include "approval.hpp"
 #include "artifact/artifact.hpp"
 #include "artifact/factory.hpp"
@@ -7,6 +14,12 @@ namespace arcs::approval {
 
 namespace {
 
+/**
+ * @brief Converts an ApprovalDecision enum value to its lowercase string
+ *        representation used in the artifact payload.
+ * @param decision The decision to convert.
+ * @return The lowercase decision name, or "unknown" for an unrecognized value.
+ */
 std::string to_string(ApprovalDecision decision)
 {
     switch (decision) {
@@ -25,6 +38,13 @@ std::string to_string(ApprovalDecision decision)
 
 } // namespace
 
+/**
+ * @brief Builds an "approval" artifact from the given decision payload,
+ *        recording the decision, actor, timing, and links to every
+ *        referenced artifact in the payload and provenance.
+ * @param in The approval payload describing the decision to record.
+ * @return The resulting approval artifact.
+ */
 ApprovalArtifact ApprovalGate::submit(const ApprovalPayload& in)
 {
     ApprovalArtifact a = arcs::artifact::factory::make_base_artifact(
@@ -55,9 +75,9 @@ ApprovalArtifact ApprovalGate::submit(const ApprovalPayload& in)
             {"artifact_id", in.request_ref.artifact_id},
             {"version_id", in.request_ref.version_id}
         }},
-        {"action_ref", {
-            {"artifact_id", in.action_ref.artifact_id},
-            {"version_id", in.action_ref.version_id}
+        {"action_candidate_ref", {
+            {"artifact_id", in.action_candidate_ref.artifact_id},
+            {"version_id", in.action_candidate_ref.version_id}
         }},
         {"decision", to_string(in.decision)},
         {"reason", in.reason},
@@ -76,7 +96,7 @@ ApprovalArtifact ApprovalGate::submit(const ApprovalPayload& in)
         in.policy_ref.artifact_id,
         in.verification_ref.artifact_id,
         in.request_ref.artifact_id,
-        in.action_ref.artifact_id,
+        in.action_candidate_ref.artifact_id,
     };
     a.provenance.rules_applied = {"approval_gate"};
     a.provenance.transform = "submit_approval";

@@ -15,10 +15,25 @@
 
 #include "store/commit.hpp"
 
+/**
+ * @file policy_update_executor.cpp
+ * @brief Implements PolicyUpdateExecutor::execute, which builds a new
+ *        policy artifact version from an action's parameters, records a
+ *        corresponding "artifact_committed" event, and commits both to
+ *        the artifact store.
+ */
+
 namespace arcs::execution {
 
 namespace {
 
+/**
+ * @brief Fetch a required string field from a JSON object.
+ * @param j JSON object expected to contain @p key as a string.
+ * @param key Name of the field to read.
+ * @return The string value at @p key.
+ * @throws std::invalid_argument if @p key is missing or not a string.
+ */
 std::string require_string(const nlohmann::json& j, const char* key)
 {
     if (!j.contains(key) || !j.at(key).is_string()) {
@@ -30,11 +45,25 @@ std::string require_string(const nlohmann::json& j, const char* key)
 
 } // namespace
 
+/** @brief Constructs the executor, retaining a reference to the target store. */
 PolicyUpdateExecutor::PolicyUpdateExecutor(arcs::store::IStore& store)
     : store_(store)
 {
 }
 
+/**
+ * @brief Applies a "policy_update" action: validates its type and
+ *        parameters, constructs a new policy artifact version and a
+ *        matching "artifact_committed" event, and commits both as a
+ *        single bundle to the store.
+ * @param action Action to execute; payload.type must equal
+ *               handles_action_type() ("policy_update") and must contain
+ *               params.new_policy, params.policy_artifact_id,
+ *               params.policy_version_id, and params.event_id.
+ * @param ctx Execution context (unused by this executor).
+ * @return A success ExecutionResult once the commit succeeds, or a
+ *         failure result carrying the validation/commit error message.
+ */
 ExecutionResult PolicyUpdateExecutor::execute(
     const Action& action,
     const ExecutionContext& ctx
@@ -114,6 +143,7 @@ ExecutionResult PolicyUpdateExecutor::execute(
     }
 }
 
+/** @brief Returns "policy_update", the action type this executor handles. */
 std::string PolicyUpdateExecutor::handles_action_type() const
 {
     return "policy_update";

@@ -1,3 +1,11 @@
+/**
+ * @file worker_client.cpp
+ * @brief Implements WorkerInterpretationClient: builds a JSON request,
+ *        POSTs it to the configured worker URL via a shelled-out curl
+ *        invocation, and parses the JSON response back into an
+ *        InterpretationResponse.
+ */
+
 #include "interpretation/worker_client.hpp"
 
 #include <array>
@@ -18,7 +26,12 @@ namespace arcs::interpretation {
 
 namespace {
 
-// Quotes fuer eine Shell sicher einpacken, damit curl-Parameter nicht zerlegt werden.
+/**
+ * @brief Single-quotes a value for safe inclusion in a shell command line,
+ *        so curl arguments aren't split or reinterpreted by the shell.
+ * @param value The raw string to escape.
+ * @return The shell-quoted string, including surrounding single quotes.
+ */
 std::string shell_escape(std::string_view value)
 {
     std::string escaped;
@@ -35,10 +48,17 @@ std::string shell_escape(std::string_view value)
     return escaped;
 }
 
+/**
+ * @brief Writes the request body to a uniquely named temp file, since curl
+ *        is fed the body via --data-binary @file rather than inline.
+ * @param body The JSON request body to write.
+ * @return The path to the temp file, or std::nullopt if it could not be
+ *         created or written.
+ */
 std::optional<std::string> write_temp_json(const std::string& body)
 {
     char path_template[] = "/tmp/arcs-interpretation-XXXXXX";
-    // Temporaere Datei, weil curl hier per --data-binary@file gefuettert wird.
+    // Temporary file, because curl is fed here via --data-binary @file.
     const int fd = mkstemp(path_template);
     if (fd < 0) {
         return std::nullopt;
@@ -57,13 +77,23 @@ std::optional<std::string> write_temp_json(const std::string& body)
     return std::string(path_template);
 }
 
+/**
+ * @brief Outcome of a curl-backed HTTP POST invocation.
+ */
 struct CurlResult {
     bool ok{false};
     std::string stdout_text;
     std::string error;
 };
 
-// Fuehrt den HTTP-POST ueber curl aus und sammelt die JSON-Antwort ein.
+/**
+ * @brief Performs an HTTP POST via a shelled-out curl invocation and
+ *        collects the JSON response.
+ * @param url The target URL to POST to.
+ * @param body The JSON request body to send.
+ * @return The curl outcome, including stdout on success or an error message
+ *         on failure.
+ */
 CurlResult run_curl_post(const std::string& url, const std::string& body)
 {
     CurlResult result;
@@ -100,12 +130,22 @@ CurlResult run_curl_post(const std::string& url, const std::string& body)
     return result;
 }
 
+/**
+ * @brief Parses a raw HTTP response body as JSON.
+ * @param body The raw response body text.
+ * @return The parsed JSON value.
+ * @throws nlohmann::json::parse_error if the body is not valid JSON.
+ */
 nlohmann::json response_to_json(const std::string& body)
 {
     return nlohmann::json::parse(body);
 }
 
-// Baut eine standardisierte Fehlerantwort fuer den Aufrufer.
+/**
+ * @brief Builds a standardized failure response for the caller.
+ * @param error The error message to attach to the response.
+ * @return An InterpretationResponse with ok=false and the given error.
+ */
 InterpretationResponse make_error(std::string error)
 {
     InterpretationResponse response;
@@ -114,7 +154,12 @@ InterpretationResponse make_error(std::string error)
     return response;
 }
 
-// Mappt die rohe Worker-Antwort auf das ARCS-Response-Objekt.
+/**
+ * @brief Maps the raw worker response into the ARCS response object.
+ * @param curl_result The outcome of the HTTP call to the worker.
+ * @return The structured interpretation response, or an error response if
+ *         the call failed or the body could not be parsed.
+ */
 InterpretationResponse parse_worker_response(const CurlResult& curl_result)
 {
     if (!curl_result.ok) {
@@ -157,8 +202,17 @@ WorkerInterpretationClient::WorkerInterpretationClient(InterpretationApiConfig c
 {
 }
 
-// Ein Request enthaelt Text, Schema und Kontext.
-// Der Worker soll daraus direkt ein Proposal erzeugen, ohne weitere ARCS-Rueckfragen.
+/**
+ * @brief Sends a request (text, schema, and context) to the worker over
+ *        HTTP and returns its parsed response.
+ *
+ * The worker is expected to produce a proposal directly from this data,
+ * without further round-trips back to ARCS.
+ *
+ * @param request The interpretation request to send.
+ * @return The structured interpretation response, or an error response if
+ *         the URL is not configured or the call fails.
+ */
 InterpretationResponse WorkerInterpretationClient::interpret(const InterpretationRequest& request)
 {
     const nlohmann::json body{

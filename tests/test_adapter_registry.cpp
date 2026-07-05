@@ -2,13 +2,14 @@
 
 #include <memory>
 
-#include "execution/adapter_executor.hpp"
-#include "execution/adapter_registry.hpp"
+#include "execution/action_dispatcher.hpp"
+#include "execution/action_handler_registry.hpp"
+#include "execution/executor.hpp"
 #include "execution/execution_result.hpp"
 
 namespace {
 
-class DummyAdapter final : public arcs::execution::IExecutionAdapter {
+class DummyHandler final : public arcs::execution::IExecutor {
 public:
     std::string handles_action_type() const override
     {
@@ -23,12 +24,12 @@ public:
     }
 };
 
-TEST(AdapterRegistryTest, RoutesToRegisteredAdapter)
+TEST(ActionHandlerRegistryTest, RoutesToRegisteredHandler)
 {
-    arcs::execution::AdapterRegistry registry;
-    ASSERT_TRUE(registry.register_adapter(std::make_shared<DummyAdapter>()));
+    arcs::execution::ActionHandlerRegistry registry;
+    ASSERT_TRUE(registry.register_handler(std::make_shared<DummyHandler>()));
 
-    arcs::execution::AdapterExecutor executor(registry);
+    arcs::execution::ActionDispatcher dispatcher(registry);
 
     arcs::execution::Action action{};
     action.artifact_id = "a_1";
@@ -36,17 +37,17 @@ TEST(AdapterRegistryTest, RoutesToRegisteredAdapter)
     action.payload.type = "dummy";
 
     arcs::execution::ExecutionContext ctx{};
-    const auto result = executor.execute(action, ctx);
+    const auto result = dispatcher.execute(action, ctx);
 
     EXPECT_EQ(result.status, arcs::execution::ExecutionStatus::Success);
     EXPECT_EQ(result.action_ref.artifact_id, "a_1");
     EXPECT_EQ(result.action_ref.version_id, "v_1");
 }
 
-TEST(AdapterRegistryTest, UnknownTypeFails)
+TEST(ActionHandlerRegistryTest, UnknownTypeFails)
 {
-    arcs::execution::AdapterRegistry registry;
-    arcs::execution::AdapterExecutor executor(registry);
+    arcs::execution::ActionHandlerRegistry registry;
+    arcs::execution::ActionDispatcher dispatcher(registry);
 
     arcs::execution::Action action{};
     action.artifact_id = "a_1";
@@ -54,7 +55,7 @@ TEST(AdapterRegistryTest, UnknownTypeFails)
     action.payload.type = "missing";
 
     arcs::execution::ExecutionContext ctx{};
-    const auto result = executor.execute(action, ctx);
+    const auto result = dispatcher.execute(action, ctx);
 
     EXPECT_EQ(result.status, arcs::execution::ExecutionStatus::Fail);
     EXPECT_FALSE(result.error_message.empty());

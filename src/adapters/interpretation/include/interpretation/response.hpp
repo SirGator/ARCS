@@ -1,3 +1,9 @@
+/**
+ * @file response.hpp
+ * @brief Defines the response payload returned by the external
+ *        interpretation worker.
+ */
+
 #pragma once
 
 #include <optional>
@@ -7,18 +13,22 @@
 
 namespace arcs::interpretation {
 
-// Einheitliche Antwort des Parsers.
-// `payload` enthaelt das strukturierte Proposal, `error` nur bei Problemen.
+/**
+ * @brief Uniform response from the interpretation parser.
+ *
+ * `payload` holds the structured proposal; `error` is only set when
+ * something went wrong.
+ */
 struct InterpretationResponse {
-    // Signalisiert, ob die Anfrage technisch und fachlich akzeptiert wurde.
+    /// Whether the request was accepted both technically and semantically.
     bool ok{false};
-    // Rueckgabe der Anfrage-ID, falls der Parser sie mitsendet.
+    /// Echo of the request ID, if the parser includes it.
     std::string request_id;
-    // Echo des verwendeten Schemas, damit Aufrufer Response und Request koppeln koennen.
+    /// Echo of the schema used, so callers can correlate response with request.
     std::string schema_id;
-    // Strukturierte Interpretation als JSON-Objekt.
+    /// Structured interpretation as a JSON object.
     nlohmann::json payload;
-    // Fehlermeldung bei nicht erfolgreicher Verarbeitung.
+    /// Error message when processing was not successful.
     std::optional<std::string> error;
 };
 

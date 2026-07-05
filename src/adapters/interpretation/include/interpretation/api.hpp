@@ -1,3 +1,9 @@
+/**
+ * @file api.hpp
+ * @brief Defines the single-call contract for interpretation requests: a
+ *        client submits one request and receives exactly one proposal back.
+ */
+
 #pragma once
 
 #include "interpretation/config.hpp"
@@ -6,13 +12,21 @@
 
 namespace arcs::interpretation {
 
-// Ein einzelner Vertrag fuer Interpretationsanfragen.
-// Der Client schickt einen Auftrag hinein und bekommt genau ein Proposal zurueck.
+/**
+ * @brief Abstract contract for interpretation requests.
+ *
+ * The client sends a single request in and receives exactly one proposal
+ * back, decoupling callers from the concrete interpretation backend.
+ */
 class IInterpretationApi {
 public:
     virtual ~IInterpretationApi() = default;
 
-    // Fuehrt die Interpretation aus und liefert das strukturierte Ergebnis.
+    /**
+     * @brief Runs the interpretation and returns the structured result.
+     * @param request The interpretation request to process.
+     * @return The structured interpretation response.
+     */
     virtual InterpretationResponse interpret(const InterpretationRequest& request) = 0;
 };
 

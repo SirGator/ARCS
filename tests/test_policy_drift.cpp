@@ -46,6 +46,10 @@ TEST(PolicyDriftTest, ApprovalBoundToOldPolicyVersionBlocksWhenPolicyHeadChanges
             {"artifact_id", policy_v1.artifact_id},
             {"version_id",  policy_v1.version_id}
         }},
+        {"action_candidate_ref", {
+            {"artifact_id", "a_candidate_1"},
+            {"version_id", "v_candidate_1"}
+        }},
         {"decision", "approve"}
     };
 

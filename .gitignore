@@ -2,11 +2,13 @@ build/
 build-fixed/
 .cache/
 .vscode/
+.pytest_cache/
 
 *.o
 *.a
 *.so
 *.exe
+*.zip
 
 CMakeCache.txt
 CMakeFiles/
@@ -20,6 +22,7 @@ arcs.log
 .venv/
 __pycache__/
 *.pyc
+*.pyo
 
 ARCS_Core_Specification.md
 

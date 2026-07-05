@@ -1,3 +1,8 @@
+/**
+ * @file optimistic_lock.cpp
+ * @brief Implements the optimistic-lock validation declared in optimistic_lock.hpp.
+ */
+
 #include "store/optimistic_lock.hpp"
 
 namespace arcs::store::optimistic_lock {

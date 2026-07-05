@@ -1,3 +1,9 @@
+/**
+ * @file worker_client.hpp
+ * @brief Declares the concrete HTTP client that talks to the external
+ *        interpretation worker.
+ */
+
 #pragma once
 
 #include "interpretation/config.hpp"
@@ -5,13 +11,25 @@
 
 namespace arcs::interpretation {
 
-// Konkrete Client-Implementierung fuer den externen Parser/Worker.
-// Intern wird ein HTTP POST mit JSON gebaut und die JSON-Antwort geparst.
+/**
+ * @brief Concrete client implementation for the external parser/worker.
+ *
+ * Internally builds an HTTP POST request with a JSON body and parses the
+ * JSON response.
+ */
 class WorkerInterpretationClient final : public IInterpretationApi {
 public:
+    /**
+     * @brief Constructs a client bound to the given worker configuration.
+     * @param config Configuration describing how to reach the worker.
+     */
     explicit WorkerInterpretationClient(InterpretationApiConfig config);
 
-    // Sendet einen einzelnen Interpretationsauftrag an den Worker.
+    /**
+     * @brief Sends a single interpretation request to the worker.
+     * @param request The interpretation request to send.
+     * @return The structured interpretation response.
+     */
     InterpretationResponse interpret(const InterpretationRequest& request) override;
 
 private:

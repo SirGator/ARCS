@@ -1,0 +1,7 @@
+build/ export-ignore
+.venv/ export-ignore
+artifacts/ export-ignore
+__pycache__/ export-ignore
+*.pyc export-ignore
+arcs.log export-ignore
+ARCS.zip export-ignore

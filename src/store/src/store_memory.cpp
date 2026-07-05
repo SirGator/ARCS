@@ -1,3 +1,12 @@
+/**
+ * @file store_memory.cpp
+ * @brief Implements the in-memory `StoreMemory` backend declared in store_memory.hpp.
+ *
+ * Contains schema-validation gates (loading artifact/event JSON schemas
+ * lazily via static registries) plus the insertability/consistency checks
+ * used by `append_artifact`, `append_event`, and `commit`.
+ */
+
 #include "store/store_memory.hpp"
 
 #include "artifact/json.hpp"
@@ -20,6 +29,11 @@ namespace {
 using arcs::artifact::ArtifactVersion;
 using arcs::event::Event;
 
+/**
+ * @brief Lazily-built, process-wide registry holding the `artifact_base` schema.
+ * @return Reference to the singleton registry.
+ * @throws arcs::store::StoreError if the schema file cannot be loaded/registered.
+ */
 const arcs::schema::SchemaRegistry& artifact_base_registry()
 {
     static const auto registry = [] {
@@ -40,6 +54,11 @@ const arcs::schema::SchemaRegistry& artifact_base_registry()
     return registry;
 }
 
+/**
+ * @brief Lazily-built, process-wide registry holding all per-type artifact payload schemas.
+ * @return Reference to the singleton registry.
+ * @throws arcs::store::StoreError if any schema file cannot be loaded/registered.
+ */
 const arcs::schema::SchemaRegistry& artifact_payload_registry()
 {
     static const auto registry = [] {
@@ -66,6 +85,11 @@ const arcs::schema::SchemaRegistry& artifact_payload_registry()
     return registry;
 }
 
+/**
+ * @brief Lazily-built, process-wide registry holding the `event` schema.
+ * @return Reference to the singleton registry.
+ * @throws arcs::store::StoreError if the schema file cannot be loaded/registered.
+ */
 const arcs::schema::SchemaRegistry& event_registry()
 {
     static const auto registry = [] {
@@ -86,6 +110,11 @@ const arcs::schema::SchemaRegistry& event_registry()
     return registry;
 }
 
+/**
+ * @brief Validates an artifact version against the shared `artifact_base` schema.
+ * @param version The version to validate.
+ * @throws arcs::store::CommitRejectedError if validation fails.
+ */
 void ensure_base_artifact_valid(const ArtifactVersion& version)
 {
     const nlohmann::json artifact_json = version;
@@ -103,6 +132,11 @@ void ensure_base_artifact_valid(const ArtifactVersion& version)
     }
 }
 
+/**
+ * @brief Validates an artifact version's payload against its declared schema_id.
+ * @param version The version whose payload is validated.
+ * @throws arcs::store::CommitRejectedError if validation fails.
+ */
 void ensure_payload_valid(const ArtifactVersion& version)
 {
     const auto validation = arcs::schema::Validator::validate(
@@ -119,6 +153,11 @@ void ensure_payload_valid(const ArtifactVersion& version)
     }
 }
 
+/**
+ * @brief Validates an event against the shared `event` schema.
+ * @param event The event to validate.
+ * @throws arcs::store::CommitRejectedError if validation fails.
+ */
 void ensure_event_valid(const Event& event)
 {
     const nlohmann::json event_json = event;
@@ -136,6 +175,12 @@ void ensure_event_valid(const Event& event)
     }
 }
 
+/**
+ * @brief Checks id non-emptiness, duplicate version_id, and schema validity for a version.
+ * @param version The candidate version.
+ * @param versions_by_version_id Map to check for a duplicate version_id.
+ * @throws arcs::store::CommitRejectedError on any violation.
+ */
 void ensure_version_insertable_impl(
     const ArtifactVersion& version,
     const std::unordered_map<std::string, ArtifactVersion>& versions_by_version_id)
@@ -157,6 +202,12 @@ void ensure_version_insertable_impl(
     ensure_payload_valid(version);
 }
 
+/**
+ * @brief Inserts a version into the version-by-id and per-artifact index maps.
+ * @param version The version to insert.
+ * @param versions_by_version_id Map updated with `version_id -> version`.
+ * @param version_ids_by_artifact_id Map updated by appending to `artifact_id`'s version list.
+ */
 void append_artifact_to_state_impl(
     const ArtifactVersion& version,
     std::unordered_map<std::string, ArtifactVersion>& versions_by_version_id,
@@ -166,6 +217,12 @@ void append_artifact_to_state_impl(
     version_ids_by_artifact_id[version.artifact_id].push_back(version.version_id);
 }
 
+/**
+ * @brief Checks id non-emptiness, duplicate event_id, and schema validity for an event.
+ * @param event The candidate event.
+ * @param known_event_ids Set to check for a duplicate event_id.
+ * @throws arcs::store::CommitRejectedError on any violation.
+ */
 void ensure_event_insertable_impl(
     const Event& event,
     const std::unordered_set<std::string>& known_event_ids)
@@ -187,6 +244,11 @@ void ensure_event_insertable_impl(
     ensure_event_valid(event);
 }
 
+/**
+ * @brief Checks that a commit bundle is non-empty and free of internal id duplicates.
+ * @param bundle The bundle to validate.
+ * @throws arcs::store::CommitRejectedError on the first violation found.
+ */
 void ensure_bundle_locally_consistent_impl(const arcs::store::CommitBundle& bundle)
 {
     if (bundle.versions.empty()) {

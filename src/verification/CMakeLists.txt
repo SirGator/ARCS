@@ -2,6 +2,7 @@ add_library(arcs_verification
     src/approval_verifier.cpp
     src/authority_verifier.cpp
     src/permission_verifier.cpp
+    src/policy_head_verifier.cpp
     src/reference_integrity_verifier.cpp
     src/schema_verifier.cpp
     src/scope_verifier.cpp

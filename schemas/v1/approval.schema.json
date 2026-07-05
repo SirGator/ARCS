@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft-07/schema#",
   "$id": "arcs.approval.v1",
   "type": "object",
-  "required": ["target_option", "policy_ref", "verification_ref", "request_ref", "action_ref", "decision", "reason", "actor", "timestamp", "expires_at", "approval_scope", "store_head_at_approval", "risk_summary"],
+  "required": ["target_option", "policy_ref", "verification_ref", "request_ref", "action_candidate_ref", "decision", "reason", "actor", "timestamp", "expires_at", "approval_scope", "store_head_at_approval", "risk_summary"],
   "properties": {
     "target_option": {
       "type": "object",
@@ -40,7 +40,7 @@
       },
       "additionalProperties": false
     },
-    "action_ref": {
+    "action_candidate_ref": {
       "type": "object",
       "required": ["artifact_id", "version_id"],
       "properties": {

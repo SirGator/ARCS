@@ -1,3 +1,8 @@
+/**
+ * @file schema_registry.cpp
+ * @brief Implements SchemaRegistry: registration and lookup of schemas by ID.
+ */
+
 #include "schema/schema_registry.hpp"
 
 namespace arcs::schema {

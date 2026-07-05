@@ -27,16 +27,17 @@ into the Core, the governance guarantees erode over time (exceptions creep in
 
 ## Problem 2 — Docs / Reality Drift
 
-**Problem:** The top-level `README.md` references a canonical `docs/`
-specification tree (`docs/core-rules/`, `docs/current-state/STATE.md`, etc.)
-that does not exist in the repository. The actual spec lives under
-`spec and paper/Spec/`. This makes the README misleading for anyone (including
-future-you) trying to onboard into the project.
+**Status:** Mostly solved.
+
+**Problem:** The spec now lives consistently under
+`spec and paper/Spec/`, and the top-level `README.md` points at that
+location. The remaining gap is not the path itself anymore, but keeping
+the current-state documentation synchronized with the code so that
+architectural changes do not silently drift out of sync.
 
 **Possible solutions:**
-- Decide which location is canonical: either migrate `spec and paper/Spec/`
-  into a real `docs/` tree matching the README's references, or rewrite the
-  README to point at the actual current locations.
+- Keep `spec and paper/Spec/` as the canonical location and treat path changes
+  as solved unless a real `docs/` migration is intentionally planned.
 - Add a `docs/current-state/STATE.md`-equivalent file that is kept up to date
   every time a milestone lands, so "current status" is always answerable
   without archaeology.

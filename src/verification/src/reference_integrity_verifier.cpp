@@ -1,3 +1,9 @@
+/**
+ * @file reference_integrity_verifier.cpp
+ * @brief Implements ReferenceIntegrityVerifier::check, which walks a
+ *        target's payload for embedded artifact/version references and
+ *        confirms each one resolves to a matching version in the store.
+ */
 #include "verification/verifier.hpp"
 
 #include "store/store.hpp"
@@ -11,6 +17,13 @@ namespace arcs::verification {
 
 namespace {
 
+/**
+ * @brief Recursively walks a JSON value, collecting an ArtifactRef for
+ *        every object encountered that has both "artifact_id" and
+ *        "version_id" string fields.
+ * @param value JSON value (object, array, or scalar) to scan.
+ * @param out Output vector that collected references are appended to.
+ */
 void collect_refs_from_json(const nlohmann::json& value,
                             std::vector<ArtifactRef>& out) {
     if (value.is_object()) {
@@ -40,6 +53,12 @@ void collect_refs_from_json(const nlohmann::json& value,
     }
 }
 
+/**
+ * @brief Collects all artifact/version references embedded anywhere in a
+ *        target's payload.
+ * @param target Artifact version whose payload is scanned.
+ * @return The list of ArtifactRef values found.
+ */
 std::vector<ArtifactRef> collect_all_refs(const ArtifactVersion& target) {
     std::vector<ArtifactRef> refs;
 
@@ -55,6 +74,15 @@ std::vector<ArtifactRef> collect_all_refs(const ArtifactVersion& target) {
 
 } // namespace
 
+/**
+ * @brief Collects every artifact reference in the target's payload and
+ *        confirms each resolves in the store to a version belonging to
+ *        the expected artifact_id. Targets with no references pass
+ *        trivially.
+ * @param target Artifact version being verified.
+ * @param context Verification context; must provide a store.
+ * @return VerificationCheck named "reference_integrity" with the outcome.
+ */
 VerificationCheck ReferenceIntegrityVerifier::check(
     const ArtifactVersion& target,
     const VerificationContext& context) const {

@@ -1,3 +1,9 @@
+/**
+ * @file scope_verifier.cpp
+ * @brief Implements ScopeVerifier::check, which confirms that a target's
+ *        required scopes (if declared) match its stream-derived scope and
+ *        are within the acting principal's allowed permission scopes.
+ */
 #include "verification/verifier.hpp"
 
 #include <string>
@@ -9,6 +15,11 @@ namespace arcs::verification {
 
 namespace {
 
+/**
+ * @brief Reads the "required_scopes" string array from a target's payload.
+ * @param target Artifact version whose payload is inspected.
+ * @return The list of required scope strings, empty if none declared.
+ */
 std::vector<std::string> required_scopes_from_payload(const ArtifactVersion& target) {
     std::vector<std::string> out;
 
@@ -34,6 +45,12 @@ std::vector<std::string> required_scopes_from_payload(const ArtifactVersion& tar
     return out;
 }
 
+/**
+ * @brief Derives the scope associated with an artifact's stream from its
+ *        stream key. Currently the stream key is used directly as the scope.
+ * @param stream_key Stream key of the target artifact.
+ * @return The derived scope string, empty if stream_key is empty.
+ */
 std::string stream_scope_from_stream_key(const std::string& stream_key) {
     if (stream_key.empty()) {
         return {};
@@ -43,6 +60,17 @@ std::string stream_scope_from_stream_key(const std::string& stream_key) {
 
 } // namespace
 
+/**
+ * @brief Verifies that a target's required scopes (if any) match the
+ *        scope derived from its stream key and are permitted by the
+ *        context's effective permission scopes. Targets declaring no
+ *        required scopes pass trivially; ambiguous cases (unresolvable
+ *        scope, empty required scope, or no permission scopes available
+ *        to disambiguate) report Unknown rather than guessing.
+ * @param target Artifact version being verified.
+ * @param context Verification context, including effective permissions.
+ * @return VerificationCheck named "scope" with the outcome.
+ */
 VerificationCheck ScopeVerifier::check(
     const ArtifactVersion& target,
     const VerificationContext& context) const {

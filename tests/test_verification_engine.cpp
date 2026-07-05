@@ -186,3 +186,32 @@ TEST(VerificationEngineTest, MakeVerificationReportArtifactBuildsVerificationArt
     EXPECT_EQ(artifact.payload.at("status"), "pass");
     EXPECT_EQ(artifact.payload.at("target").at("artifact_id"), target.artifact_id);
 }
+
+TEST(VerificationEngineTest, PolicyHeadVerifierFailsWhenTargetUsesStalePolicyRef) {
+    auto target = make_target();
+    target.payload["policy_ref"] = {
+        {"artifact_id", "a_policy_core"},
+        {"version_id", "v_policy_001"},
+    };
+
+    ArtifactVersion current_policy{};
+    current_policy.artifact_id = "a_policy_core";
+    current_policy.version_id = "v_policy_002";
+
+    VerificationContext context{};
+    context.policy = &current_policy;
+
+    const auto check = PolicyHeadVerifier{}.check(target, context);
+    EXPECT_EQ(check.status, CheckStatus::Fail);
+    EXPECT_EQ(check.detail, "option.policy_ref does not match current policy head");
+}
+
+TEST(VerificationEngineTest, VerifierRegistryBuildsPlanAndTracksUnsupportedChecks) {
+    const auto registry = VerifierRegistry::with_core_verifiers();
+
+    const auto plan = registry.build_plan({"permission", "scope", "unknown_custom_check"});
+
+    ASSERT_EQ(plan.verifiers.size(), 2u);
+    ASSERT_EQ(plan.unsupported_checks.size(), 1u);
+    EXPECT_EQ(plan.unsupported_checks.front(), "unknown_custom_check");
+}

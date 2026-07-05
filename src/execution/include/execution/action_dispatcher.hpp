@@ -1,17 +1,17 @@
 #pragma once
 
-#include "execution/adapter_registry.hpp"
+#include "execution/action_handler_registry.hpp"
 
 namespace arcs::execution {
 
-class AdapterExecutor {
+class ActionDispatcher {
 public:
-    explicit AdapterExecutor(AdapterRegistry& registry);
+    explicit ActionDispatcher(ActionHandlerRegistry& registry);
 
     ExecutionResult execute(const Action& action, const ExecutionContext& ctx) const;
 
 private:
-    AdapterRegistry& registry_;
+    ActionHandlerRegistry& registry_;
 };
 
 } // namespace arcs::execution

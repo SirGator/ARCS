@@ -1,3 +1,8 @@
+/**
+ * @file json.cpp
+ * @brief Implements JSON (de)serialization for Event and EventRef.
+ */
+
 #include "event/json.hpp"
 
 #include "artifact/json.hpp"

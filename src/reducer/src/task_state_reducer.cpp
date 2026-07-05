@@ -1,7 +1,20 @@
+/**
+ * @file task_state_reducer.cpp
+ * @brief Implements TaskStateReducer::reduce.
+ */
 #include "reducer/task_state_reducer.hpp"
 
 namespace arcs::reducer {
 
+/**
+ * @brief Derives a task's overall status from its artifacts: "draft" if no
+ * options exist yet, "executed" if an execution_result is present,
+ * "approved" if the latest approval decision is "approve", otherwise
+ * "blocked". Also collects the ids of all option and approval artifacts
+ * seen.
+ * @param artifacts Artifact history to reduce over.
+ * @return The resulting TaskState.
+ */
 TaskState TaskStateReducer::reduce(const std::vector<arcs::artifact::ArtifactVersion>& artifacts)
 {
     TaskState state{};

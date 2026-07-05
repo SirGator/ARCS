@@ -85,6 +85,15 @@ External signals may come from systems such as:
 * scheduled events
 * webhook events
 * CLI input
+* approval responses
+* permission responses
+
+Input in ARCS means externally initiated, discrete signals that actively enter the system.
+This includes human requests, webhooks, callbacks, approvals, and permission replies.
+
+High-frequency world updates are treated separately through the External State Adapter Interface.
+
+If semantic translation is required, raw or weakly structured input MAY later be passed into a separate Interpretation Adapter.
 
 #### Input
 
@@ -231,19 +240,156 @@ Discord Message
 
 ---
 
-### 6.5 Planner Interface
+### 6.5 External State Adapter Interface
 
-The Planner Interface defines how ARCS creates possible next actions.
+The External State Adapter Interface defines how ARCS receives or polls continuous updates about the outside world.
 
-The planner proposes actions. It does not execute them and it does not approve them.
+This interface exists because world state is not the same thing as active user or system requests.
+External state updates may arrive every second or faster, may be polled continuously, and often represent observations rather than requests.
 
 #### Purpose
 
-The purpose of the planner is to create one or more possible plans based on the current request, context, memory, and system state.
+The purpose of an external state adapter is to collect, normalize, and forward high-frequency world-state information without turning it into hidden authority.
 
 #### Input
 
-The planner may receive:
+An external state adapter may receive:
+
+* device status
+* software status
+* health checks
+* telemetry streams
+* polled sensor values
+* external environment snapshots
+
+#### Output
+
+An external state adapter may produce:
+
+* `StateObservationArtifact`
+* `IngressArtifact`
+* `EnvironmentSnapshotArtifact`
+
+#### Allowed Side Effects
+
+An external state adapter is allowed to:
+
+* poll external systems
+* receive high-frequency updates
+* normalize observation payloads
+* attach timestamps and source metadata
+* submit observations into the ARCS flow
+
+#### Forbidden Side Effects
+
+An external state adapter must not:
+
+* invent missing measurements
+* silently discard relevant state transitions
+* treat world observations as approval or permission authority
+* execute external actions merely because a state changed
+
+#### Invariants
+
+* Observations must remain traceable to source and time.
+* Frequent updates must not become hidden mutable state outside artifacts.
+* External state is observation, not authority.
+
+#### Example
+
+```text
+Device Health Poll
+        ↓
+External State Adapter
+        ↓
+StateObservationArtifact
+        ↓
+Core Validation Flow
+```
+
+---
+
+### 6.6 Interpretation Adapter Interface
+
+The Interpretation Adapter Interface defines how ARCS translates raw or weakly structured input into structured proposal material.
+
+Interpretation is not the same thing as input transport.
+Input gets data into ARCS.
+Interpretation converts ambiguous text, speech, or mixed user signals into a proposal that the Core can validate and process.
+
+#### Purpose
+
+The purpose of an interpretation adapter is to convert external expressions into traceable structured interpretation proposals.
+
+#### Input
+
+An interpretation adapter may receive:
+
+* raw text
+* normalized user messages
+* speech-to-text output
+* mixed structured/unstructured request payloads
+* language-specific external input
+
+#### Output
+
+An interpretation adapter may produce:
+
+* `InterpretationProposalArtifact`
+* `StructuredIntentDraft`
+* `InterpretationErrorArtifact`
+
+#### Allowed Side Effects
+
+An interpretation adapter is allowed to:
+
+* translate text into structured proposals
+* call parsers, translators, or LLM-backed services
+* attach interpretation metadata
+* expose uncertainty or missing fields
+
+#### Forbidden Side Effects
+
+An interpretation adapter must not:
+
+* approve actions
+* create authoritative state directly
+* invent permissions
+* treat interpreted meaning as verified truth
+
+#### Invariants
+
+* Interpretation output is only a proposal.
+* Original input must remain traceable.
+* Interpretation must not bypass Core validation.
+
+#### Example
+
+```text
+Raw User Text
+        ↓
+Interpretation Adapter
+        ↓
+InterpretationProposalArtifact
+        ↓
+Core Validation / Verification Flow
+```
+
+---
+
+### 6.7 Reasoning Interface
+
+The Reasoning Interface defines how ARCS creates options, plans, or analyses from already structured inputs, context, and state.
+
+The reasoning component proposes. It does not execute and it does not approve.
+
+#### Purpose
+
+The purpose of reasoning is to create one or more possible next-step proposals based on the current request, context, memory, and system state.
+
+#### Input
+
+The reasoning component may receive:
 
 * `ValidatedRequestArtifact`
 * `ContextArtifact`
@@ -253,10 +399,11 @@ The planner may receive:
 
 #### Output
 
-The planner may produce:
+The reasoning component may produce:
 
 * `PlanCandidateArtifact`
 * `PlanCandidateArtifact[]`
+* `ReasoningReportArtifact`
 * `NoPlanFoundArtifact`
 
 Each plan candidate must include:
@@ -271,7 +418,7 @@ Each plan candidate must include:
 
 #### Allowed Side Effects
 
-The planner is allowed to:
+The reasoning component is allowed to:
 
 * generate plan candidates
 * request additional context through approved interfaces
@@ -281,7 +428,7 @@ The planner is allowed to:
 
 #### Forbidden Side Effects
 
-The planner must not:
+The reasoning component must not:
 
 * execute tools
 * approve its own plan
@@ -293,17 +440,17 @@ The planner must not:
 
 #### Invariants
 
-* A plan is only a proposal.
-* Every plan must be verifiable.
-* Every plan must expose its assumptions.
-* The planner must not perform external actions.
+* A reasoning result is only a proposal.
+* Every resulting plan or option must be verifiable.
+* Every reasoning path should expose assumptions when available.
+* The reasoning component must not perform external actions.
 
 #### Example
 
 ```text
 ValidatedRequestArtifact
         ↓
-Planner
+Reasoning Component
         ↓
 PlanCandidateArtifact[]
         ↓
@@ -312,7 +459,72 @@ Verifier
 
 ---
 
-### 6.6 Verifier Interface
+### 6.8 LLM Adapter Interface
+
+The LLM Adapter Interface defines how ARCS talks to language models as external software capabilities.
+
+An LLM Adapter is not a reasoning authority by itself. It is a boundary module around model transport, prompt packaging, and response retrieval.
+
+#### Purpose
+
+The purpose of the LLM adapter is to call a model and return a traceable model response in a controlled format.
+
+#### Input
+
+An LLM adapter may receive:
+
+* prompt text
+* schema constraints
+* runtime context
+* model selection metadata
+
+#### Output
+
+An LLM adapter may produce:
+
+* `ModelResponseArtifact`
+* `StructuredOutputDraft`
+* `ModelErrorArtifact`
+
+#### Allowed Side Effects
+
+An LLM adapter is allowed to:
+
+* package model requests
+* call a model service
+* normalize model responses
+* surface parser or schema-related failures
+
+#### Forbidden Side Effects
+
+An LLM adapter must not:
+
+* approve actions
+* grant permissions
+* commit authoritative system state directly
+* execute actions
+
+#### Invariants
+
+* Model output is never authority by itself.
+* LLM responses must remain distinguishable from verified ARCS state.
+* Structured model output must still pass normal Core controls.
+
+#### Example
+
+```text
+Prompt + Schema + Context
+        ↓
+LLM Adapter
+        ↓
+StructuredOutputDraft
+        ↓
+Reasoning / Core Validation Flow
+```
+
+---
+
+### 6.9 Verifier Interface
 
 The Verifier Interface defines how ARCS checks proposed plans, actions, and outputs.
 

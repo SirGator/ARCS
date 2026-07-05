@@ -46,6 +46,21 @@ def _preferred_python(root: Path) -> str:
     return sys.executable
 
 
+def _module_available(python_executable: str, module_name: str) -> bool:
+    try:
+        probe = subprocess.run(
+            [python_executable, "-c", f"import {module_name}"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return probe.returncode == 0
+
+
 def _wait_for_health(url: str, process: subprocess.Popen[str], timeout: float = 20.0) -> None:
     deadline = time.time() + timeout
     last_error = "service did not become healthy"
@@ -93,6 +108,8 @@ class FullStackEndToEndTests(unittest.TestCase):
             self.skipTest(f"text-to-json-parser not found: {PARSER_ROOT}")
         parser_port = _reserve_port()
         parser_python = _preferred_python(PARSER_ROOT)
+        if not _module_available(parser_python, "uvicorn"):
+            self.skipTest(f"uvicorn not available for parser interpreter: {parser_python}")
         env = os.environ.copy()
         env["LLM_BACKEND"] = "echo"
         process = subprocess.Popen(
@@ -119,6 +136,8 @@ class FullStackEndToEndTests(unittest.TestCase):
     def _start_worker(self, parser_url: str) -> int:
         worker_port = _reserve_port()
         worker_python = _preferred_python(WORKER_ROOT)
+        if not _module_available(worker_python, "httpx"):
+            self.skipTest(f"httpx not available for worker interpreter: {worker_python}")
         worker_config = Path(self._tempdir.name) / "worker.yaml"
         worker_config.write_text("", encoding="utf-8")
         env = os.environ.copy()

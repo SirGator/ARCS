@@ -1,3 +1,9 @@
+/**
+ * @file request.hpp
+ * @brief Defines the request payload sent to the external interpretation
+ *        worker.
+ */
+
 #pragma once
 
 #include <optional>
@@ -7,20 +13,24 @@
 
 namespace arcs::interpretation {
 
-// Vollstaendiger Auftrag an die externe Interpretation.
-// Alles, was der Parser braucht, steht in einem Request-Objekt.
+/**
+ * @brief Complete request to the external interpretation worker.
+ *
+ * Everything the parser needs is carried in a single request object, so
+ * the worker never needs to perform an extra lookup.
+ */
 struct InterpretationRequest {
-    // Vom Aufrufer vergebene Korrelations-ID fuer Logs und Rueckfragen.
+    /// Caller-assigned correlation ID for logs and follow-up questions.
     std::string request_id;
-    // Der ungeparste Nutztext, der interpretiert werden soll.
+    /// The unparsed raw text that should be interpreted.
     std::string raw_input;
-    // Ziel-Schema, das die Antwort einhalten soll.
+    /// Target schema that the response is expected to conform to.
     std::string schema_id;
-    // Das Schema selbst wird inline mitgesendet, damit der Parser ohne extra Lookup arbeiten kann.
+    /// The schema itself, sent inline so the parser can work without an extra lookup.
     nlohmann::json schema;
-    // Laufzeitkontext fuer die Interpretation, z.B. Sprache, Zeitzone und aktuelle Zeit.
+    /// Runtime context for the interpretation, e.g. language, timezone, and current time.
     nlohmann::json context;
-    // Steuerung des Prompt-/Parser-Verhaltens, z.B. Modus oder Temperatur.
+    /// Controls prompt/parser behavior, e.g. mode or temperature.
     nlohmann::json prompt_config;
 };
 

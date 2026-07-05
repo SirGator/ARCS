@@ -77,26 +77,38 @@ Adapters transform representation, not authority.
 
 ## 3. Adapter Types
 
-ARCS MAY use multiple adapter types depending on the external boundary.
+ARCS uses a small number of broad adapter classes.
 
-Adapter types MUST remain separated by responsibility.
+The goal is not to create a separate top-level adapter type for every external concern.
+The goal is to group extensions by responsibility while keeping the model simple.
+
+The canonical adapter classes are:
+
+1. `input`
+2. `external_state`
+3. `interpretation`
+4. `output`
+5. `database`
+6. `reasoning`
+7. `llm`
+
+Approval replies, permission replies, admin commands, webhook callbacks, and similar externally-originated decisions are treated as `input` unless they are part of a continuously refreshed world-state feed.
 
 ---
 
 ### 3.1 Input Adapter
 
-An Input Adapter receives an external signal and converts it into an `ingress_event` draft.
+An Input Adapter receives externally initiated signals and converts them into an `ingress_event` draft.
 
 Examples:
 
 * user message adapter,
 * API request adapter,
-* file event adapter,
-* scheduled task adapter,
-* system signal adapter,
+* CLI adapter,
 * webhook adapter,
-* watcher adapter,
-* sensor adapter.
+* approval response adapter,
+* permission response adapter,
+* scheduler trigger adapter.
 
 Primary input:
 
@@ -117,10 +129,80 @@ Rules:
 * The Input Adapter MUST NOT silently reinterpret meaning.
 * The Input Adapter MUST NOT create a committed `ingress_event` directly unless the architecture explicitly grants it Store access through the Core commit interface.
 * By default, the Input Adapter submits an ingress draft to the Core, and the Core coordinates validation and commit.
+* Approval or permission information arriving from outside ARCS is still `input`; it does not gain authority merely by entering through an adapter.
+* If semantic translation is required, the Input Adapter SHOULD hand off to a separate Interpretation Adapter instead of silently performing interpretation itself.
 
 ---
 
-### 3.2 Output Adapter
+### 3.2 External State Adapter
+
+An External State Adapter receives or polls high-frequency world-state updates and converts them into traceable ARCS-compatible state observations.
+
+Examples:
+
+* device status adapter,
+* software health adapter,
+* sensor adapter,
+* watcher adapter,
+* telemetry adapter,
+* periodic environment snapshot adapter.
+
+Primary input:
+
+```text
+ExternalStateSignal | PolledWorldState
+```
+
+Primary output:
+
+```text
+IngressEventDraft | StateObservationDraft
+```
+
+Rules:
+
+* The External State Adapter exists because world-state updates may be frequent, continuous, and latency-sensitive.
+* It MUST preserve source identity, timestamp, and observation context.
+* It MUST NOT silently collapse distinct state transitions that matter for audit or control.
+* It MUST NOT treat observed state as permission or approval authority by itself.
+* It MUST NOT execute state-changing operations merely because it observes state changes.
+
+---
+
+### 3.3 Interpretation Adapter
+
+An Interpretation Adapter converts raw or weakly structured input into a structured interpretation proposal.
+
+Examples:
+
+* text-to-JSON bridge adapter,
+* speech-to-structured-intent adapter,
+* domain translation adapter,
+* schema-constrained interpretation service.
+
+Primary input:
+
+```text
+RawInput | NormalizedInputSignal
+```
+
+Primary output:
+
+```text
+InterpretationProposalDraft
+```
+
+Rules:
+
+* The Interpretation Adapter performs semantic translation, not authority decisions.
+* It MAY call LLMs, parsers, translators, or other proposal-generating systems.
+* It MUST preserve enough linkage to the original input for audit and replay analysis.
+* It MUST NOT create authoritative `task`, `approval`, `policy`, `permission_grant`, `action`, or `execution_result` artifacts directly.
+* Its output remains a proposal until validated and committed through the Core lifecycle.
+
+---
+
+### 3.4 Output Adapter
 
 An Output Adapter converts final ARCS output into an external representation.
 
@@ -155,111 +237,106 @@ Output delivery MUST NOT be confused with arbitrary external action execution.
 
 If an operation changes an external system beyond normal response delivery, display, or status reporting, it SHOULD be modeled as an `action` and executed through the Execution Engine.
 
-Examples of operations that SHOULD be modeled as actions:
-
-* sending an email as a task result,
-* modifying a file,
-* calling a third-party API with side effects,
-* creating a calendar event,
-* deploying code,
-* changing permissions,
-* writing to an external database.
-
 ---
 
-### 3.3 Executor Backend / Tool Driver
+### 3.5 Database Adapter
 
-An Executor Backend connects the Execution Engine to an external tool, service, protocol, or system.
+A Database Adapter connects ARCS to structured persistence or query systems that are not the ARCS Store itself.
 
 Examples:
 
-* web search executor,
-* database query executor,
-* code execution executor,
-* calendar executor,
-* email executor,
-* file system executor,
-* shell executor if explicitly allowed by policy.
+* PostgreSQL adapter,
+* MySQL adapter,
+* SQLite application database adapter,
+* document database adapter,
+* cache/query adapter when used as structured data access.
 
 Primary input:
 
 ```text
-ArtifactRef<action>
+VerifiedAction | QueryRequest | ReadRequest
 ```
-
-Primary raw output:
-
-```text
-ExternalToolResponse
-```
-
-Primary ARCS output:
-
-```text
-ExecutionResultDraft
-```
-
-Rules:
-
-* An Executor Backend MAY execute external side effects only after the Execution Engine dispatches a verified `action`.
-* The Executor Backend MUST NOT decide whether the action should execute.
-* The Executor Backend MUST NOT accept raw user input as an executable command.
-* The Executor Backend MUST enforce local scope checks and idempotency.
-* The Executor Backend MUST convert raw external responses into `execution_result` drafts.
-* The resulting `execution_result` becomes authoritative only after schema validation and Store commit through the Core lifecycle.
-
-An Executor Backend is allowed to communicate with external systems, but it is not allowed to govern the ARCS lifecycle.
-
----
-
-### 3.4 Store Backend
-
-A Store Backend connects the ARCS Store to physical persistence infrastructure.
-
-Examples:
-
-* SQL backend,
-* object store backend,
-* local file backend,
-* event log backend,
-* vector index backend,
-* graph persistence backend.
-
-A Store Backend is infrastructure, not a normal boundary Adapter.
-
-Rules:
-
-* The Store contract defines authoritative commit semantics.
-* The Store Backend MUST NOT decide which artifacts are authoritative.
-* The Store Backend MUST NOT bypass Store versioning, event logging, commit boundaries, or replay rules.
-* Physical persistence does not define logical authority. Logical authority is defined by committed artifacts and committed events.
-
----
-
-### 3.5 Scheduler Adapter
-
-A Scheduler Adapter receives time-based, recurring, delayed, or condition-triggered signals and converts them into ingress drafts.
-
-Examples:
-
-* delayed task trigger,
-* recurring task trigger,
-* system timer,
-* periodic background check,
-* watcher trigger.
 
 Primary output:
 
 ```text
-IngressEventDraft
+QueryResultDraft | ExecutionResultDraft | RetrievedStateDraft
 ```
 
 Rules:
 
-* The Scheduler Adapter MUST include scheduling metadata.
-* Scheduling metadata SHOULD include trigger time, recurrence rule, scheduler identity, task identity if available, and correlation identifiers.
-* The Scheduler Adapter MUST NOT execute the scheduled task directly.
-* The scheduled trigger MUST enter the Core lifecycle as ingress.
+* The Database Adapter MUST NOT be confused with the ARCS Store backend.
+* The ARCS Store defines committed truth for ARCS itself; a Database Adapter connects to some other data system.
+* Read-only database access MAY be used to retrieve context or state.
+* State-changing database operations MUST be modeled as verified actions when they have external side effects.
+* The adapter MUST NOT bypass ARCS verification, approval, or execution rules.
+
+---
+
+### 3.6 Reasoning Adapter
+
+A Reasoning Adapter connects ARCS to software that proposes plans, options, analyses, or structured reasoning outputs from already structured inputs.
+
+Examples:
+
+* planner service,
+* rule engine,
+* symbolic reasoning module,
+* retrieval-assisted proposal generator,
+* domain-specific recommendation engine.
+
+Primary input:
+
+```text
+ReasoningRequest
+```
+
+Primary output:
+
+```text
+InterpretationProposalDraft | OptionProposalDraft | ReasoningReportDraft
+```
+
+Rules:
+
+* A Reasoning Adapter may propose, analyze, rank, classify, or explain.
+* It MUST NOT approve actions.
+* It MUST NOT issue permission grants.
+* It MUST NOT create authoritative `action`, `approval`, `policy`, or `execution_result` artifacts directly.
+* Its outputs remain proposals until the Core validates, verifies, and commits the resulting artifacts.
+* Interpretation and Reasoning MAY be combined in one deployed service, but they are distinct responsibilities in the architecture.
+
+---
+
+### 3.7 LLM Adapter
+
+An LLM Adapter is a specialized adapter for calling a language model or model-serving API.
+
+Examples:
+
+* Ollama adapter,
+* OpenAI-compatible adapter,
+* local inference adapter,
+* structured-output model adapter.
+
+Primary input:
+
+```text
+ModelRequest
+```
+
+Primary output:
+
+```text
+ModelResponseDraft
+```
+
+Rules:
+
+* The LLM Adapter is a transport and formatting boundary around model inference.
+* It MUST NOT be treated as an authority layer.
+* It MUST NOT approve actions, grant permissions, or mutate committed state.
+* If model output is used for planning or interpretation, it MUST flow back into ARCS as proposals subject to normal controls.
 
 ---
 
@@ -291,7 +368,48 @@ Rules:
 
 ---
 
-### 4.2 Output Adapter Interface
+### 4.2 External State Adapter Interface
+
+```text
+ExternalStateAdapter
+├── initialize(config)
+├── poll_or_receive_state() -> ExternalStateSignal
+├── normalize_state(signal: ExternalStateSignal) -> StateObservationDraft
+├── validate_local(draft: StateObservationDraft) -> LocalValidationResult
+├── submit_state(draft: StateObservationDraft) -> CoreSubmissionResult
+└── shutdown()
+```
+
+Rules:
+
+* The adapter MAY be push-based, poll-based, or hybrid.
+* It MUST preserve observation timestamps and source identity.
+* It MUST NOT treat frequent updates as permission to mutate external systems.
+* It MUST NOT replace the normal verification path for downstream decisions.
+
+---
+
+### 4.3 Interpretation Adapter Interface
+
+```text
+InterpretationAdapter
+├── initialize(config)
+├── receive_interpretation_request(input) -> InterpretationRequest
+├── translate_to_proposal(request: InterpretationRequest) -> InterpretationProposalDraft
+├── validate_local(draft: InterpretationProposalDraft) -> LocalValidationResult
+├── submit_proposal(draft: InterpretationProposalDraft) -> CoreSubmissionResult
+└── shutdown()
+```
+
+Rules:
+
+* The Interpretation Adapter transforms raw or weakly structured input into a structured proposal.
+* It MUST preserve traceability back to the original input.
+* It MUST NOT treat interpreted output as authority.
+
+---
+
+### 4.4 Output Adapter Interface
 
 ```text
 OutputAdapter
@@ -310,7 +428,69 @@ Rules:
 
 ---
 
-### 4.3 Executor Backend Interface
+### 4.5 Database Adapter Interface
+
+```text
+DatabaseAdapter
+├── initialize(config)
+├── can_read(request) -> CapabilityCheckResult
+├── read(request) -> RetrievedStateDraft
+├── can_write(action_ref: ArtifactRef<action>) -> CapabilityCheckResult
+├── execute_verified_write(action_ref: ArtifactRef<action>) -> ExternalToolResponse
+├── convert_response(response) -> ExecutionResultDraft | QueryResultDraft
+├── submit_result(result) -> CoreSubmissionResult
+└── shutdown()
+```
+
+Rules:
+
+* Read access MAY be used for context retrieval.
+* Write access MUST follow the verified action path.
+* The adapter MUST distinguish clearly between read-only queries and side-effecting writes.
+
+---
+
+### 4.6 Reasoning Adapter Interface
+
+```text
+ReasoningAdapter
+├── initialize(config)
+├── receive_reasoning_request(request) -> ReasoningRequest
+├── generate_proposal(request) -> InterpretationProposalDraft | OptionProposalDraft | ReasoningReportDraft
+├── validate_local(draft) -> LocalValidationResult
+├── submit_proposal(draft) -> CoreSubmissionResult
+└── shutdown()
+```
+
+Rules:
+
+* A Reasoning Adapter generates proposals, not authority.
+* It MUST expose uncertainty and assumptions when available.
+* It MUST NOT bypass Core verification.
+
+---
+
+### 4.7 LLM Adapter Interface
+
+```text
+LlmAdapter
+├── initialize(config)
+├── build_model_request(prompt, schema, context) -> ModelRequest
+├── call_model(request: ModelRequest) -> ModelResponseDraft
+├── validate_local(response: ModelResponseDraft) -> LocalValidationResult
+├── submit_response(response: ModelResponseDraft) -> CoreSubmissionResult
+└── shutdown()
+```
+
+Rules:
+
+* The LLM Adapter manages model transport and response conversion.
+* It MUST NOT directly create authoritative ARCS state.
+* If an LLM-backed capability is intended to reason, the resulting output still enters ARCS as proposal material.
+
+---
+
+### 4.8 Executor Backend Interface
 
 ```text
 ExecutorBackend
@@ -331,7 +511,7 @@ Rules:
 
 ---
 
-### 4.4 Store Backend Interface
+### 4.9 Store Backend Interface
 
 ```text
 StoreBackend
@@ -349,6 +529,217 @@ Rules:
 
 * Store Backend interfaces are governed by the Store specification, not the Adapter lifecycle.
 * Store Backend MUST NOT expose hidden write paths that bypass Store commit rules.
+
+---
+
+### 4.10 Adapter Management Layer
+
+Adapter interfaces alone are not sufficient for a real system.
+ARCS SHOULD provide a dedicated Adapter Management Layer that is responsible for registration, lifecycle control, lookup, health tracking, and capability-aware routing.
+
+The Adapter Management Layer is not itself an authority source.
+It does not approve actions, grant permissions, or validate policy correctness.
+Its role is operational coordination of Adapter instances.
+
+#### Purpose
+
+The purpose of the Adapter Management Layer is to make Adapter usage explicit, inspectable, and controllable at runtime.
+
+It answers questions such as:
+
+* which adapters are available,
+* which adapter class each one belongs to,
+* whether an adapter is enabled,
+* whether an adapter initialized successfully,
+* which adapter should handle a given request,
+* whether an adapter is healthy enough to be used.
+
+#### Core Responsibilities
+
+The Adapter Management Layer SHOULD support at least:
+
+1. Adapter registration,
+2. Adapter descriptor storage,
+3. lifecycle management,
+4. typed lookup by adapter class,
+5. lookup by adapter id,
+6. capability-aware routing,
+7. enabled/disabled state,
+8. health state tracking,
+9. last-error tracking,
+10. configuration binding.
+
+#### Recommended Components
+
+ARCS SHOULD model the management layer using components such as:
+
+* `AdapterDescriptor`
+* `AdapterRuntimeState`
+* `AdapterManager`
+* typed registries or typed lookup views
+* `AdapterResolver`
+
+#### AdapterDescriptor
+
+An `AdapterDescriptor` SHOULD describe the static identity and declared capabilities of an adapter.
+
+Recommended fields:
+
+```text
+adapter_id
+adapter_class
+adapter_version
+display_name
+capabilities
+supported_kinds
+permission_scope
+default_enabled
+configuration_version
+```
+
+Rules:
+
+* The descriptor MUST NOT claim capabilities the adapter does not actually implement.
+* The descriptor SHOULD be inspectable without executing the adapter's external side effects.
+
+#### AdapterRuntimeState
+
+An `AdapterRuntimeState` SHOULD capture the operational state of an adapter instance.
+
+Recommended fields:
+
+```text
+initialized
+enabled
+healthy
+last_error
+last_started_at
+last_stopped_at
+last_health_check_at
+last_success_at
+```
+
+Rules:
+
+* Runtime state is operational metadata, not authoritative ARCS business state.
+* Runtime state MUST NOT replace committed artifacts or committed events.
+
+#### AdapterManager
+
+The `AdapterManager` SHOULD be the central runtime registry for adapter instances.
+
+Responsibilities:
+
+* register adapter instances,
+* reject duplicate adapter ids unless replacement is explicitly allowed,
+* initialize adapters with bound configuration,
+* stop adapters on shutdown,
+* expose descriptor and runtime state for inspection,
+* provide typed and untyped lookup methods.
+
+Minimal conceptual interface:
+
+```text
+AdapterManager
+├── register_adapter(adapter)
+├── initialize_adapter(adapter_id, config)
+├── initialize_all()
+├── shutdown_adapter(adapter_id)
+├── shutdown_all()
+├── get_descriptor(adapter_id)
+├── get_runtime_state(adapter_id)
+├── list_adapters(adapter_class?)
+├── find_adapter(adapter_id)
+└── resolve_adapter(request_context)
+```
+
+Rules:
+
+* The AdapterManager MUST fail closed when required adapter configuration is missing.
+* The AdapterManager MUST NOT route work to disabled adapters.
+* The AdapterManager MUST NOT route work to adapters known to be unhealthy when policy forbids degraded execution.
+
+#### Typed Registries
+
+ARCS MAY implement either:
+
+* one central `AdapterManager` with typed lookup views, or
+* separate typed registries such as:
+  * `InputAdapterRegistry`
+  * `ExternalStateAdapterRegistry`
+  * `InterpretationAdapterRegistry`
+  * `OutputAdapterRegistry`
+  * `DatabaseAdapterRegistry`
+  * `ReasoningAdapterRegistry`
+  * `LlmAdapterRegistry`
+
+The exact implementation is flexible.
+What matters is that adapter class, identity, capabilities, and runtime state remain explicit.
+
+#### AdapterResolver
+
+An `AdapterResolver` SHOULD choose the correct adapter for a concrete runtime need.
+
+Examples:
+
+* which Interpretation Adapter handles this language or format,
+* which Output Adapter delivers to this destination,
+* which Database Adapter owns this external data source,
+* which LLM Adapter serves this model class,
+* which External State Adapter owns this polling target.
+
+Selection MAY depend on:
+
+* adapter class,
+* adapter id,
+* declared capabilities,
+* target system,
+* schema support,
+* destination metadata,
+* policy restrictions,
+* health state.
+
+Rules:
+
+* Resolution MUST be deterministic for the same configuration and request context unless policy explicitly allows fallback behaviour.
+* Fallback behaviour MUST be explicit and traceable.
+
+#### Health and Failure Handling
+
+The management layer SHOULD support adapter health inspection.
+
+Health state MAY include:
+
+```text
+healthy
+degraded
+unavailable
+disabled
+misconfigured
+```
+
+Rules:
+
+* Health state MUST NOT silently bypass Core controls.
+* Health state SHOULD be visible to operational tooling.
+* Health failures SHOULD be traceable through logs or explicit runtime diagnostics.
+
+#### Scope of This Layer
+
+The Adapter Management Layer manages Adapter instances.
+It does not replace the Core lifecycle.
+
+It MUST NOT:
+
+* validate business correctness,
+* approve actions,
+* grant permissions,
+* commit artifacts by itself,
+* redefine which state is authoritative.
+
+Final rule:
+
+**Adapter interfaces define what adapters can do. The Adapter Management Layer defines which adapters exist, whether they are usable, and which one is selected. The Core remains the authority over lifecycle and committed truth.**
 
 ---
 

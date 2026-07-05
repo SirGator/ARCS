@@ -1,3 +1,8 @@
+/**
+ * @file factory.cpp
+ * @brief Implements make_base_artifact(), which assembles a new
+ *        ArtifactVersion populated with generated ids and metadata.
+ */
 #include "artifact/factory.hpp"
 
 #include <chrono>
@@ -11,6 +16,11 @@ namespace arcs::artifact::factory {
 
 namespace {
 
+/**
+ * @brief Returns the current UTC time formatted as an ISO-8601 timestamp
+ *        (e.g. "2026-07-04T12:00:00Z").
+ * @return The formatted UTC timestamp string.
+ */
 std::string utc_now()
 {
     const auto now = std::chrono::system_clock::now();
@@ -24,6 +34,23 @@ std::string utc_now()
 
 } // namespace
 
+/**
+ * @brief Builds a new ArtifactVersion with freshly generated artifact and
+ *        version identifiers, version set to 1, and the given metadata
+ *        filled in.
+ * @param type Artifact type name (e.g. "ingress_event").
+ * @param schema_id Identifier of the schema the payload should conform to.
+ * @param stream_key Logical stream/session the artifact belongs to.
+ * @param created_by_actor_type Type of the actor creating the artifact.
+ * @param created_by_id Identifier of the actor creating the artifact.
+ * @param source_kind Kind of source the data originated from.
+ * @param source_ref Concrete reference to the source.
+ * @param trust_level Trust level to assign.
+ * @param trust_source_class Trust source classification.
+ * @param created_at ISO-8601 UTC timestamp to use; if empty, the current
+ *        UTC time is used instead.
+ * @return A newly constructed ArtifactVersion with the given metadata.
+ */
 ArtifactVersion make_base_artifact(
     const std::string& type,
     const std::string& schema_id,

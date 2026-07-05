@@ -1,3 +1,9 @@
+/**
+ * @file ingress_router.cpp
+ * @brief Implements DefaultIngressRouter, which matches an ingress_event
+ *        artifact's source_kind and intent against registered handlers to
+ *        decide the routing action, falling back to Quarantine.
+ */
 #include "ingress/ingress_router.hpp"
 
 #include <algorithm>
@@ -6,11 +12,25 @@
 
 namespace arcs::ingress {
 
+/**
+ * @brief Registers a handler to be considered by route(), in the order
+ *        added.
+ * @param handler The handler to register (moved in).
+ */
 void DefaultIngressRouter::add_handler(Handler handler)
 {
     handlers_.push_back(std::move(handler));
 }
 
+/**
+ * @brief Finds the first registered handler whose source_kinds and
+ *        intent_keywords match the given ingress_event's payload, and
+ *        returns its action. A handler with no source_kinds/keywords
+ *        matches anything for that criterion. Falls back to Quarantine if
+ *        no handler matches.
+ * @param ingress The ingress_event artifact to route.
+ * @return The chosen route result.
+ */
 RouteResult DefaultIngressRouter::route(const arcs::artifact::ArtifactVersion& ingress)
 {
     const auto& payload = ingress.payload;

@@ -1,3 +1,8 @@
+/**
+ * @file schema_loader.cpp
+ * @brief Implements SchemaLoader::load_from_file.
+ */
+
 #include "schema/schema_loader.hpp"
 
 #include <fstream>

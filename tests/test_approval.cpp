@@ -12,7 +12,7 @@ TEST(ApprovalGateTest, SubmitApproveBuildsApprovalArtifact) {
     in.policy_ref    = {"a_policy_1", "v_policy_1"};
     in.verification_ref = {"a_report_1", "v_report_1"};
     in.request_ref = {"a_request_1", "v_request_1"};
-    in.action_ref = {"a_action_1", "v_action_1"};
+    in.action_candidate_ref = {"a_action_candidate_1", "v_action_candidate_1"};
     in.decision      = ApprovalDecision::Approve;
     in.reason        = "checked";
     in.actor         = {"human", "user:simon"};
@@ -37,8 +37,8 @@ TEST(ApprovalGateTest, SubmitApproveBuildsApprovalArtifact) {
     EXPECT_EQ(approval.payload["verification_ref"]["version_id"],  "v_report_1");
     EXPECT_EQ(approval.payload["request_ref"]["artifact_id"], "a_request_1");
     EXPECT_EQ(approval.payload["request_ref"]["version_id"],  "v_request_1");
-    EXPECT_EQ(approval.payload["action_ref"]["artifact_id"], "a_action_1");
-    EXPECT_EQ(approval.payload["action_ref"]["version_id"],  "v_action_1");
+    EXPECT_EQ(approval.payload["action_candidate_ref"]["artifact_id"], "a_action_candidate_1");
+    EXPECT_EQ(approval.payload["action_candidate_ref"]["version_id"],  "v_action_candidate_1");
 
     EXPECT_EQ(approval.payload["decision"], "approve");
     EXPECT_EQ(approval.payload["reason"], "checked");
@@ -57,7 +57,7 @@ TEST(ApprovalGateTest, SubmitRejectBuildsRejectDecision) {
     in.policy_ref    = {"a_policy_1", "v_policy_1"};
     in.verification_ref = {"a_report_1", "v_report_1"};
     in.request_ref = {"a_request_1", "v_request_1"};
-    in.action_ref = {"a_action_1", "v_action_1"};
+    in.action_candidate_ref = {"a_action_candidate_1", "v_action_candidate_1"};
     in.decision      = ApprovalDecision::Reject;
     in.reason        = "not safe";
     in.actor         = {"human", "user:simon"};

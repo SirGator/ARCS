@@ -588,7 +588,8 @@ Side effects:
 
 Rules:
 
-* If approval is required by policy, no action may be materialized before approval is committed.
+* If approval is required by policy, no executable `action` may be created before approval is committed.
+* A deterministic `action_candidate` MAY be materialized before approval so the approval binds to a concrete proposed operation.
 * If approval is not required, the rationale MUST be derivable from committed policy and verification artifacts.
 
 ---

@@ -43,8 +43,8 @@ TEST(ActionMaterializerTest, EmitReportStepBecomesReportEmitAction) {
     auto actions = materializer.materialize(option, policy);
 
     ASSERT_EQ(actions.size(), 1u);
-    EXPECT_EQ(actions[0].type, "action");
-    EXPECT_EQ(actions[0].schema_id, "arcs.action.report_emit.v1");
+    EXPECT_EQ(actions[0].type, "action_candidate");
+    EXPECT_EQ(actions[0].schema_id, "arcs.action_candidate.report_emit.v1");
 
     EXPECT_EQ(actions[0].payload["type"], "report_emit");
     EXPECT_EQ(actions[0].payload["option_ref"]["artifact_id"], option.artifact_id);

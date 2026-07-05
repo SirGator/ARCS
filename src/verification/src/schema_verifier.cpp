@@ -1,3 +1,8 @@
+/**
+ * @file schema_verifier.cpp
+ * @brief Implements SchemaVerifier::check, which validates a target's
+ *        payload against its declared JSON schema via the schema registry.
+ */
 #include "verification/verifier.hpp"
 
 #include "schema/validator.hpp"
@@ -6,6 +11,15 @@
 
 namespace arcs::verification {
 
+/**
+ * @brief Validates the target's payload against the schema identified by
+ *        target.schema_id, using the schema registry from the context.
+ *        Fails if schema_id is empty, validation fails, or an exception
+ *        is thrown during validation.
+ * @param target Artifact version being verified.
+ * @param context Verification context; must provide a schema registry.
+ * @return VerificationCheck named "schema" with the outcome.
+ */
 VerificationCheck SchemaVerifier::check(
     const ArtifactVersion& target,
     const VerificationContext& context) const {

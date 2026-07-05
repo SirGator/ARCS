@@ -236,6 +236,18 @@ target_link_libraries(arcs_adapter_registry_tests
 
 add_test(NAME arcs_adapter_registry_tests COMMAND $<TARGET_FILE:arcs_adapter_registry_tests>)
 
+add_executable(arcs_adapter_interfaces_tests
+    test_adapter_interfaces.cpp
+)
+
+target_link_libraries(arcs_adapter_interfaces_tests
+    PRIVATE
+        arcs_adapters
+        GTest::gtest_main
+)
+
+add_test(NAME arcs_adapter_interfaces_tests COMMAND $<TARGET_FILE:arcs_adapter_interfaces_tests>)
+
 add_executable(arcs_text_flow_tests
     test_text_flow.cpp
 )
@@ -262,6 +274,56 @@ target_link_libraries(arcs_cli_adapters_tests
 
 add_test(NAME arcs_cli_adapters_tests COMMAND $<TARGET_FILE:arcs_cli_adapters_tests>)
 
+add_executable(arcs_ingress_service_tests
+    test_ingress_service.cpp
+)
+
+target_link_libraries(arcs_ingress_service_tests
+    PRIVATE
+        arcs_core
+        GTest::gtest_main
+)
+
+add_test(NAME arcs_ingress_service_tests COMMAND $<TARGET_FILE:arcs_ingress_service_tests>)
+
+add_executable(arcs_artifact_intake_service_tests
+    test_artifact_intake_service.cpp
+)
+
+target_link_libraries(arcs_artifact_intake_service_tests
+    PRIVATE
+        arcs_core
+        GTest::gtest_main
+)
+
+add_test(NAME arcs_artifact_intake_service_tests COMMAND $<TARGET_FILE:arcs_artifact_intake_service_tests>)
+
+add_executable(arcs_core_runtime_persistence_tests
+    test_core_runtime_persistence.cpp
+)
+
+target_link_libraries(arcs_core_runtime_persistence_tests
+    PRIVATE
+        arcs_core
+        arcs_approval
+        GTest::gtest_main
+)
+
+add_test(NAME arcs_core_runtime_persistence_tests COMMAND $<TARGET_FILE:arcs_core_runtime_persistence_tests>)
+
+add_executable(arcs_resume_service_tests
+    test_resume_service.cpp
+)
+
+target_link_libraries(arcs_resume_service_tests
+    PRIVATE
+        arcs_core
+        arcs_approval
+        GTest::gtest_main
+)
+
+add_test(NAME arcs_resume_service_tests COMMAND $<TARGET_FILE:arcs_resume_service_tests>)
+
 add_test(
     NAME arcs_full_stack_e2e_tests
     COMMAND
@@ -282,6 +344,18 @@ target_link_libraries(arcs_artifact_factory_tests
 )
 
 add_test(NAME arcs_artifact_factory_tests COMMAND $<TARGET_FILE:arcs_artifact_factory_tests>)
+
+add_executable(arcs_commit_service_tests
+    test_commit_service.cpp
+)
+
+target_link_libraries(arcs_commit_service_tests
+    PRIVATE
+        arcs_core
+        GTest::gtest_main
+)
+
+add_test(NAME arcs_commit_service_tests COMMAND $<TARGET_FILE:arcs_commit_service_tests>)
 
 # ---- Phase 0 additions ---------------------------------------------------
 

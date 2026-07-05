@@ -19,7 +19,13 @@
         "head_advanced",
         "approval_recorded",
         "action_materialized",
-        "execution_recorded"
+        "execution_recorded",
+        "approval.requested",
+        "approval.granted",
+        "approval.resumed",
+        "action.promoted",
+        "action.verified",
+        "decision.recorded"
       ]
     },
     "ts": { "type": "string", "format": "date-time" },

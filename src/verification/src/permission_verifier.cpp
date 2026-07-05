@@ -1,3 +1,9 @@
+/**
+ * @file permission_verifier.cpp
+ * @brief Implements PermissionVerifier::check, which compares the
+ *        capabilities required by a target's payload against the acting
+ *        principal's effective permissions.
+ */
 #include "verification/verifier.hpp"
 
 #include <sstream>
@@ -10,6 +16,13 @@ namespace arcs::verification {
 
 namespace {
 
+/**
+ * @brief Reads the list of required capability names from a target's
+ *        payload, checking either "requires_permissions" or
+ *        "required_permissions" (whichever is present).
+ * @param target Artifact version whose payload is inspected.
+ * @return The list of required capability strings, empty if none declared.
+ */
 std::vector<std::string> required_permissions_from_payload(const ArtifactVersion& target) {
     std::vector<std::string> out;
 
@@ -42,6 +55,12 @@ std::vector<std::string> required_permissions_from_payload(const ArtifactVersion
     return out;
 }
 
+/**
+ * @brief Joins a list of missing capability names into a single
+ *        comma-separated string for use in a detail message.
+ * @param missing Capability names that were missing.
+ * @return The comma-separated string, empty if missing is empty.
+ */
 std::string join_missing(const std::vector<std::string>& missing) {
     std::ostringstream oss;
     for (std::size_t i = 0; i < missing.size(); ++i) {
@@ -55,6 +74,14 @@ std::string join_missing(const std::vector<std::string>& missing) {
 
 } // namespace
 
+/**
+ * @brief Verifies that the acting principal's effective permissions cover
+ *        every capability the target declares as required. Targets that
+ *        declare no required permissions pass trivially.
+ * @param target Artifact version being verified.
+ * @param context Verification context, including effective permissions.
+ * @return VerificationCheck named "permission" with the outcome.
+ */
 VerificationCheck PermissionVerifier::check(
     const ArtifactVersion& target,
     const VerificationContext& context) const {

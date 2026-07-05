@@ -1,3 +1,8 @@
+/**
+ * @file policy_artifact.cpp
+ * @brief Implements JSON (de)serialization for PolicyPayload, declared in
+ * policy/policy.hpp.
+ */
 #include "policy/policy.hpp"
 
 #include <nlohmann/json.hpp>
@@ -6,6 +11,13 @@ namespace arcs::policy {
 
 namespace {
 
+/**
+ * @brief Reads a JSON array field into a vector of strings, or returns an
+ * empty vector if the field is absent.
+ * @param j JSON object to read from.
+ * @param key Name of the array field to extract.
+ * @return Vector of strings from the field, empty if the field is missing.
+ */
 std::vector<std::string> string_vec_from_json(
     const nlohmann::json& j,
     const char* key
@@ -25,6 +37,13 @@ std::vector<std::string> string_vec_from_json(
 
 } // namespace
 
+/**
+ * @brief Parses a full policy payload from its JSON representation,
+ * including capabilities, constraints, verifier rules, and approval
+ * requirements. Missing sections default to empty.
+ * @param j JSON object representing a policy.
+ * @return The parsed PolicyPayload.
+ */
 PolicyPayload policy_from_json(const nlohmann::json& j) {
     PolicyPayload policy{};
 
@@ -72,6 +91,12 @@ PolicyPayload policy_from_json(const nlohmann::json& j) {
     return policy;
 }
 
+/**
+ * @brief Serializes a policy payload to its JSON representation, emitting
+ * only the constraint sub-objects that are actually present.
+ * @param policy The policy payload to serialize.
+ * @return JSON object representing the policy.
+ */
 nlohmann::json policy_to_json(const PolicyPayload& policy) {
     nlohmann::json j;
 

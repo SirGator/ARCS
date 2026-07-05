@@ -1,3 +1,10 @@
+/**
+ * @file authority_verifier.cpp
+ * @brief Implements AuthorityVerifier: determines whether a target
+ *        requires an elevated authority capability (policy edit or
+ *        permission grant) and, if so, checks that the acting principal
+ *        holds it.
+ */
 #include "verification/authority_verifier.hpp"
 
 #include <algorithm>
@@ -16,6 +23,16 @@ bool AuthorityVerifier::has_capability(
     ) != permissions.capabilities.end();
 }
 
+/**
+ * @brief Determines whether the target requires the "policy:edit" or
+ *        "perm:grant" capability (based on its type, or its action type
+ *        when the target is an "action"), and if so, checks that the
+ *        context's effective permissions include it.
+ * @param target Artifact version being verified.
+ * @param ctx Verification context, including the effective permissions
+ *            of the acting principal.
+ * @return VerificationCheck named "authority" with the outcome.
+ */
 VerificationCheck AuthorityVerifier::check(
     const arcs::artifact::ArtifactVersion& target,
     const VerificationContext& ctx) const

@@ -1,3 +1,9 @@
+/**
+ * @file ids.cpp
+ * @brief Implements unique identifier generation for artifacts, artifact
+ *        versions, and events by combining a timestamp, a monotonically
+ *        increasing counter, and a random component.
+ */
 #include "artifact/ids.hpp"
 
 #include <atomic>
@@ -13,6 +19,14 @@ namespace arcs::artifact::ids {
 namespace {
     std::atomic<std::uint64_t> g_counter{0};
 
+    /**
+     * @brief Builds a unique id string by combining the given prefix with
+     *        the current epoch milliseconds, a process-wide atomic counter,
+     *        and a random 48-bit value, to make collisions practically
+     *        impossible even under concurrent calls.
+     * @param prefix Short string prepended to the generated id (e.g. "a_").
+     * @return The generated unique id string.
+     */
     std::string make_id(const std::string& prefix) {
         const auto now = std::chrono::system_clock::now().time_since_epoch();
         const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now).count();
@@ -33,14 +47,26 @@ namespace {
     }
 } // namespace arcs::artifact::ids
 
+/**
+ * @brief Generates a new unique artifact identifier.
+ * @return A unique string ID prefixed with "a_".
+ */
 std::string new_artifact_id() {
     return make_id("a_");
 }
 
+/**
+ * @brief Generates a new unique artifact version identifier.
+ * @return A unique string ID prefixed with "v_".
+ */
 std::string new_version_id() {
     return make_id("v_");
 }
 
+/**
+ * @brief Generates a new unique event identifier.
+ * @return A unique string ID prefixed with "e_".
+ */
 std::string new_event_id() {
     return make_id("e_");
 }

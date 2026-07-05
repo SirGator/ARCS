@@ -4,7 +4,7 @@
 #include <string>
 
 #include "core/flow.hpp"
-#include "execution/cli_output_adapter.hpp"
+#include "adapters/output/cli_output_adapter.hpp"
 #include "ingress/ingress_normalizer.hpp"
 #include "ingress/cli_ingress_source.hpp"
 
@@ -13,7 +13,7 @@ TEST(CliAdaptersTest, ReadInputAndWriteOutput)
     std::istringstream in("approval=yes permission=no\n");
     std::ostringstream out;
 
-    arcs::execution::CliTextOutputAdapter output_adapter;
+    arcs::adapters::output::CliTextOutputAdapter output_adapter;
 
     arcs::ingress::CliIngressSource source(in, "cli", "user:cli", "human");
     auto raw_event = source.emit();

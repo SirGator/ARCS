@@ -1,11 +1,19 @@
+/**
+ * @file head_tracker.cpp
+ * @brief Implements the `head_advanced` event reducer declared in head_tracker.hpp.
+ */
+
 #include "store/head_tracker.hpp"
 
 namespace arcs::store::head_tracker {
 
 namespace {
 
-
-
+/**
+ * @brief Finds the event ref with role "target" on a `head_advanced` event.
+ * @param event The event to search.
+ * @return Pointer to the target ref, or nullptr if none is present.
+ */
 const EventRef* find_target_ref(const Event& event)
 {
     for (const auto& ref : event.refs) {
@@ -16,6 +24,12 @@ const EventRef* find_target_ref(const Event& event)
     return nullptr;
 }
 
+/**
+ * @brief Validates that a target ref has non-empty artifact_id and version_id.
+ * @param event The owning event, used for error messages.
+ * @param ref The target ref to validate.
+ * @throws CommitRejectedError if either field is empty.
+ */
 void validate_target_ref(const Event& event, const EventRef& ref)
 {
     if (ref.artifact_id.empty()) {

@@ -1,3 +1,9 @@
+/**
+ * @file json.cpp
+ * @brief Implements to_json/from_json conversions between the artifact
+ *        model types and nlohmann::json, including validation of
+ *        enum-like string fields on deserialization.
+ */
 #include "artifact/json.hpp"
 
 #include <stdexcept>
@@ -6,6 +12,13 @@ namespace arcs::artifact {
 
 namespace {
 
+/**
+ * @brief Checks that a value is one of an allowed set of strings, throwing
+ *        if not. Used to validate enum-like fields when deserializing.
+ * @param value The value to check.
+ * @param allowed The set of allowed values.
+ * @param field_name Name of the field, used in the error message.
+ */
 void require_value(
     const std::string& value,
     const std::initializer_list<const char*> allowed,
@@ -24,11 +37,13 @@ void require_value(
 
 } // namespace
 
+/// @brief Serializes an ActorRef to JSON.
 void to_json(json& j, const ActorRef& v)
 {
     j = json{{"actor_type", v.actor_type}, {"id", v.id}};
 }
 
+/// @brief Deserializes an ActorRef from JSON, validating actor_type.
 void from_json(const json& j, ActorRef& v)
 {
     j.at("actor_type").get_to(v.actor_type);
@@ -36,11 +51,13 @@ void from_json(const json& j, ActorRef& v)
     require_value(v.actor_type, {"human", "system", "model", "executor"}, "actor_type");
 }
 
+/// @brief Serializes a SourceRef to JSON.
 void to_json(json& j, const SourceRef& v)
 {
     j = json{{"kind", v.kind}, {"ref", v.ref}};
 }
 
+/// @brief Deserializes a SourceRef from JSON, validating kind.
 void from_json(const json& j, SourceRef& v)
 {
     j.at("kind").get_to(v.kind);
@@ -48,11 +65,14 @@ void from_json(const json& j, SourceRef& v)
     require_value(v.kind, {"chat", "file", "api", "sensor", "timer", "internal"}, "source.kind");
 }
 
+/// @brief Serializes a TrustInfo to JSON.
 void to_json(json& j, const TrustInfo& v)
 {
     j = json{{"level", v.level}, {"source_class", v.source_class}};
 }
 
+/// @brief Deserializes a TrustInfo from JSON, validating level and
+///        source_class.
 void from_json(const json& j, TrustInfo& v)
 {
     j.at("level").get_to(v.level);
@@ -61,6 +81,7 @@ void from_json(const json& j, TrustInfo& v)
     require_value(v.source_class, {"human", "system", "model", "external"}, "trust.source_class");
 }
 
+/// @brief Serializes a ModelUsage to JSON.
 void to_json(json& j, const ModelUsage& v)
 {
     j = json{
@@ -72,6 +93,7 @@ void to_json(json& j, const ModelUsage& v)
     };
 }
 
+/// @brief Deserializes a ModelUsage from JSON.
 void from_json(const json& j, ModelUsage& v)
 {
     j.at("name").get_to(v.name);
@@ -81,6 +103,7 @@ void from_json(const json& j, ModelUsage& v)
     j.at("raw_output_hash").get_to(v.raw_output_hash);
 }
 
+/// @brief Serializes a Provenance to JSON.
 void to_json(json& j, const Provenance& v)
 {
     j = json{
@@ -91,6 +114,8 @@ void to_json(json& j, const Provenance& v)
     };
 }
 
+/// @brief Deserializes a Provenance from JSON. Each field defaults to
+///        empty if absent from the JSON object.
 void from_json(const json& j, Provenance& v)
 {
     if (j.contains("parents"))
@@ -130,6 +155,7 @@ void from_json(const json& j, Provenance& v)
     }
 }
 
+/// @brief Serializes an ArtifactVersion to JSON.
 void to_json(json& j, const ArtifactVersion& v)
 {
     j = json{
@@ -150,6 +176,8 @@ void to_json(json& j, const ArtifactVersion& v)
     };
 }
 
+/// @brief Deserializes an ArtifactVersion from JSON. The tags and
+///        provenance fields default to empty if absent.
 void from_json(const json& j, ArtifactVersion& v)
 {
     j.at("artifact_id").get_to(v.artifact_id);

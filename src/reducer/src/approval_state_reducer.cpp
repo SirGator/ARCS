@@ -1,7 +1,19 @@
+/**
+ * @file approval_state_reducer.cpp
+ * @brief Implements ApprovalStateReducer::reduce.
+ */
 #include "reducer/approval_state_reducer.hpp"
 
 namespace arcs::reducer {
 
+/**
+ * @brief Scans "approval" artifacts and derives the latest decision and
+ * policy reference, marking the state valid when the last seen decision is
+ * "approve". The policy reference may come from a raw string or from a
+ * "version_id"/"artifact_id" field of an object payload.
+ * @param artifacts Artifact history to reduce over.
+ * @return The resulting ApprovalState.
+ */
 ApprovalState ApprovalStateReducer::reduce(const std::vector<arcs::artifact::ArtifactVersion>& artifacts)
 {
     ApprovalState state{};

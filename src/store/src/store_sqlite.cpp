@@ -1,3 +1,12 @@
+/**
+ * @file store_sqlite.cpp
+ * @brief Implements the SQLite-backed `StoreSqlite` declared in store_sqlite.hpp.
+ *
+ * Handles schema creation/migration, JSON (de)serialization of artifact
+ * versions and events into flat SQLite rows, transaction management, and
+ * the head-projection logic that mirrors `head_tracker` for `StoreMemory`.
+ */
+
 #include "store/store_sqlite.hpp"
 
 #include "artifact/json.hpp"
@@ -24,6 +33,11 @@ namespace arcs::store {
 
 namespace {
 
+/**
+ * @brief Lazily-built, process-wide registry holding the `artifact_base` schema.
+ * @return Reference to the singleton registry.
+ * @throws arcs::store::StoreError if the schema file cannot be loaded/registered.
+ */
 const arcs::schema::SchemaRegistry& artifact_base_registry()
 {
     static const auto registry = [] {
@@ -44,6 +58,11 @@ const arcs::schema::SchemaRegistry& artifact_base_registry()
     return registry;
 }
 
+/**
+ * @brief Lazily-built, process-wide registry holding all per-type artifact payload schemas.
+ * @return Reference to the singleton registry.
+ * @throws arcs::store::StoreError if any schema file cannot be loaded/registered.
+ */
 const arcs::schema::SchemaRegistry& artifact_payload_registry()
 {
     static const auto registry = [] {
@@ -70,6 +89,11 @@ const arcs::schema::SchemaRegistry& artifact_payload_registry()
     return registry;
 }
 
+/**
+ * @brief Lazily-built, process-wide registry holding the `event` schema.
+ * @return Reference to the singleton registry.
+ * @throws arcs::store::StoreError if the schema file cannot be loaded/registered.
+ */
 const arcs::schema::SchemaRegistry& event_registry()
 {
     static const auto registry = [] {
@@ -90,6 +114,11 @@ const arcs::schema::SchemaRegistry& event_registry()
     return registry;
 }
 
+/**
+ * @brief Validates an artifact version against the shared `artifact_base` schema.
+ * @param version The version to validate.
+ * @throws CommitRejectedError if validation fails.
+ */
 void ensure_base_artifact_valid(const ArtifactVersion& version)
 {
     const nlohmann::json artifact_json = version;
@@ -107,6 +136,11 @@ void ensure_base_artifact_valid(const ArtifactVersion& version)
     }
 }
 
+/**
+ * @brief Validates an artifact version's payload against its declared schema_id.
+ * @param version The version whose payload is validated.
+ * @throws CommitRejectedError if validation fails.
+ */
 void ensure_payload_valid(const ArtifactVersion& version)
 {
     const auto validation = arcs::schema::Validator::validate(
@@ -123,6 +157,11 @@ void ensure_payload_valid(const ArtifactVersion& version)
     }
 }
 
+/**
+ * @brief Validates an event against the shared `event` schema.
+ * @param event The event to validate.
+ * @throws CommitRejectedError if validation fails.
+ */
 void ensure_event_valid(const Event& event)
 {
     const nlohmann::json event_json = event;
@@ -140,7 +179,7 @@ void ensure_event_valid(const Event& event)
     }
 }
 
-// RAII wrapper for sqlite3_stmt.
+/** @brief RAII wrapper that finalizes a `sqlite3_stmt*` on destruction. */
 struct Stmt {
     sqlite3_stmt* stmt{nullptr};
 
@@ -155,7 +194,13 @@ struct Stmt {
     Stmt& operator=(const Stmt&) = delete;
 };
 
-// Prepares a statement and throws StoreError with sqlite context on failure.
+/**
+ * @brief Prepares a SQL statement, throwing StoreError with sqlite context on failure.
+ * @param db The database handle.
+ * @param sql The SQL text to prepare.
+ * @return The prepared statement, wrapped for automatic finalization.
+ * @throws StoreError if preparation fails.
+ */
 Stmt prepare_stmt(sqlite3* db, const char* sql)
 {
     sqlite3_stmt* p = nullptr;
@@ -178,6 +223,13 @@ Stmt prepare_stmt(sqlite3* db, const char* sql)
 #define SQLITE_TRANSIENT reinterpret_cast<sqlite3_destructor_type>(-1)
 #endif
 
+/**
+ * @brief Binds a string value to a prepared statement parameter, copying it.
+ * @param stmt The prepared statement.
+ * @param index 1-based parameter index.
+ * @param value The string to bind.
+ * @throws StoreError if the bind call fails.
+ */
 void bind_text(sqlite3_stmt* stmt, int index, const std::string& value)
 {
     if (sqlite3_bind_text(stmt, index, value.c_str(),
@@ -187,6 +239,13 @@ void bind_text(sqlite3_stmt* stmt, int index, const std::string& value)
     }
 }
 
+/**
+ * @brief Binds a 64-bit integer value to a prepared statement parameter.
+ * @param stmt The prepared statement.
+ * @param index 1-based parameter index.
+ * @param value The integer to bind.
+ * @throws StoreError if the bind call fails.
+ */
 void bind_int64(sqlite3_stmt* stmt, int index, std::int64_t value)
 {
     if (sqlite3_bind_int64(stmt, index, value) != SQLITE_OK) {
@@ -194,6 +253,12 @@ void bind_int64(sqlite3_stmt* stmt, int index, std::int64_t value)
     }
 }
 
+/**
+ * @brief Reads a TEXT column value as a std::string, treating NULL as empty.
+ * @param stmt The statement positioned on a result row.
+ * @param index 0-based column index.
+ * @return The column's text value.
+ */
 std::string column_text(sqlite3_stmt* stmt, int index)
 {
     const unsigned char* p = sqlite3_column_text(stmt, index);
@@ -204,6 +269,12 @@ std::string column_text(sqlite3_stmt* stmt, int index)
     return std::string(reinterpret_cast<const char*>(p), static_cast<std::size_t>(len));
 }
 
+/**
+ * @brief Executes a SQL statement with no result set, throwing StoreError on failure.
+ * @param db The database handle.
+ * @param sql The SQL text to execute.
+ * @throws StoreError if execution fails.
+ */
 void exec_or_throw(sqlite3* db, const char* sql)
 {
     char* err = nullptr;
@@ -476,6 +547,12 @@ void StoreSqlite::append_event(const Event& event)
 
 namespace {
 
+/**
+ * @brief Reconstructs an ArtifactVersion from a result row of a SELECT over
+ * artifact_versions (columns in the fixed order used by get/get_version/list).
+ * @param stmt The statement positioned on a result row.
+ * @return The deserialized artifact version.
+ */
 ArtifactVersion load_artifact_version(sqlite3_stmt* stmt)
 {
     ArtifactVersion v;
@@ -507,6 +584,12 @@ ArtifactVersion load_artifact_version(sqlite3_stmt* stmt)
     return v;
 }
 
+/**
+ * @brief Reconstructs an Event from a result row of a SELECT over events
+ * (columns in the fixed order used by list_events).
+ * @param stmt The statement positioned on a result row.
+ * @return The deserialized event.
+ */
 Event load_event(sqlite3_stmt* stmt)
 {
     Event e;

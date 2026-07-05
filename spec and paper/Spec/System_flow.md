@@ -75,11 +75,19 @@ fail / unknown → blocked
     ↓
 pass
     ↓
+Action Materializer
+    ↓
+action_candidate
+    ↓
+Schema Gate
+    ↓
+Store Commit
+    ↓
 Approval Gate, if required by policy
-    ├── approval required → approval → Schema Gate → Store Commit
+    ├── approval required → approval_request → Schema Gate → Store Commit → approval → Schema Gate → Store Commit
     └── approval not required → continue with policy-derived rationale
     ↓
-Action Materializer
+Action Promotion
     ↓
 action
     ↓
@@ -114,7 +122,7 @@ External Output
 
 This flow MUST prevent direct planner-to-executor execution.
 
-A proposed operation MUST first become an explicit `option`, pass schema validation, pass option verification, satisfy approval requirements if required by policy, be deterministically materialized into an `action`, pass action verification, and only then reach an Executor.
+A proposed operation MUST first become an explicit `option`, pass schema validation, pass option verification, be deterministically materialized into an `action_candidate`, satisfy approval requirements if required by policy against that concrete candidate, be promoted into an `action`, pass action verification, and only then reach an Executor.
 
 ---
 
@@ -179,15 +187,17 @@ ARCS MUST follow the blocking rule:
 **fail = blocked**
 **unknown = blocked**
 
-Only an option with a `pass` verification result MAY continue to approval evaluation or action materialization.
+Only an option with a `pass` verification result MAY continue to action-candidate materialization and approval evaluation.
 
-If policy requires approval, the Approval Gate MUST create an `approval` artifact before an action MAY be materialized.
+If policy requires approval, the Approval Gate MUST create an `approval_request` and then an `approval` artifact bound to the concrete `action_candidate` before an executable `action` MAY be created.
 
-If policy does not require approval, ARCS MAY continue without an approval artifact, but the reason MUST be derivable from committed policy, permission, and verification artifacts.
+If policy does not require approval, ARCS MAY continue without an approval artifact, but the reason MUST be derivable from committed policy, permission, verification, and action-candidate artifacts.
 
-The Action Materializer MUST convert a verified and approved-if-required option into an `action`.
+The Action Materializer MUST convert a verified option into an `action_candidate`.
 
-The Action Materializer MUST be deterministic. It MUST NOT call an LLM, parse natural language, infer missing execution parameters, perform I/O, or invent execution details.
+The Action Promotion step MUST convert an approved-if-required `action_candidate` into an executable `action`.
+
+The Action Materializer and Action Promotion step MUST be deterministic. They MUST NOT call an LLM, parse natural language, infer missing execution parameters, perform I/O, or invent execution details.
 
 The `action` MUST pass action verification before execution.
 
@@ -249,6 +259,10 @@ task
 option
     ↓
 verification_report for option
+    ↓
+action_candidate
+    ↓
+approval_request, if required by policy
     ↓
 approval, if required by policy
     ↓

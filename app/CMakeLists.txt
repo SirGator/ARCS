@@ -1,5 +1,6 @@
 add_executable(arcs_app
     main.cpp
+    runtime_session.cpp
 )
 
 target_link_libraries(arcs_app

@@ -8,7 +8,8 @@
 
 #include "core/flow.hpp"
 #include "interpretation/config.hpp"
-#include "execution/cli_output_adapter.hpp"
+#include "runtime_session.hpp"
+#include "adapters/output/cli_output_adapter.hpp"
 
 namespace {
 
@@ -92,7 +93,7 @@ void print_usage()
 {
     std::cout << "Usage: arcs_app [options]\n"
               << "  --config <file>                       Load YAML config\n"
-              << "  --demo-control                        Allow demo approval/permission flags\n";
+              << "  --demo-control                        Enable non-production test controls\n";
 }
 
 struct ParsedArgs {
@@ -160,9 +161,10 @@ int main(int argc, char* argv[])
         .enable_demo_controls = demo_control_enabled,
     };
 
-    const auto output = arcs::core::run_text_flow(line, &interpretation_config, flow_options);
+    arcs::app::RuntimeSession session;
+    const auto output = session.run_text(line, &interpretation_config, flow_options);
 
-    arcs::execution::CliTextOutputAdapter output_adapter;
+    arcs::adapters::output::CliTextOutputAdapter output_adapter;
     output_adapter.write(std::cout, output);
 
     std::ofstream log_file("arcs.log", std::ios::app);
