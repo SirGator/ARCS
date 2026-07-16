@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "$id": "arcs.adapter_submission.v1",
+  "type": "object",
+  "required": ["adapter_id", "adapter_type", "version", "status"],
+  "properties": {
+    "adapter_id": { "type": "string", "minLength": 1 },
+    "adapter_type": { "type": "string", "minLength": 1 },
+    "version": { "type": "string", "minLength": 1 },
+    "status": { "type": "string", "minLength": 1 }
+  },
+  "additionalProperties": false
+}

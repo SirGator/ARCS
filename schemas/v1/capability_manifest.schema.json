@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "$id": "arcs.capability_manifest.v1",
+  "type": "object",
+  "required": ["adapter_id", "action_type", "schema_id", "target_adapter", "risk_level", "description", "requires_approval"],
+  "properties": {
+    "adapter_id": { "type": "string", "minLength": 1 },
+    "action_type": { "type": "string", "minLength": 1 },
+    "schema_id": { "type": "string", "minLength": 1 },
+    "target_adapter": { "type": "string", "minLength": 1 },
+    "risk_level": { "type": "string", "minLength": 1 },
+    "description": { "type": "string" },
+    "requires_approval": { "type": "boolean" }
+  },
+  "additionalProperties": false
+}

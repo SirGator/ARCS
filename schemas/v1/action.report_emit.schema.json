@@ -2,13 +2,14 @@
   "$schema": "https://json-schema.org/draft-07/schema#",
   "$id": "arcs.action.report_emit.v1",
   "type": "object",
-  "required": ["action_id", "type", "option_ref", "policy_ref", "action_candidate_ref", "approval_ref", "verification_ref", "params", "required_permissions", "safety_level", "idempotency_key"],
+  "required": ["action_id", "type", "target_adapter", "option_ref", "policy_ref", "action_candidate_ref", "approval_ref", "verification_ref", "params", "required_permissions", "safety_level", "idempotency_key"],
   "properties": {
     "action_id": { "type": "string", "minLength": 1 },
     "type": {
       "type": "string",
       "const": "report_emit"
     },
+    "target_adapter": { "type": "string", "minLength": 1 },
     "option_ref": {
       "type": "object",
       "required": ["artifact_id", "version_id"],

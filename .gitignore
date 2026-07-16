@@ -1,7 +1,10 @@
 build/
 build-fixed/
+.venv/
+venv/
 .cache/
 .vscode/
+.idea/
 .pytest_cache/
 
 *.o
@@ -18,8 +21,10 @@ compile_commands.json
 
 artifacts/
 arcs.log
+source/arcs.log
+*.log
+*.tmp
 
-.venv/
 __pycache__/
 *.pyc
 *.pyo
@@ -29,3 +34,8 @@ ARCS_Core_Specification.md
 json/
 
 phases/
+
+/source
+/docs
+/spec and paper
+

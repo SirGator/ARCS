@@ -13,6 +13,8 @@
       },
       "additionalProperties": false
     },
+    "action_type": { "type": "string" },
+    "target_adapter": { "type": "string" },
     "status": {
       "type": "string",
       "enum": ["success", "fail", "timeout", "cancelled"]

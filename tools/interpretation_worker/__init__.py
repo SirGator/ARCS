@@ -1,1 +1,0 @@
-"""ARCS interpretation worker."""

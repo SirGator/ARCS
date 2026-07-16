@@ -25,6 +25,7 @@
         "approval.resumed",
         "action.promoted",
         "action.verified",
+        "execution.command_dispatched",
         "decision.recorded"
       ]
     },

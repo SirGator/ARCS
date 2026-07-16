@@ -1,16 +1,15 @@
 {
   "$schema": "https://json-schema.org/draft-07/schema#",
-  "$id": "arcs.action_candidate.report_emit.v1",
+  "$id": "arcs.execution_command.v1",
   "type": "object",
-  "required": ["action_id", "type", "target_adapter", "option_ref", "policy_ref", "params", "required_permissions", "safety_level", "idempotency_key"],
+  "required": ["command_id", "action_id", "type", "action_type", "target_adapter", "action_ref", "params", "required_permissions", "safety_level", "idempotency_key"],
   "properties": {
+    "command_id": { "type": "string", "minLength": 1 },
     "action_id": { "type": "string", "minLength": 1 },
-    "type": {
-      "type": "string",
-      "const": "report_emit"
-    },
+    "type": { "type": "string", "minLength": 1 },
+    "action_type": { "type": "string", "minLength": 1 },
     "target_adapter": { "type": "string", "minLength": 1 },
-    "option_ref": {
+    "action_ref": {
       "type": "object",
       "required": ["artifact_id", "version_id"],
       "properties": {
@@ -19,7 +18,7 @@
       },
       "additionalProperties": false
     },
-    "policy_ref": {
+    "approval_ref": {
       "type": "object",
       "required": ["artifact_id", "version_id"],
       "properties": {
@@ -28,21 +27,16 @@
       },
       "additionalProperties": false
     },
-    "params": {
+    "verification_ref": {
       "type": "object",
-      "required": ["format"],
+      "required": ["artifact_id", "version_id"],
       "properties": {
-        "format": {
-          "type": "string",
-          "enum": ["json", "md", "pdf"]
-        },
-        "sections": {
-          "type": "array",
-          "items": { "type": "string" }
-        }
+        "artifact_id": { "type": "string", "minLength": 1 },
+        "version_id": { "type": "string", "minLength": 1 }
       },
       "additionalProperties": false
     },
+    "params": { "type": "object" },
     "required_permissions": {
       "type": "array",
       "items": { "type": "string" }
