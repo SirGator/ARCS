@@ -25,14 +25,14 @@ pub enum ArtifactKind {
     Error,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ArtifactState {
-    Raw,
-    Validated,
-    Rejected,
-    Approved,
-    Executed,
-    Failed,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ArtifactKind {
+    Input,
+    Intent,
+    Action,
+    Result,
+    Error,
 }
 
 #[derive(Debug, Clone)]
@@ -67,7 +67,6 @@ pub fn create_raw_artifact_base(
     id: i32,
     schema_id: i32,
     kind: ArtifactKind,
-    state: ArtifactState,
     origin: String,
     subject: String,
     content: String,
@@ -86,4 +85,3 @@ pub fn create_raw_artifact_base(
         created_at: CreatedAt(created_at),
     }
 }
-
