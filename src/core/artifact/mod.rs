@@ -1,4 +1,3 @@
-pub mod artifact-base;
-pub mod artifact-lifecycle;
+pub mod types;
 
-pub use artifact_base::*;
+pub use types::*;
