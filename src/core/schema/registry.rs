@@ -1,6 +1,6 @@
-use std::collection::HashMap;
+use std::collections::HashMap;
 
-use crate::core::atifact::SchemaIdM;
+use crate::core::artifact::SchemaId;
 use super::types::SchemaDefinition;
 
 pub struct SchemaRegistry {

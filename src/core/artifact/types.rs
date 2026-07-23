@@ -1,29 +1,34 @@
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+use serde::Serialize;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 pub struct ArtifactId(i32);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 pub struct SchemaId(i32);
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+impl SchemaId {
+    pub fn new(value: i32) -> Self {
+        Self(value)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub struct Origin(String);
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub struct Subject(String);
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Content(String);
 
-#[derive(Debug, Clone)]
-pub struct CreatedAt(String);
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ArtifactKind {
-    Input,
-    Intent,
-    Action,
-    Result,
-    Error,
+impl Content {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
 }
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CreatedAt(String);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -35,13 +40,22 @@ pub enum ArtifactKind {
     Error,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ArtifactState {
+    Raw,
+    Validated,
+    Rejected,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct Relation {
     pub from: ArtifactId,
     pub kind: RelationKind,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum RelationKind {
     DerivedFrom,
     CausedBy,
@@ -49,7 +63,7 @@ pub enum RelationKind {
     Replaces,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ArtifactBase {
     pub id: ArtifactId,
     pub schema_id: SchemaId,
@@ -61,7 +75,6 @@ pub struct ArtifactBase {
     pub relations: Vec<Relation>,
     pub created_at: CreatedAt,
 }
-
 
 pub fn create_raw_artifact_base(
     id: i32,

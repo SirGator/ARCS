@@ -16,7 +16,7 @@ pub fn validate_artifact(
         Some(schema) => schema,
         None => {
             artifact.state = ArtifactState::Rejected;
-            return Err(ValidattionError::SchemaNotFound);
+            return Err(ValidationError::SchemaNotFound);
         }
     };
 
@@ -31,7 +31,7 @@ pub fn validate_artifact(
         return Err(ValidationError::EmptyContent);
     }
 
-    artifact.state = ArtifactState::Validated
+    artifact.state = ArtifactState::Validated;
 
     Ok(())
 }
