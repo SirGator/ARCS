@@ -35,8 +35,8 @@ json/
 
 phases/
 
-/source
 /docs
-/spec and paper
+/target/
+**/target/
 /target
 
