@@ -35,15 +35,3 @@ pub fn validate_artifact(
 
     Ok(())
 }
-
-impl Content {
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl SchemaId {
-    pub fn new(value: i32) -> Self {
-        Self(value)
-    }
-}
