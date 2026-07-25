@@ -24,19 +24,24 @@ policies, permissions and approval gates as newly proposed flows.
 
 ## Current milestone
 
-The Rust implementation currently provides the trusted data foundation:
+The Rust implementation currently provides one deliberately small input slice:
 
-- a typed artifact envelope matching `schemas/v1/artifact_base.schema.json`
-- embedded payload schemas from `schemas/v1/`
-- fail-closed envelope and payload validation
+- a typed Rust artifact envelope
+- the embedded `arcs.input.v1` payload schema
+- fail-closed payload validation
+- consistency checks between schema ID, artifact type and schema version
 - explicit lifecycle-event types instead of mutable artifact state
 - an append-only SQLite artifact-version store
 - protection against duplicate versions and version gaps
 
+The envelope is not yet validated through a separate JSON schema. For this
+first slice, Rust types define its structure while `arcs.input.v1` validates
+the payload. Input provenance lives only in the envelope's `source` field; the
+payload contains only non-empty `raw_text`.
+
 Reasoning, graph retrieval, policy evaluation, approvals, adapter execution and
-learning weights are subsequent milestones. The existing schemas define many
-of their data contracts already, but the runtime components are not implemented
-yet.
+learning weights are subsequent milestones. Their schemas and runtime
+components are not implemented yet.
 
 ## Build and test
 
@@ -67,14 +72,14 @@ cargo run
 ## Project layout
 
 ```text
-schemas/v1/              JSON contracts
+schemas/v1/              current input payload contract
 src/core/artifact/       immutable artifact envelope
 src/core/schema/         embedded schema registry and validator
-src/core/validation/     envelope and payload validation
+src/core/validation/     payload and schema-consistency validation
 src/core/lifecycle/      append-only lifecycle event types
 src/store/database/      SQLite artifact store
 src/main.rs              minimal executable example
 ```
 
-The JSON schemas are the contract. Rust structures and runtime behavior must
-remain compatible with them.
+Payload JSON schemas are the external data contracts. Rust structures define
+the internal envelope until a dedicated envelope schema is introduced.

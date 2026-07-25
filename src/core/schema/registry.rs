@@ -8,10 +8,7 @@ use super::{SchemaDefinition, SchemaViolation};
 
 // Die Verträge werden in die Binary eingebettet. Ihre Verfügbarkeit hängt
 // damit zur Laufzeit nicht von einem veränderbaren Arbeitsverzeichnis ab.
-const BUNDLED_SCHEMAS: &[&str] = &[
-    include_str!("../../../schemas/v1/input.schema.json"),
-
-];
+const BUNDLED_SCHEMAS: &[&str] = &[include_str!("../../../schemas/v1/input.schema.json")];
 
 /// Fehler beim Einlesen eines Schemas in die Registry.
 #[derive(Debug)]
@@ -163,10 +160,7 @@ fn validate_value(
     if let Some(expected) = schema.get("const")
         && expected != value
     {
-        violations.push(SchemaViolation::new(
-            path,
-            format!("must equal {expected}"),
-        ));
+        violations.push(SchemaViolation::new(path, format!("must equal {expected}")));
     }
 
     if let Some(text) = value.as_str()
@@ -202,7 +196,10 @@ fn validate_value(
         && let Some(text) = value.as_str()
         && !is_rfc3339(text)
     {
-        violations.push(SchemaViolation::new(path, "must be a valid RFC 3339 date-time"));
+        violations.push(SchemaViolation::new(
+            path,
+            "must be a valid RFC 3339 date-time",
+        ));
     }
 
     if let Some(object) = value.as_object() {
@@ -357,12 +354,38 @@ mod tests {
     use super::*;
 
     #[test]
-    // Ein unvollständiger Payload muss blockiert werden.
-    fn bundled_schema_rejects_missing_required_payload_field() {
+    // Ein Input ohne Rohtext muss blockiert werden.
+    fn bundled_input_schema_rejects_missing_raw_text() {
+        let registry = SchemaRegistry::with_bundled_schemas().unwrap();
+        let result = registry.validate(&SchemaId("arcs.input.v1".into()), &json!({}));
+
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .iter()
+                .any(|violation| violation.path == "$.raw_text")
+        );
+    }
+
+    #[test]
+    // Leerer Text ist kein verwertbarer Input.
+    fn bundled_input_schema_rejects_empty_raw_text() {
+        let registry = SchemaRegistry::with_bundled_schemas().unwrap();
+        assert!(
+            registry
+                .validate(&SchemaId("arcs.input.v1".into()), &json!({"raw_text": ""}),)
+                .is_err()
+        );
+    }
+
+    #[test]
+    // Herkunft gehört in den Envelope und darf nicht im Payload dupliziert sein.
+    fn bundled_input_schema_rejects_additional_source() {
         let registry = SchemaRegistry::with_bundled_schemas().unwrap();
         let result = registry.validate(
-            &SchemaId("arcs.task.v1".into()),
-            &json!({"description": "missing title"}),
+            &SchemaId("arcs.input.v1".into()),
+            &json!({"raw_text": "Hallo ARCS", "source": "duplicate"}),
         );
 
         assert!(result.is_err());
@@ -370,7 +393,7 @@ mod tests {
             result
                 .unwrap_err()
                 .iter()
-                .any(|violation| violation.path == "$.title")
+                .any(|violation| violation.path == "$.source")
         );
     }
 }

@@ -171,14 +171,14 @@ mod tests {
 
     use super::*;
 
-    fn task() -> Artifact {
-        // Gültiges Task-Artefakt als Ausgangspunkt aller Store-Tests.
+    fn input() -> Artifact {
+        // Gültiges Input-Artefakt als Ausgangspunkt aller Store-Tests.
         Artifact::new(
-            "task-1",
-            "task-1-v1",
-            "task",
-            "arcs.task.v1",
-            "2026-07-25T18:00:00Z",
+            "input-1",
+            "input-1-v1",
+            "input",
+            "arcs.input.v1",
+            "2026-07-26T23:00:00+02:00",
             Actor {
                 actor_type: ActorType::Human,
                 id: "user-1".into(),
@@ -191,8 +191,8 @@ mod tests {
                 level: TrustLevel::High,
                 source_class: SourceClass::Human,
             },
-            "goal:1",
-            json!({"title": "Repair project"}),
+            "input:1",
+            json!({"raw_text": "Hallo ARCS"}),
         )
     }
 
@@ -201,7 +201,7 @@ mod tests {
     fn appends_and_reads_artifact() {
         let registry = SchemaRegistry::with_bundled_schemas().unwrap();
         let store = SqliteArtifactStore::in_memory().unwrap();
-        let artifact = task();
+        let artifact = input();
 
         store.append(&artifact, &registry).unwrap();
 
@@ -214,7 +214,7 @@ mod tests {
     fn refuses_to_overwrite_a_version() {
         let registry = SchemaRegistry::with_bundled_schemas().unwrap();
         let store = SqliteArtifactStore::in_memory().unwrap();
-        let artifact = task();
+        let artifact = input();
         store.append(&artifact, &registry).unwrap();
 
         assert!(store.append(&artifact, &registry).is_err());
@@ -226,9 +226,9 @@ mod tests {
     fn rejects_version_gaps() {
         let registry = SchemaRegistry::with_bundled_schemas().unwrap();
         let store = SqliteArtifactStore::in_memory().unwrap();
-        let mut artifact = task();
+        let mut artifact = input();
         artifact.version = 2;
-        artifact.version_id = VersionId("task-1-v2".into());
+        artifact.version_id = VersionId("input-1-v2".into());
 
         assert!(matches!(
             store.append(&artifact, &registry),

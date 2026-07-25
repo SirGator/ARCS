@@ -1,64 +1,53 @@
-use crate::core::artifact::{Artifact, SchemaId};
+use crate::core::artifact::Artifact;
 use crate::core::schema::{SchemaRegistry, SchemaViolation};
 
 /// Gründe, aus denen ein Artefakt nicht in den Store gelangen darf.
 #[derive(Debug)]
 pub enum ValidationError {
-    /// Der typisierte Umschlag konnte nicht in JSON überführt werden.
-    Serialization(serde_json::Error),
-    /// Metadaten oder Struktur des gemeinsamen Umschlags sind ungültig.
-    Envelope(Vec<SchemaViolation>),
-    /// Der fachliche Payload verletzt seinen eigenen Vertrag.
+    /// Schema-ID, Artefakttyp, Schemaversion oder Payload sind ungültig.
     Payload(Vec<SchemaViolation>),
-    /// `created_at` besitzt keine erkennbare RFC-3339-Struktur.
-    InvalidTimestamp,
 }
 
-/// Validiert Umschlag und Payload eines Artefakts in zwei getrennten Stufen.
+/// Validiert den ersten minimalen ARCS-Flow.
 ///
-/// Erst wenn beide Verträge und der Zeitstempel gültig sind, darf das Artefakt
-/// gespeichert werden. Ein fehlender Vertrag führt über die Registry ebenfalls
-/// zu einem Fehler.
+/// In diesem Slice ist die typisierte Rust-Struktur selbst der Vertrag für den
+/// Artefakt-Umschlag. Die JSON-Schema-Prüfung gilt vorerst nur für den Payload.
+/// Vor der Payload-Prüfung wird sichergestellt, dass Schema-ID, fachlicher Typ
+/// und Schemaversion widerspruchsfrei zusammengehören.
 pub fn validate_artifact(
     artifact: &Artifact,
     registry: &SchemaRegistry,
 ) -> Result<(), ValidationError> {
-    // Der gemeinsame Umschlag kontrolliert Identität, Herkunft, Vertrauen,
-    // Versionierung und Provenienz unabhängig vom konkreten Artefakttyp.
-    let envelope = serde_json::to_value(artifact).map_err(ValidationError::Serialization)?;
-    registry
-        .validate(&SchemaId("arcs.artifact_base.v1".into()), &envelope)
-        .map_err(ValidationError::Envelope)?;
+    let schema = registry.get(&artifact.schema_id).ok_or_else(|| {
+        ValidationError::Payload(vec![SchemaViolation::new(
+            "$.schema_id",
+            "schema is not registered",
+        )])
+    })?;
 
-    // Danach wird ausschließlich der fachliche Inhalt gegen sein angegebenes
-    // Schema geprüft.
-    registry
-        .validate(&artifact.schema_id, &artifact.payload)
-        .map_err(ValidationError::Payload)?;
-
-    // Das Schema deklariert `date-time`. Diese kleine zusätzliche Prüfung
-    // verhindert beliebige Strings, ohne Zeitberechnungen in den Core zu holen.
-    if !looks_like_rfc3339(&artifact.created_at) {
-        return Err(ValidationError::InvalidTimestamp);
+    if artifact.artifact_type != schema.artifact_type {
+        return Err(ValidationError::Payload(vec![SchemaViolation::new(
+            "$.type",
+            format!(
+                "artifact type '{}' does not match schema type '{}'",
+                artifact.artifact_type, schema.artifact_type
+            ),
+        )]));
     }
 
-    Ok(())
-}
+    if artifact.schema_version != schema.version {
+        return Err(ValidationError::Payload(vec![SchemaViolation::new(
+            "$.schema_version",
+            format!(
+                "schema version '{}' does not match registered version '{}'",
+                artifact.schema_version, schema.version
+            ),
+        )]));
+    }
 
-fn looks_like_rfc3339(value: &str) -> bool {
-    // Geprüft wird bewusst nur die unverzichtbare Struktur. Semantische
-    // Zeitrechnung gehört später in einen spezialisierten Zeittyp.
-    let bytes = value.as_bytes();
-    bytes.len() >= 20
-        && bytes.get(4) == Some(&b'-')
-        && bytes.get(7) == Some(&b'-')
-        && bytes.get(10) == Some(&b'T')
-        && bytes.get(13) == Some(&b':')
-        && bytes.get(16) == Some(&b':')
-        && (value.ends_with('Z')
-            || bytes
-                .get(19..)
-                .is_some_and(|suffix| suffix.contains(&b'+') || suffix.contains(&b'-')))
+    registry
+        .validate(&artifact.schema_id, &artifact.payload)
+        .map_err(ValidationError::Payload)
 }
 
 #[cfg(test)]
@@ -71,14 +60,13 @@ mod tests {
 
     use super::*;
 
-    fn task(payload: Value) -> Artifact {
-        // Gemeinsames Fixture; nur der Payload variiert je Test.
+    fn input(payload: Value) -> Artifact {
         Artifact::new(
-            "artifact-1",
-            "version-1",
-            "task",
-            "arcs.task.v1",
-            "2026-07-25T18:00:00+02:00",
+            "input-1",
+            "input-1-v1",
+            "input",
+            "arcs.input.v1",
+            "2026-07-26T23:00:00+02:00",
             Actor {
                 actor_type: ActorType::Human,
                 id: "simon".into(),
@@ -91,25 +79,53 @@ mod tests {
                 level: TrustLevel::High,
                 source_class: SourceClass::Human,
             },
-            "task:1",
+            "input:1",
             payload,
         )
     }
 
     #[test]
-    // Belegt, dass Umschlag und Task-Payload gemeinsam akzeptiert werden.
-    fn valid_task_passes_both_validation_layers() {
+    // Ein Input mit nichtleerem Rohtext erfüllt den Minimalvertrag.
+    fn valid_input_passes_payload_validation() {
         let registry = SchemaRegistry::with_bundled_schemas().unwrap();
-        assert!(validate_artifact(&task(json!({"title": "Repair project"})), &registry).is_ok());
+        assert!(validate_artifact(&input(json!({"raw_text": "Hallo ARCS"})), &registry).is_ok());
     }
 
     #[test]
-    // Ein Modellvorschlag ohne Pflichtfelder darf den Core nicht passieren.
-    fn malformed_task_fails_closed() {
+    // Ein Input ohne Pflichtfeld darf den Core nicht passieren.
+    fn malformed_input_fails_closed() {
         let registry = SchemaRegistry::with_bundled_schemas().unwrap();
         assert!(matches!(
-            validate_artifact(&task(json!({})), &registry),
+            validate_artifact(&input(json!({})), &registry),
             Err(ValidationError::Payload(_))
         ));
+    }
+
+    #[test]
+    // Der fachliche Artefakttyp muss zur registrierten Schema-ID passen.
+    fn mismatching_artifact_type_is_rejected() {
+        let registry = SchemaRegistry::with_bundled_schemas().unwrap();
+        let mut artifact = input(json!({"raw_text": "Hallo ARCS"}));
+        artifact.artifact_type = "action".into();
+
+        let Err(ValidationError::Payload(violations)) = validate_artifact(&artifact, &registry)
+        else {
+            panic!("mismatching artifact type must be rejected");
+        };
+        assert_eq!(violations[0].path, "$.type");
+    }
+
+    #[test]
+    // Die numerische Version muss mit dem Suffix der Schema-ID übereinstimmen.
+    fn mismatching_schema_version_is_rejected() {
+        let registry = SchemaRegistry::with_bundled_schemas().unwrap();
+        let mut artifact = input(json!({"raw_text": "Hallo ARCS"}));
+        artifact.schema_version = 2;
+
+        let Err(ValidationError::Payload(violations)) = validate_artifact(&artifact, &registry)
+        else {
+            panic!("mismatching schema version must be rejected");
+        };
+        assert_eq!(violations[0].path, "$.schema_version");
     }
 }
