@@ -1,5 +1,7 @@
-pub mod types;
-pub mod registry;
+//! Versionierte JSON-Verträge und ihre Laufzeitprüfung.
 
-pub use types::*;
+pub mod registry;
+pub mod types;
+
 pub use registry::*;
+pub use types::*;

@@ -1,42 +1,52 @@
-mod core;
-
-use core::{
-    create_raw_artifact_base,
-    validate_artifact,
-    ArtifactKind,
-    SchemaDefinition,
-    SchemaId,
-    SchemaRegistry,
+use arcs::core::{
+    Actor, ActorType, Artifact, SchemaRegistry, Source, SourceClass, SourceKind, Trust, TrustLevel,
 };
+use arcs::store::SqliteArtifactStore;
+use serde_json::json;
 
 fn main() {
-    let mut registry = SchemaRegistry::new();
+    // Die Demo verwendet dieselben eingebetteten Verträge wie der Core.
+    let registry = SchemaRegistry::with_bundled_schemas().expect("bundled schemas must be valid");
 
-    registry.register(SchemaDefinition {
-        id: SchemaId::new(1),
-        name: "raw_text_input".to_string(),
-        artifact_kind: ArtifactKind::Input,
-    });
+    // Der flüchtige Store hält das Beispiel nebenwirkungsfrei. Für dauerhafte
+    // Daten steht `SqliteArtifactStore::open` bereit.
+    let store = SqliteArtifactStore::in_memory().expect("store must initialize");
 
-    let mut artifact = create_raw_artifact_base(
-        1,
-        1,
-        ArtifactKind::Input,
-        "dummy_adapter".to_string(),
-        "dummy_input".to_string(),
-        "Hallo ARCS".to_string(),
-        vec![],
-        "2026-07-18T21:00:00+02:00".to_string(),
+    // Das menschliche Ziel wird als nachvollziehbares Task-Artefakt erfasst.
+    let goal = Artifact::new(
+        "goal-demo",
+        "goal-demo-v1",
+        "task",
+        "arcs.task.v1",
+        "2026-07-25T18:00:00+02:00",
+        Actor {
+            actor_type: ActorType::Human,
+            id: "demo-user".into(),
+        },
+        Source {
+            kind: SourceKind::Chat,
+            reference: "demo".into(),
+        },
+        Trust {
+            level: TrustLevel::High,
+            source_class: SourceClass::Human,
+        },
+        "demo:goal",
+        json!({"title": "Demonstrate the ARCS artifact foundation"}),
     );
 
-    let validation_result = validate_artifact(&mut artifact, &registry);
+    store
+        .append(&goal, &registry)
+        .expect("valid artifact must be committed");
 
-    if let Err(error) = validation_result {
-        eprintln!("Validation failed: {error:?}");
-    }
+    let loaded = store
+        .get(&goal.version_id)
+        .expect("database read must succeed")
+        .expect("stored artifact must exist");
 
-    let json = serde_json::to_string_pretty(&artifact)
-        .expect("Artifact konnte nicht als JSON serialisiert werden");
-
-    println!("{json}");
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&loaded)
+            .expect("artifact must serialize")
+    );
 }

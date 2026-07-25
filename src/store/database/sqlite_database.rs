@@ -1,0 +1,241 @@
+//! SQLite-Implementierung des unveränderlichen Artefakt-Stores.
+
+use rusqlite::{Connection, OptionalExtension, params};
+
+use crate::core::{Artifact, SchemaRegistry, ValidationError, VersionId, validate_artifact};
+
+/// Fehler an der Validierungs- oder Persistenzgrenze.
+#[derive(Debug)]
+pub enum StoreError {
+    /// SQLite konnte eine Operation nicht durchführen.
+    Database(rusqlite::Error),
+    /// Ein Artefakt konnte nicht verlustfrei serialisiert werden.
+    Serialization(serde_json::Error),
+    /// Das Artefakt hat seine kontrollierte Prüfung nicht bestanden.
+    Validation(ValidationError),
+    /// Die neue Version setzt die Historie nicht lückenlos fort.
+    VersionConflict { expected: u64, actual: u64 },
+}
+
+// Diese Konvertierungen halten `?` lesbar und bewahren die Fehlerursache.
+impl From<rusqlite::Error> for StoreError {
+    fn from(value: rusqlite::Error) -> Self {
+        Self::Database(value)
+    }
+}
+
+impl From<serde_json::Error> for StoreError {
+    fn from(value: serde_json::Error) -> Self {
+        Self::Serialization(value)
+    }
+}
+
+/// Append-only SQLite-Speicher für versionierte Artefakte.
+///
+/// Eine gespeicherte Version wird nie aktualisiert. Neue Erkenntnisse werden
+/// als neue Version oder separates, referenzierendes Artefakt angehängt.
+pub struct SqliteArtifactStore {
+    connection: Connection,
+}
+
+impl SqliteArtifactStore {
+    /// Öffnet oder erzeugt einen persistenten Store am angegebenen Pfad.
+    pub fn open(path: impl AsRef<std::path::Path>) -> Result<Self, StoreError> {
+        Self::from_connection(Connection::open(path)?)
+    }
+
+    /// Erzeugt einen flüchtigen Store für Tests und Demos.
+    pub fn in_memory() -> Result<Self, StoreError> {
+        Self::from_connection(Connection::open_in_memory()?)
+    }
+
+    /// Initialisiert das idempotent anlegbare Datenbankschema.
+    fn from_connection(connection: Connection) -> Result<Self, StoreError> {
+        // `version_id` ist global eindeutig. Der zweite UNIQUE-Constraint
+        // verhindert konkurrierende Versionen derselben Nummer. `sequence`
+        // bewahrt die tatsächliche Commit-Reihenfolge.
+        connection.execute_batch(
+            "
+            PRAGMA foreign_keys = ON;
+            CREATE TABLE IF NOT EXISTS artifact_versions (
+                sequence       INTEGER PRIMARY KEY AUTOINCREMENT,
+                version_id     TEXT NOT NULL UNIQUE,
+                artifact_id    TEXT NOT NULL,
+                version        INTEGER NOT NULL CHECK (version >= 1),
+                stream_key     TEXT NOT NULL,
+                schema_id      TEXT NOT NULL,
+                artifact_json  TEXT NOT NULL,
+                committed_at   TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (artifact_id, version)
+            );
+            CREATE INDEX IF NOT EXISTS idx_artifact_versions_stream
+                ON artifact_versions(stream_key, sequence);
+            ",
+        )?;
+        Ok(Self { connection })
+    }
+
+    /// Validiert und speichert genau eine unveränderliche Artefaktversion.
+    pub fn append(&self, artifact: &Artifact, registry: &SchemaRegistry) -> Result<(), StoreError> {
+        // Kein Artefakt darf die Schema-Sicherheitsgrenze umgehen.
+        validate_artifact(artifact, registry).map_err(StoreError::Validation)?;
+
+        // Die erste Version muss 1 sein; danach ist nur der direkte Nachfolger
+        // erlaubt. So entstehen keine nicht replaybaren Lücken.
+        let latest: Option<i64> = self
+            .connection
+            .query_row(
+                "SELECT MAX(version) FROM artifact_versions WHERE artifact_id = ?1",
+                params![artifact.artifact_id.0],
+                |row| row.get(0),
+            )
+            .optional()?
+            .flatten();
+        let expected = latest.map_or(1, |version| version as u64 + 1);
+        if artifact.version != expected {
+            return Err(StoreError::VersionConflict {
+                expected,
+                actual: artifact.version,
+            });
+        }
+
+        // Erst nach allen Prüfungen wird das vollständige Artefakt mit einer
+        // einzelnen INSERT-Anweisung atomar angehängt.
+        let json = serde_json::to_string(artifact)?;
+        self.connection.execute(
+            "INSERT INTO artifact_versions
+             (version_id, artifact_id, version, stream_key, schema_id, artifact_json)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                artifact.version_id.0,
+                artifact.artifact_id.0,
+                artifact.version as i64,
+                artifact.stream_key,
+                artifact.schema_id.0,
+                json
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Liest eine exakte Version anhand ihrer globalen Versions-ID.
+    pub fn get(&self, version_id: &VersionId) -> Result<Option<Artifact>, StoreError> {
+        let json: Option<String> = self
+            .connection
+            .query_row(
+                "SELECT artifact_json FROM artifact_versions WHERE version_id = ?1",
+                params![version_id.0],
+                |row| row.get(0),
+            )
+            .optional()?;
+        json.map(|json| serde_json::from_str(&json).map_err(StoreError::Serialization))
+            .transpose()
+    }
+
+    /// Liest die höchste bekannte Version einer Artefaktidentität.
+    pub fn latest(&self, artifact_id: &str) -> Result<Option<Artifact>, StoreError> {
+        let json: Option<String> = self
+            .connection
+            .query_row(
+                "SELECT artifact_json FROM artifact_versions
+                 WHERE artifact_id = ?1 ORDER BY version DESC LIMIT 1",
+                params![artifact_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        json.map(|json| serde_json::from_str(&json).map_err(StoreError::Serialization))
+            .transpose()
+    }
+
+    /// Gibt die Anzahl aller gespeicherten Artefaktversionen zurück.
+    pub fn len(&self) -> Result<u64, StoreError> {
+        let count: i64 =
+            self.connection
+                .query_row("SELECT COUNT(*) FROM artifact_versions", [], |row| {
+                    row.get(0)
+                })?;
+        Ok(count as u64)
+    }
+
+    /// Prüft ohne Mutation, ob der Store noch leer ist.
+    pub fn is_empty(&self) -> Result<bool, StoreError> {
+        Ok(self.len()? == 0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use crate::core::{Actor, ActorType, Source, SourceClass, SourceKind, Trust, TrustLevel};
+
+    use super::*;
+
+    fn task() -> Artifact {
+        // Gültiges Task-Artefakt als Ausgangspunkt aller Store-Tests.
+        Artifact::new(
+            "task-1",
+            "task-1-v1",
+            "task",
+            "arcs.task.v1",
+            "2026-07-25T18:00:00Z",
+            Actor {
+                actor_type: ActorType::Human,
+                id: "user-1".into(),
+            },
+            Source {
+                kind: SourceKind::Chat,
+                reference: "chat-1".into(),
+            },
+            Trust {
+                level: TrustLevel::High,
+                source_class: SourceClass::Human,
+            },
+            "goal:1",
+            json!({"title": "Repair project"}),
+        )
+    }
+
+    #[test]
+    // Der normale Pfad muss exakt denselben Wert wiederherstellen.
+    fn appends_and_reads_artifact() {
+        let registry = SchemaRegistry::with_bundled_schemas().unwrap();
+        let store = SqliteArtifactStore::in_memory().unwrap();
+        let artifact = task();
+
+        store.append(&artifact, &registry).unwrap();
+
+        assert_eq!(store.len().unwrap(), 1);
+        assert_eq!(store.get(&artifact.version_id).unwrap().unwrap(), artifact);
+    }
+
+    #[test]
+    // Append-only bedeutet insbesondere: keine Version überschreiben.
+    fn refuses_to_overwrite_a_version() {
+        let registry = SchemaRegistry::with_bundled_schemas().unwrap();
+        let store = SqliteArtifactStore::in_memory().unwrap();
+        let artifact = task();
+        store.append(&artifact, &registry).unwrap();
+
+        assert!(store.append(&artifact, &registry).is_err());
+        assert_eq!(store.len().unwrap(), 1);
+    }
+
+    #[test]
+    // Historien mit fehlenden Zwischenversionen sind nicht replaybar.
+    fn rejects_version_gaps() {
+        let registry = SchemaRegistry::with_bundled_schemas().unwrap();
+        let store = SqliteArtifactStore::in_memory().unwrap();
+        let mut artifact = task();
+        artifact.version = 2;
+        artifact.version_id = VersionId("task-1-v2".into());
+
+        assert!(matches!(
+            store.append(&artifact, &registry),
+            Err(StoreError::VersionConflict {
+                expected: 1,
+                actual: 2
+            })
+        ));
+    }
+}
