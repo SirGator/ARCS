@@ -30,18 +30,20 @@ The Rust implementation currently provides one deliberately small input slice:
 - the embedded `arcs.input.v1` payload schema
 - fail-closed payload validation
 - consistency checks between schema ID, artifact type and schema version
-- explicit lifecycle-event types instead of mutable artifact state
 - an append-only SQLite artifact-version store
 - protection against duplicate versions and version gaps
+- persistent, directed links between stored artifact versions
+- weighted neighbor lookup with normalized weights from `-1.0` to `1.0`
+- transient, single-step activation propagation across persisted edges
 
 The envelope is not yet validated through a separate JSON schema. For this
 first slice, Rust types define its structure while `arcs.input.v1` validates
 the payload. Input provenance lives only in the envelope's `source` field; the
 payload contains only non-empty `raw_text`.
 
-Reasoning, graph retrieval, policy evaluation, approvals, adapter execution and
-learning weights are subsequent milestones. Their schemas and runtime
-components are not implemented yet.
+Multi-step graph traversal, persisted activations and learned weight updates
+are not part of this first network slice. Reasoning, policy evaluation,
+approvals and adapter execution are also subsequent milestones.
 
 ## Build and test
 
@@ -76,8 +78,8 @@ schemas/v1/              current input payload contract
 src/core/artifact/       immutable artifact envelope
 src/core/schema/         embedded schema registry and validator
 src/core/validation/     payload and schema-consistency validation
-src/core/lifecycle/      append-only lifecycle event types
 src/store/database/      SQLite artifact store
+src/store/network/       directed artifact-network API and types
 src/main.rs              minimal executable example
 ```
 

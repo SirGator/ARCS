@@ -3,6 +3,7 @@
 use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::core::{Artifact, SchemaRegistry, ValidationError, VersionId, validate_artifact};
+use crate::store::network::NetworkEdge;
 
 /// Fehler an der Validierungs- oder Persistenzgrenze.
 #[derive(Debug)]
@@ -15,6 +16,8 @@ pub enum StoreError {
     Validation(ValidationError),
     /// Die neue Version setzt die Historie nicht lückenlos fort.
     VersionConflict { expected: u64, actual: u64 },
+    /// Das Kantengewicht liegt außerhalb des geschlossenen Bereichs `-1.0..=1.0`.
+    InvalidEdgeWeight(f64),
 }
 
 // Diese Konvertierungen halten `?` lesbar und bewahren die Fehlerursache.
@@ -70,6 +73,22 @@ impl SqliteArtifactStore {
             );
             CREATE INDEX IF NOT EXISTS idx_artifact_versions_stream
                 ON artifact_versions(stream_key, sequence);
+            CREATE TABLE IF NOT EXISTS artifact_edges (
+                sequence         INTEGER PRIMARY KEY AUTOINCREMENT,
+                from_version_id  TEXT NOT NULL,
+                to_version_id    TEXT NOT NULL,
+                weight           REAL NOT NULL CHECK (
+                    weight >= -1.0 AND weight <= 1.0
+                ),
+                connected_at     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (from_version_id, to_version_id),
+                FOREIGN KEY (from_version_id)
+                    REFERENCES artifact_versions(version_id),
+                FOREIGN KEY (to_version_id)
+                    REFERENCES artifact_versions(version_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_artifact_edges_from
+                ON artifact_edges(from_version_id, sequence);
             ",
         )?;
         Ok(Self { connection })
@@ -147,6 +166,43 @@ impl SqliteArtifactStore {
             .transpose()
     }
 
+    /// Verbindet zwei bereits gespeicherte Artefaktversionen.
+    ///
+    /// Die Fremdschlüssel verhindern Kanten zu unbekannten Versionen. Eine
+    /// gerichtete Verbindung darf nur einmal angelegt werden.
+    pub(crate) fn connect(&self, edge: &NetworkEdge) -> Result<(), StoreError> {
+        if !edge.weight.is_finite() || !(-1.0..=1.0).contains(&edge.weight) {
+            return Err(StoreError::InvalidEdgeWeight(edge.weight));
+        }
+
+        self.connection.execute(
+            "INSERT INTO artifact_edges (from_version_id, to_version_id, weight)
+             VALUES (?1, ?2, ?3)",
+            params![edge.from.0, edge.to.0, edge.weight],
+        )?;
+        Ok(())
+    }
+
+    /// Liest ausgehende Kanten in stabiler Einfügereihenfolge.
+    pub(crate) fn outgoing_edges(&self, from: &VersionId) -> Result<Vec<NetworkEdge>, StoreError> {
+        let mut statement = self.connection.prepare(
+            "SELECT from_version_id, to_version_id, weight
+             FROM artifact_edges
+             WHERE from_version_id = ?1
+             ORDER BY sequence",
+        )?;
+        let edges = statement
+            .query_map(params![from.0], |row| {
+                Ok(NetworkEdge {
+                    from: VersionId(row.get(0)?),
+                    to: VersionId(row.get(1)?),
+                    weight: row.get(2)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(edges)
+    }
+
     /// Gibt die Anzahl aller gespeicherten Artefaktversionen zurück.
     pub fn len(&self) -> Result<u64, StoreError> {
         let count: i64 =
@@ -172,10 +228,14 @@ mod tests {
     use super::*;
 
     fn input() -> Artifact {
+        input_with_ids("input-1", "input-1-v1")
+    }
+
+    fn input_with_ids(artifact_id: &str, version_id: &str) -> Artifact {
         // Gültiges Input-Artefakt als Ausgangspunkt aller Store-Tests.
         Artifact::new(
-            "input-1",
-            "input-1-v1",
+            artifact_id,
+            version_id,
             "input",
             "arcs.input.v1",
             "2026-07-26T23:00:00+02:00",
@@ -237,5 +297,100 @@ mod tests {
                 actual: 2
             })
         ));
+    }
+
+    #[test]
+    // Nur bereits persistierte Artefaktversionen dürfen verbunden werden.
+    fn refuses_edges_to_unknown_versions() {
+        let registry = SchemaRegistry::with_bundled_schemas().unwrap();
+        let store = SqliteArtifactStore::in_memory().unwrap();
+        let from = input();
+        store.append(&from, &registry).unwrap();
+
+        let result = store.connect(&NetworkEdge {
+            from: from.version_id,
+            to: VersionId("missing-v1".into()),
+            weight: 0.75,
+        });
+
+        assert!(matches!(result, Err(StoreError::Database(_))));
+    }
+
+    #[test]
+    // Nur normalisierte Gewichte ergeben eine klar begrenzte Netzsemantik.
+    fn refuses_invalid_edge_weights() {
+        let store = SqliteArtifactStore::in_memory().unwrap();
+        for weight in [f64::NAN, f64::INFINITY, -1.01, 1.01] {
+            let result = store.connect(&NetworkEdge {
+                from: VersionId("from-v1".into()),
+                to: VersionId("to-v1".into()),
+                weight,
+            });
+
+            assert!(matches!(result, Err(StoreError::InvalidEdgeWeight(value))
+                    if value.is_nan() || value == weight));
+        }
+    }
+
+    #[test]
+    // Auch ein direkter Datenbankzugriff darf die Gewichtsgrenze nicht umgehen.
+    fn database_constraint_refuses_out_of_range_edge_weights() {
+        let registry = SchemaRegistry::with_bundled_schemas().unwrap();
+        let store = SqliteArtifactStore::in_memory().unwrap();
+        let source = input_with_ids("source", "source-v1");
+        let target = input_with_ids("target", "target-v1");
+        store.append(&source, &registry).unwrap();
+        store.append(&target, &registry).unwrap();
+
+        let result = store.connection.execute(
+            "INSERT INTO artifact_edges (from_version_id, to_version_id, weight)
+             VALUES (?1, ?2, ?3)",
+            params![source.version_id.0, target.version_id.0, 1.01],
+        );
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    // Die gespeicherte Richtung, Reihenfolge und Gewichtung müssen erhalten bleiben.
+    fn stores_and_reads_outgoing_edges() {
+        let registry = SchemaRegistry::with_bundled_schemas().unwrap();
+        let store = SqliteArtifactStore::in_memory().unwrap();
+        let source = input_with_ids("source", "source-v1");
+        let first = input_with_ids("first", "first-v1");
+        let second = input_with_ids("second", "second-v1");
+        for artifact in [&source, &first, &second] {
+            store.append(artifact, &registry).unwrap();
+        }
+        store
+            .connect(&NetworkEdge {
+                from: source.version_id.clone(),
+                to: first.version_id.clone(),
+                weight: 0.8,
+            })
+            .unwrap();
+        store
+            .connect(&NetworkEdge {
+                from: source.version_id.clone(),
+                to: second.version_id.clone(),
+                weight: -0.25,
+            })
+            .unwrap();
+
+        assert_eq!(
+            store.outgoing_edges(&source.version_id).unwrap(),
+            vec![
+                NetworkEdge {
+                    from: source.version_id.clone(),
+                    to: first.version_id,
+                    weight: 0.8,
+                },
+                NetworkEdge {
+                    from: source.version_id.clone(),
+                    to: second.version_id,
+                    weight: -0.25,
+                },
+            ]
+        );
     }
 }
