@@ -35,15 +35,28 @@ The Rust implementation currently provides one deliberately small input slice:
 - persistent, directed links between stored artifact versions
 - weighted neighbor lookup with normalized weights from `-1.0` to `1.0`
 - transient, single-step activation propagation across persisted edges
+- aggregation of multiple source contributions before threshold activation
 
 The envelope is not yet validated through a separate JSON schema. For this
 first slice, Rust types define its structure while `arcs.input.v1` validates
 the payload. Input provenance lives only in the envelope's `source` field; the
 payload contains only non-empty `raw_text`.
 
-Multi-step graph traversal, persisted activations and learned weight updates
-are not part of this first network slice. Reasoning, policy evaluation,
+Multi-step graph traversal, persisted activations, decay and learned weight
+updates are not part of this network slice. Reasoning, policy evaluation,
 approvals and adapter execution are also subsequent milestones.
+
+## Network activation semantics
+
+`ArtifactNetwork::propagate_many` accepts source activations from `0.0` to
+`1.0`; every source version may occur once per call. Each outgoing edge
+contributes `source activation * edge weight` to its target. Contributions that
+reach the same immutable target version are added before the non-negative
+threshold is applied. Activated targets are returned from strongest to weakest,
+with their immutable artifact and aggregate activation.
+
+Inputs, contributions and aggregate activations are transient calculation
+results. Only artifacts and their directed edges are persisted.
 
 ## Build and test
 

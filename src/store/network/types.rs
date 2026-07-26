@@ -17,10 +17,16 @@ pub struct NetworkNeighbor {
     pub weight: f64,
 }
 
-/// Flüchtiges Ergebnis einer einmaligen Aktivierungsweiterleitung.
+/// Flüchtige Aktivierung einer gespeicherten Quellversion.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ActiveSource {
+    pub version_id: VersionId,
+    pub activation: f64,
+}
+
+/// Flüchtiges Ziel, dessen aggregierte Aktivierung die Schwelle erreicht.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ActivatedArtifact {
     pub artifact: Artifact,
     pub activation: f64,
-    pub via_weight: f64,
 }
