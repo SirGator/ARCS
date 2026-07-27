@@ -1,0 +1,22 @@
+{
+  "$id": "arcs.reasoning_request.v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ARCS Reasoning Request Artifact",
+  "description": "Auditierbarer, vom Core erzeugter Auftrag mit ausschließlich kuratierten Kontextreferenzen.",
+  "type": "object",
+  "required": ["objective", "context_refs"],
+  "properties": {
+    "objective": {
+      "type": "string",
+      "minLength": 1
+    },
+    "context_refs": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  },
+  "additionalProperties": false
+}

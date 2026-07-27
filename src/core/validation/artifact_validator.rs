@@ -1,5 +1,7 @@
-use crate::core::artifact::Artifact;
-use crate::core::schema::{SchemaRegistry, SchemaViolation};
+use crate::core::artifact::{
+    Artifact, MAX_ARTIFACT_TYPE_BYTES, MAX_MODEL_TRACE_TEXT_BYTES, MAX_SOURCE_REFERENCE_BYTES,
+};
+use crate::core::schema::{SchemaRegistry, SchemaViolation, is_rfc3339};
 
 /// Gründe, aus denen ein Artefakt nicht in den Store gelangen darf.
 #[derive(Debug)]
@@ -8,16 +10,121 @@ pub enum ValidationError {
     Payload(Vec<SchemaViolation>),
 }
 
-/// Validiert den ersten minimalen ARCS-Flow.
+/// Validiert den typisierten Artifact-Umschlag und seinen Payload-Vertrag.
 ///
-/// In diesem Slice ist die typisierte Rust-Struktur selbst der Vertrag für den
-/// Artefakt-Umschlag. Die JSON-Schema-Prüfung gilt vorerst nur für den Payload.
-/// Vor der Payload-Prüfung wird sichergestellt, dass Schema-ID, fachlicher Typ
-/// und Schemaversion widerspruchsfrei zusammengehören.
+/// Die Rust-Struktur verhindert falsche Grundtypen. Zusätzlich werden alle
+/// sicherheits- und auditrelevanten Texte, Zeit, Version und Modelltemperaturen
+/// fail-closed geprüft. JSON Schema kontrolliert anschließend den fachlichen
+/// Payload; Schema-ID, Artifact-Typ und Schemaversion müssen zusammenpassen.
 pub fn validate_artifact(
     artifact: &Artifact,
     registry: &SchemaRegistry,
 ) -> Result<(), ValidationError> {
+    let mut envelope_violations = Vec::new();
+    validate_envelope_text(
+        "$.artifact_id",
+        &artifact.artifact_id.0,
+        512,
+        &mut envelope_violations,
+    );
+    validate_envelope_text(
+        "$.version_id",
+        &artifact.version_id.0,
+        512,
+        &mut envelope_violations,
+    );
+    validate_envelope_text(
+        "$.type",
+        &artifact.artifact_type,
+        MAX_ARTIFACT_TYPE_BYTES,
+        &mut envelope_violations,
+    );
+    validate_envelope_text(
+        "$.created_by.id",
+        &artifact.created_by.id,
+        512,
+        &mut envelope_violations,
+    );
+    validate_envelope_text(
+        "$.source.ref",
+        &artifact.source.reference,
+        MAX_SOURCE_REFERENCE_BYTES,
+        &mut envelope_violations,
+    );
+    validate_envelope_text(
+        "$.stream_key",
+        &artifact.stream_key,
+        1_024,
+        &mut envelope_violations,
+    );
+    if artifact.version == 0 {
+        envelope_violations.push(SchemaViolation::new("$.version", "must be at least 1"));
+    }
+    if !is_rfc3339(&artifact.created_at) {
+        envelope_violations.push(SchemaViolation::new(
+            "$.created_at",
+            "must be a valid RFC 3339 date-time",
+        ));
+    }
+    for (index, tag) in artifact.tags.iter().enumerate() {
+        validate_envelope_text(
+            &format!("$.tags[{index}]"),
+            tag,
+            1_024,
+            &mut envelope_violations,
+        );
+    }
+    if let Some(provenance) = &artifact.provenance {
+        for (index, parent) in provenance.parents.iter().enumerate() {
+            validate_envelope_text(
+                &format!("$.provenance.parents[{index}]"),
+                parent,
+                512,
+                &mut envelope_violations,
+            );
+        }
+        for (index, model) in provenance.models_used.iter().enumerate() {
+            validate_envelope_text(
+                &format!("$.provenance.models_used[{index}].name"),
+                &model.name,
+                MAX_MODEL_TRACE_TEXT_BYTES,
+                &mut envelope_violations,
+            );
+            validate_envelope_text(
+                &format!("$.provenance.models_used[{index}].prompt_hash"),
+                &model.prompt_hash,
+                MAX_MODEL_TRACE_TEXT_BYTES,
+                &mut envelope_violations,
+            );
+            validate_envelope_text(
+                &format!("$.provenance.models_used[{index}].raw_output_hash"),
+                &model.raw_output_hash,
+                MAX_MODEL_TRACE_TEXT_BYTES,
+                &mut envelope_violations,
+            );
+            if !model.temperature.is_finite() || model.temperature < 0.0 {
+                envelope_violations.push(SchemaViolation::new(
+                    format!("$.provenance.models_used[{index}].temperature"),
+                    "must be finite and non-negative",
+                ));
+            }
+        }
+    }
+    if !envelope_violations.is_empty() {
+        return Err(ValidationError::Payload(envelope_violations));
+    }
+
+    if artifact.subject.as_ref().is_some_and(|subject| {
+        subject.0.trim().is_empty()
+            || subject.0.len() > 512
+            || subject.0.chars().any(char::is_control)
+    }) {
+        return Err(ValidationError::Payload(vec![SchemaViolation::new(
+            "$.subject",
+            "subject must be non-empty, control-free, and at most 512 bytes",
+        )]));
+    }
+
     let schema = registry.get(&artifact.schema_id).ok_or_else(|| {
         ValidationError::Payload(vec![SchemaViolation::new(
             "$.schema_id",
@@ -48,6 +155,21 @@ pub fn validate_artifact(
     registry
         .validate(&artifact.schema_id, &artifact.payload)
         .map_err(ValidationError::Payload)
+}
+
+fn validate_envelope_text(
+    path: &str,
+    value: &str,
+    maximum_bytes: usize,
+    violations: &mut Vec<SchemaViolation>,
+) {
+    if value.trim().is_empty() || value.len() > maximum_bytes || value.chars().any(char::is_control)
+    {
+        violations.push(SchemaViolation::new(
+            path,
+            format!("must be non-empty, control-free, and at most {maximum_bytes} bytes"),
+        ));
+    }
 }
 
 #[cfg(test)]
@@ -127,5 +249,28 @@ mod tests {
             panic!("mismatching schema version must be rejected");
         };
         assert_eq!(violations[0].path, "$.schema_version");
+    }
+
+    #[test]
+    fn invalid_envelope_metadata_is_rejected_before_payload_validation() {
+        let registry = SchemaRegistry::with_bundled_schemas().unwrap();
+        let mut artifact = input(json!({"raw_text": "Hallo ARCS"}));
+        artifact.created_at = "not-a-date".into();
+        artifact.created_by.id = " ".into();
+
+        let Err(ValidationError::Payload(violations)) = validate_artifact(&artifact, &registry)
+        else {
+            panic!("invalid envelope metadata must be rejected");
+        };
+        assert!(
+            violations
+                .iter()
+                .any(|violation| violation.path == "$.created_at")
+        );
+        assert!(
+            violations
+                .iter()
+                .any(|violation| violation.path == "$.created_by.id")
+        );
     }
 }

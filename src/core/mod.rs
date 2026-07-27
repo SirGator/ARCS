@@ -12,8 +12,9 @@ pub mod schema;
 pub mod validation;
 
 pub use artifact::{
-    Actor, ActorType, Artifact, ArtifactId, ModelUse, Provenance, SchemaId, Source, SourceClass,
-    SourceKind, Trust, TrustLevel, VersionId,
+    Actor, ActorType, Artifact, ArtifactId, MAX_ARTIFACT_TYPE_BYTES, MAX_MODEL_TRACE_TEXT_BYTES,
+    MAX_SOURCE_REFERENCE_BYTES, ModelUse, Provenance, SchemaId, Source, SourceClass, SourceKind,
+    SubjectId, Trust, TrustLevel, VersionId,
 };
 pub use schema::{RegistryError, SchemaDefinition, SchemaRegistry, SchemaViolation};
 pub use validation::{ValidationError, validate_artifact};

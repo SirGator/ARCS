@@ -1,0 +1,134 @@
+//! Use Case zum einmaligen Persistieren eines validierten Modellkandidaten.
+
+use super::reasoning::ensure_candidate_schema;
+use super::{AdapterGateway, AdapterGatewayError};
+use crate::adapters::reasoning::ValidatedProposal;
+use crate::core::{
+    Actor, ActorType, Artifact, ModelUse, Provenance, Source, SourceClass, SourceKind, Trust,
+    TrustLevel,
+};
+use crate::store::relation_kinds;
+
+impl AdapterGateway<'_> {
+    /// Speichert einen zuvor validierten Modellvorschlag als niedrig
+    /// vertrauenswürdiges Candidate-Artifact. Dies autorisiert oder dispatcht
+    /// die vorgeschlagenen Fähigkeiten ausdrücklich nicht.
+    pub fn commit_proposal(
+        &mut self,
+        proposal: ValidatedProposal,
+    ) -> Result<Artifact, AdapterGatewayError> {
+        for capability in &proposal.required_capabilities {
+            if !self.registry.is_enabled_capability(capability) {
+                return Err(AdapterGatewayError::ForbiddenCandidateCapability(
+                    capability.clone(),
+                ));
+            }
+        }
+        let proposal_key = (
+            proposal.adapter_id.clone(),
+            proposal.request_id.clone(),
+            proposal.candidate_index,
+        );
+        if self.committed_proposals.contains(&proposal_key) {
+            return Err(AdapterGatewayError::ProposalAlreadyCommitted {
+                adapter: proposal.adapter_id,
+                request_id: proposal.request_id,
+                candidate_index: proposal.candidate_index,
+            });
+        }
+        ensure_candidate_schema(self.schemas, &proposal.schema_id)?;
+        self.schemas
+            .validate(&proposal.schema_id, &proposal.payload)
+            .map_err(AdapterGatewayError::InvalidPayload)?;
+        let definition = self
+            .schemas
+            .get(&proposal.schema_id)
+            .ok_or_else(|| {
+                AdapterGatewayError::MissingRegisteredSchema(proposal.schema_id.clone())
+            })?
+            .clone();
+        let generated = self.ids.next(&definition.artifact_type);
+        let artifact = Artifact {
+            artifact_id: generated.artifact_id,
+            version_id: generated.version_id,
+            version: 1,
+            artifact_type: definition.artifact_type,
+            schema_id: definition.id,
+            schema_version: definition.version,
+            created_at: self.clock.now_rfc3339(),
+            created_by: Actor {
+                actor_type: ActorType::Model,
+                id: proposal.adapter_id.0.clone(),
+            },
+            source: Source {
+                // Der Core erzeugt den sicheren Umschlag, der fachliche Inhalt
+                // bleibt jedoch eine externe Modellausgabe.
+                kind: SourceKind::External,
+                reference: format!("reasoning:{}", proposal.request_id),
+            },
+            trust: Trust {
+                level: TrustLevel::Low,
+                source_class: SourceClass::Model,
+            },
+            stream_key: format!("reasoning:{}", proposal.request_id),
+            subject: None,
+            tags: proposal
+                .required_capabilities
+                .iter()
+                .map(|capability| {
+                    format!(
+                        "requires:{}:{}",
+                        capability.adapter_id.0, capability.capability_id.0
+                    )
+                })
+                .chain([format!("adapter:{}", proposal.adapter_id.0)])
+                .collect(),
+            payload: proposal.payload,
+            provenance: Some(Provenance {
+                parents: proposal
+                    .referenced_versions
+                    .iter()
+                    .map(|version| version.0.clone())
+                    .collect(),
+                rules_applied: vec![
+                    "adapter_gateway.reasoning_context_minimized".into(),
+                    "adapter_gateway.proposal_schema_validated".into(),
+                    "adapter_gateway.candidate_capabilities_bounded".into(),
+                ],
+                models_used: vec![ModelUse {
+                    name: proposal.trace.model_name,
+                    prompt_hash: proposal.trace.prompt_hash,
+                    inputs: proposal
+                        .context_versions
+                        .iter()
+                        .map(|version| version.0.clone())
+                        .collect(),
+                    temperature: proposal.trace.temperature,
+                    raw_output_hash: proposal.trace.raw_output_hash,
+                }],
+                transform: Some(format!("reasoning_adapter:{}", proposal.adapter_id.0)),
+            }),
+        };
+
+        // Aktivierungsgewichte und semantische Nachvollziehbarkeit bleiben
+        // getrennt: Diese Kanten dokumentieren Evidenz und Modellauftrag,
+        // beeinflussen aber keine Network-Aktivierung.
+        let relations = proposal
+            .referenced_versions
+            .iter()
+            .cloned()
+            .map(|version| (version, relation_kinds::supported_by()))
+            .chain([(
+                proposal.reasoning_request_version.clone(),
+                relation_kinds::generated_by(),
+            )])
+            .collect::<Vec<_>>();
+        self.store
+            .append_related(&artifact, self.schemas, &relations)?;
+        self.committed_proposals.insert(proposal_key);
+        Ok(artifact)
+    }
+}
+
+#[cfg(test)]
+mod tests;

@@ -1,6 +1,15 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+/// Globale Obergrenze für auditierbare externe oder interne Source-Referenzen.
+pub const MAX_SOURCE_REFERENCE_BYTES: usize = 2_048;
+
+/// Gemeinsame Grenze für den aus einer Schema-ID abgeleiteten Artifact-Typ.
+pub const MAX_ARTIFACT_TYPE_BYTES: usize = 128;
+
+/// Gemeinsame Grenze für Namen und Hashes in einer Modell-Provenienz.
+pub const MAX_MODEL_TRACE_TEXT_BYTES: usize = 512;
+
 /// Stabile Identität eines Artefakts über alle seine Versionen hinweg.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -16,6 +25,14 @@ pub struct VersionId(pub String);
 #[serde(transparent)]
 pub struct SchemaId(pub String);
 
+/// Fachliches Objekt, auf das sich ein Artifact bezieht.
+///
+/// Beispiele sind `server-01/cpu` oder `current_user_request`. Die konkrete
+/// Semantik bleibt beim jeweiligen Adapter-Schema.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct SubjectId(pub String);
+
 /// Autoritätsklasse des Erstellers.
 ///
 /// Die Klasse ist sicherheitsrelevant: Ein Modell kann beispielsweise einen
@@ -27,6 +44,8 @@ pub enum ActorType {
     Human,
     /// Eine deterministische ARCS-Systemkomponente.
     System,
+    /// Ein registrierter externer Input-, State- oder Transform-Adapter.
+    Adapter,
     /// Ein LLM oder anderes probabilistisches Reasoning-System.
     Model,
     /// Ein kontrollierter Adapter, der eine freigegebene Aktion ausführt.
@@ -56,6 +75,8 @@ pub enum SourceKind {
     Sensor,
     /// Zeitgesteuertes Ereignis.
     Timer,
+    /// Rückgabe eines externen Adapters ohne fachlich genauer bekannten Kanal.
+    External,
     /// Von ARCS selbst erzeugte Information.
     Internal,
 }
@@ -167,6 +188,9 @@ pub struct Artifact {
     pub trust: Trust,
     /// Gruppiert zusammengehörige Artefakte und Ereignisse.
     pub stream_key: String,
+    /// Optionales fachliches Ziel für Current-State-Auflösung.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subject: Option<SubjectId>,
     /// Optionale Such- und Klassifikationsmerkmale.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
@@ -208,9 +232,16 @@ impl Artifact {
             source,
             trust,
             stream_key: stream_key.into(),
+            subject: None,
             tags: Vec::new(),
             payload,
             provenance: None,
         }
+    }
+
+    /// Ordnet die neue Version einem fachlichen Subject zu.
+    pub fn with_subject(mut self, subject: impl Into<String>) -> Self {
+        self.subject = Some(SubjectId(subject.into()));
+        self
     }
 }

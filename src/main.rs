@@ -1,45 +1,74 @@
-use arcs::core::{
-    Actor, ActorType, Artifact, SchemaRegistry, Source, SourceClass, SourceKind, Trust, TrustLevel,
+use arcs::adapters::{
+    ADAPTER_PROTOCOL_VERSION, AdapterGateway, AdapterGrant, AdapterId, AdapterManifest,
+    BoundarySubmission, CapabilityContract, CapabilityDescriptor, CapabilityId, ProducerClass,
+    SequenceIdGenerator, SystemClock,
 };
+use arcs::core::{SchemaId, SchemaRegistry, SourceKind, SubjectId, TrustLevel};
 use arcs::store::SqliteArtifactStore;
 use serde_json::json;
 
 fn main() {
     // Die Demo verwendet dieselben eingebetteten Verträge wie der Core.
-    let registry = SchemaRegistry::with_bundled_schemas().expect("bundled schemas must be valid");
+    let mut schemas =
+        SchemaRegistry::with_bundled_schemas().expect("bundled schemas must be valid");
 
     // Der flüchtige Store hält das Beispiel nebenwirkungsfrei. Für dauerhafte
     // Daten steht `SqliteArtifactStore::open` bereit.
     let store = SqliteArtifactStore::in_memory().expect("store must initialize");
 
-    // Die menschliche Eingabe wird als nachvollziehbares Input-Artefakt erfasst.
-    let input = Artifact::new(
-        "input-demo",
-        "input-demo-v1",
-        "input",
-        "arcs.input.v1",
-        "2026-07-26T23:00:00+02:00",
-        Actor {
-            actor_type: ActorType::Human,
-            id: "demo-user".into(),
-        },
-        Source {
-            kind: SourceKind::Chat,
-            reference: "dummy-input".into(),
-        },
-        Trust {
-            level: TrustLevel::High,
-            source_class: SourceClass::Human,
-        },
-        "demo:input",
-        json!({
-            "raw_text": "Hallo ARCS"
-        }),
-    );
+    // Die Demo simuliert einen von außen installierten Chat-Adapter. Sein
+    // Manifest behauptet eine Fähigkeit; erst der getrennte Betreiber-Grant
+    // schaltet sie tatsächlich frei.
+    let manifest = AdapterManifest {
+        protocol_version: ADAPTER_PROTOCOL_VERSION,
+        adapter_id: AdapterId("demo.chat".into()),
+        adapter_version: "1.0.0".into(),
+        capabilities: vec![CapabilityDescriptor {
+            id: CapabilityId("chat.observe".into()),
+            contract: CapabilityContract::Observe {
+                emits: vec![SchemaId("arcs.input.v1".into())],
+            },
+            required_permissions: vec![],
+        }],
+    };
+    let grant = AdapterGrant {
+        adapter_id: AdapterId("demo.chat".into()),
+        producer_class: ProducerClass::Adapter,
+        enabled_capabilities: vec![CapabilityId("chat.observe".into())],
+        granted_permissions: vec![],
+        assigned_trust: TrustLevel::Medium,
+        observation_source_kind: Some(SourceKind::Chat),
+        max_payload_bytes: 4096,
+        max_external_reference_bytes: 512,
+        reasoning_limits: None,
+    };
 
-    store
-        .append(&input, &registry)
-        .expect("valid input must be committed");
+    let mut gateway = AdapterGateway::new(
+        &mut schemas,
+        &store,
+        Box::new(SystemClock),
+        Box::new(SequenceIdGenerator::new("demo")),
+    );
+    let adapter_session = gateway
+        .register_adapter(manifest, grant, &[])
+        .expect("demo adapter registration must be valid");
+
+    // Der Adapter liefert ausschließlich Boundary-Daten. IDs, Zeit,
+    // Artifact-Typ, Actor, Trust und Provenance setzt der Core.
+    let input = gateway
+        .submit_boundary(
+            &adapter_session,
+            BoundarySubmission {
+                capability_id: CapabilityId("chat.observe".into()),
+                schema_id: SchemaId("arcs.input.v1".into()),
+                subject: SubjectId("current_user_request".into()),
+                external_reference: "demo-conversation".into(),
+                payload: json!({
+                    "raw_text": "Hallo ARCS"
+                }),
+            },
+        )
+        .expect("valid adapter input must be committed");
 
     let loaded = store
         .get(&input.version_id)
