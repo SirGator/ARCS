@@ -109,8 +109,9 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::adapters::{ArtifactIdGenerator, Clock, GeneratedArtifactIds};
-    use crate::core::{ArtifactId, SchemaRegistry};
+    use crate::core::{
+        ArtifactId, ArtifactIdGenerator, Clock, GeneratedArtifactIds, SchemaRegistry,
+    };
     use crate::store::SqliteArtifactStore;
 
     struct FixedClock;

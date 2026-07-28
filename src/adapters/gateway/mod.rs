@@ -13,19 +13,22 @@ use crate::adapters::reasoning::ReasoningAdapter;
 use crate::adapters::registration::{
     AdapterId, AdapterRegistry, AdapterRegistryError, CapabilityId, CapabilityRef,
 };
-use crate::core::{RegistryError, SchemaId, SchemaRegistry, SchemaViolation, VersionId};
+use crate::core::{
+    ArtifactIdGenerator, Clock, RegistryError, SchemaId, SchemaRegistry, SchemaViolation, VersionId,
+};
 use crate::store::{SqliteArtifactStore, StoreError};
 
+mod connection;
 mod data;
 mod envelope;
 mod internal;
-mod observation;
 mod output;
 mod proposal;
 mod reasoning;
 mod registration;
 mod support;
 
+pub use connection::AdapterConnectionError;
 pub use internal::InternalArtifactSubmission;
 pub use support::*;
 
@@ -46,9 +49,7 @@ pub enum AdapterGatewayError {
     ReasoningProducerMustBeModel(AdapterId),
     DataProducerMustNotBeModel(AdapterId),
     OutputProducerMustBeExecutor(AdapterId),
-    InvalidAdapterSession,
     SessionTokenExhausted,
-    CapabilityCannotPush(CapabilityRef),
     UndeclaredOutputSchema {
         capability: CapabilityId,
         schema: SchemaId,
@@ -165,7 +166,7 @@ pub struct AdapterGateway<'a> {
     output_endpoints: HashMap<AdapterId, Box<dyn OutputAdapter>>,
     adapter_sessions: HashMap<u64, AdapterId>,
     next_session_token: u64,
-    committed_proposals: HashSet<(AdapterId, String, usize)>,
+    committed_proposals: HashSet<(VersionId, usize)>,
     used_reasoning_requests: HashSet<(CapabilityRef, String)>,
     completed_data_invocations: HashSet<(CapabilityRef, VersionId, SchemaId)>,
     completed_output_invocations: HashSet<(CapabilityRef, VersionId, SchemaId)>,

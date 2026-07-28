@@ -1,10 +1,11 @@
 use crate::adapters::AdapterCallError;
-use crate::adapters::gateway::{SequenceIdGenerator, SystemClock};
 use crate::adapters::reasoning::{ReasoningInvocation, ReasoningLimits, ReasoningResponse};
 use crate::adapters::registration::{
     ADAPTER_PROTOCOL_VERSION, CapabilityContract, CapabilityDescriptor, CapabilityId,
 };
-use crate::core::{RegistryError, SchemaId, SourceKind, TrustLevel};
+use crate::core::{
+    RegistryError, SchemaId, SequenceIdGenerator, SourceKind, SystemClock, TrustLevel,
+};
 use crate::store::SqliteArtifactStore;
 
 use super::*;

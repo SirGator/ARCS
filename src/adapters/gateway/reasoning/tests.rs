@@ -4,12 +4,13 @@ use serde_json::json;
 
 use super::*;
 use crate::adapters::{
-    ADAPTER_PROTOCOL_VERSION, AdapterCallError, AdapterId, ArtifactIdGenerator, CapabilityContract,
-    CapabilityDescriptor, CapabilityId, ContextSelection, GeneratedArtifactIds, ProposalSubmission,
-    ReasoningAdapter, ReasoningBudget, ReasoningLimits, ReasoningResponse, ReasoningTrace,
+    ADAPTER_PROTOCOL_VERSION, AdapterCallError, AdapterId, CapabilityContract,
+    CapabilityDescriptor, CapabilityId, ContextSelection, ProposalSubmission, ReasoningAdapter,
+    ReasoningBudget, ReasoningLimits, ReasoningResponse, ReasoningTrace,
 };
 use crate::core::{
-    Actor, ActorType, ArtifactId, Source, SourceClass, SourceKind, Trust, TrustLevel,
+    Actor, ActorType, ArtifactId, ArtifactIdGenerator, Clock, GeneratedArtifactIds, Source,
+    SourceClass, SourceKind, Trust, TrustLevel,
 };
 use crate::store::{ArtifactNetwork, SqliteArtifactStore};
 
@@ -38,7 +39,7 @@ const RESULT_SCHEMA: &str = r#"{
 
 struct FixedClock;
 
-impl crate::adapters::Clock for FixedClock {
+impl Clock for FixedClock {
     fn now_rfc3339(&self) -> String {
         "2026-07-27T12:00:00Z".into()
     }

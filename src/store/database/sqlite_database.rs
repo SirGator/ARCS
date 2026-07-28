@@ -22,6 +22,8 @@ pub enum StoreError {
     InvalidEdgeWeight(f64),
     /// Nur ein Artifact mit Subject kann einen Current-State-Zeiger bilden.
     MissingSubject,
+    /// Eine bereits persistierte Schema-ID darf nie einen anderen Vertrag erhalten.
+    SchemaDrift(SchemaId),
 }
 
 // Diese Konvertierungen halten `?` lesbar und bewahren die Fehlerursache.
@@ -117,6 +119,10 @@ impl SqliteArtifactStore {
                 FOREIGN KEY (version_id)
                     REFERENCES artifact_versions(version_id)
             );
+            CREATE TABLE IF NOT EXISTS schema_bindings (
+                schema_id    TEXT PRIMARY KEY,
+                schema_json  TEXT NOT NULL
+            );
             ",
         )?;
         ensure_subject_history_schema(&connection)?;
@@ -132,6 +138,38 @@ impl SqliteArtifactStore {
         // Kein Artefakt darf die Schema-Sicherheitsgrenze umgehen.
         validate_artifact(artifact, registry).map_err(StoreError::Validation)?;
         append_validated(&self.connection, artifact)
+    }
+
+    /// Bindet alle bekannten Schema-IDs atomar an ihre kanonischen Dokumente.
+    ///
+    /// Eine schon persistierte ID darf nur mit demselben Dokument erneut
+    /// gebunden werden. Schema-Evolution benötigt deshalb immer eine neue ID.
+    pub(crate) fn bind_schemas(&self, registry: &SchemaRegistry) -> Result<(), StoreError> {
+        let transaction = self.connection.unchecked_transaction()?;
+        for schema in registry.definitions() {
+            let canonical = serde_json::to_string(&schema.document)?;
+            let existing: Option<String> = transaction
+                .query_row(
+                    "SELECT schema_json FROM schema_bindings WHERE schema_id = ?1",
+                    params![schema.id.0],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            match existing {
+                Some(existing) if existing != canonical => {
+                    return Err(StoreError::SchemaDrift(schema.id.clone()));
+                }
+                Some(_) => {}
+                None => {
+                    transaction.execute(
+                        "INSERT INTO schema_bindings (schema_id, schema_json) VALUES (?1, ?2)",
+                        params![schema.id.0, canonical],
+                    )?;
+                }
+            }
+        }
+        transaction.commit()?;
+        Ok(())
     }
 
     /// Hängt eine historische Version an und setzt im selben Commit den

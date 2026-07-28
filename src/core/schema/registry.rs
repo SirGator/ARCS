@@ -86,6 +86,10 @@ impl SchemaRegistry {
         self.schemas.get(id)
     }
 
+    pub(crate) fn definitions(&self) -> impl Iterator<Item = &SchemaDefinition> {
+        self.schemas.values()
+    }
+
     /// Prüft einen JSON-Wert gegen den bezeichneten Vertrag.
     ///
     /// Alle Verstöße werden gesammelt. Auch eine unbekannte Schema-ID ist ein

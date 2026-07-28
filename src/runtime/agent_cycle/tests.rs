@@ -10,13 +10,15 @@ use serde_json::json;
 use super::*;
 use crate::adapters::{
     ADAPTER_PROTOCOL_VERSION, AdapterCallError, AdapterGrant, AdapterId, AdapterManifest,
-    ArtifactIdGenerator, BoundarySubmission, CapabilityContract, CapabilityDescriptor,
-    CapabilityId, Clock, ContextSelection, DataAdapter, DataInvocation, DataResponse,
-    GeneratedArtifactIds, InternalArtifactSubmission, OutputAdapter, OutputInvocation,
-    OutputResponse, ProducerClass, ProposalSubmission, ReasoningAdapter, ReasoningBudget,
-    ReasoningInvocation, ReasoningLimits, ReasoningResponse, ReasoningTrace,
+    CapabilityContract, CapabilityDescriptor, CapabilityId, ContextSelection, DataAdapter,
+    DataInvocation, DataResponse, InternalArtifactSubmission, ObservationMessage, OutputAdapter,
+    OutputInvocation, OutputResponse, ProducerClass, ProposalSubmission, ReasoningAdapter,
+    ReasoningBudget, ReasoningInvocation, ReasoningLimits, ReasoningResponse, ReasoningTrace,
 };
-use crate::core::{ArtifactId, SchemaRegistry, SourceKind, SubjectId, TrustLevel};
+use crate::core::{
+    ArtifactId, ArtifactIdGenerator, Clock, GeneratedArtifactIds, SchemaRegistry, SourceKind,
+    SubjectId, TrustLevel,
+};
 use crate::store::{ArtifactRelation, ArtifactRelations, SqliteArtifactStore, relation_kinds};
 
 const CPU_SCHEMA_ID: &str = "arcs.observation.server_cpu.v1";
@@ -486,36 +488,33 @@ fn adapters_specialize_a_persistent_cycle_without_polluting_the_core() {
     // Derselbe Subject-Slot erhält zwei unveränderliche Versionen. Nur
     // der Current-Zeiger wechselt; die alte CPU-Sicht bleibt abrufbar.
     let old_cpu = gateway
-        .submit_boundary(
+        .ingest_observation(
             &cpu_session,
-            BoundarySubmission {
+            ObservationMessage {
                 capability_id: CapabilityId("server.cpu.observe".into()),
-                schema_id: SchemaId(CPU_SCHEMA_ID.into()),
-                subject: SubjectId("server-1/cpu".into()),
+                external_subject: Some("server-1/cpu".into()),
                 external_reference: "sensor://server-1/cpu/1".into(),
                 payload: json!({"utilization": 0.51}),
             },
         )
         .unwrap();
     let current_cpu = gateway
-        .submit_boundary(
+        .ingest_observation(
             &cpu_session,
-            BoundarySubmission {
+            ObservationMessage {
                 capability_id: CapabilityId("server.cpu.observe".into()),
-                schema_id: SchemaId(CPU_SCHEMA_ID.into()),
-                subject: SubjectId("server-1/cpu".into()),
+                external_subject: Some("server-1/cpu".into()),
                 external_reference: "sensor://server-1/cpu/2".into(),
                 payload: json!({"utilization": 0.94}),
             },
         )
         .unwrap();
     let input = gateway
-        .submit_boundary(
+        .ingest_observation(
             &input_session,
-            BoundarySubmission {
+            ObservationMessage {
                 capability_id: CapabilityId("chat.input.observe".into()),
-                schema_id: SchemaId(INPUT_SCHEMA_ID.into()),
-                subject: SubjectId("conversation-1/request".into()),
+                external_subject: Some("conversation-1/request".into()),
                 external_reference: "chat://conversation-1/message-1".into(),
                 payload: json!({"text": "Warum ist der Server so langsam?"}),
             },
@@ -684,7 +683,7 @@ fn adapters_specialize_a_persistent_cycle_without_polluting_the_core() {
     assert_eq!(
         store
             .current(
-                &SubjectId("server-1/cpu".into()),
+                current_cpu.subject.as_ref().unwrap(),
                 &SchemaId(CPU_SCHEMA_ID.into()),
             )
             .unwrap()

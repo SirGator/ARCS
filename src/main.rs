@@ -1,9 +1,10 @@
 use arcs::adapters::{
     ADAPTER_PROTOCOL_VERSION, AdapterGateway, AdapterGrant, AdapterId, AdapterManifest,
-    BoundarySubmission, CapabilityContract, CapabilityDescriptor, CapabilityId, ProducerClass,
-    SequenceIdGenerator, SystemClock,
+    CapabilityContract, CapabilityDescriptor, CapabilityId, ObservationMessage, ProducerClass,
 };
-use arcs::core::{SchemaId, SchemaRegistry, SourceKind, SubjectId, TrustLevel};
+use arcs::core::{
+    SchemaId, SchemaRegistry, SequenceIdGenerator, SourceKind, SystemClock, TrustLevel,
+};
 use arcs::store::SqliteArtifactStore;
 use serde_json::json;
 
@@ -56,12 +57,11 @@ fn main() {
     // Der Adapter liefert ausschließlich Boundary-Daten. IDs, Zeit,
     // Artifact-Typ, Actor, Trust und Provenance setzt der Core.
     let input = gateway
-        .submit_boundary(
+        .ingest_observation(
             &adapter_session,
-            BoundarySubmission {
+            ObservationMessage {
                 capability_id: CapabilityId("chat.observe".into()),
-                schema_id: SchemaId("arcs.input.v1".into()),
-                subject: SubjectId("current_user_request".into()),
+                external_subject: Some("current_user_request".into()),
                 external_reference: "demo-conversation".into(),
                 payload: json!({
                     "raw_text": "Hallo ARCS"

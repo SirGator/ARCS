@@ -1,8 +1,11 @@
 use serde_json::json;
 
 use super::*;
-use crate::adapters::{AdapterId, ArtifactIdGenerator, GeneratedArtifactIds, ReasoningTrace};
-use crate::core::{Actor, ArtifactId, SchemaId, SchemaRegistry, Source, VersionId};
+use crate::adapters::{AdapterId, ReasoningTrace};
+use crate::core::{
+    Actor, ArtifactId, ArtifactIdGenerator, Clock, GeneratedArtifactIds, SchemaId, SchemaRegistry,
+    Source, VersionId,
+};
 use crate::store::{
     ArtifactNetwork, ArtifactRelation, ArtifactRelations, SqliteArtifactStore, relation_kinds,
 };
@@ -20,7 +23,7 @@ const ROUTE_SCHEMA: &str = r#"{
 
 struct FixedClock;
 
-impl crate::adapters::Clock for FixedClock {
+impl Clock for FixedClock {
     fn now_rfc3339(&self) -> String {
         "2026-07-27T12:00:00Z".into()
     }

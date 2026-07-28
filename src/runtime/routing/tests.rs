@@ -7,13 +7,13 @@ use serde_json::json;
 
 use crate::adapters::{
     ADAPTER_PROTOCOL_VERSION, AdapterCallError, AdapterGrant, AdapterId, AdapterManifest,
-    CapabilityContract, CapabilityDescriptor, CapabilityId, CapabilityRef, Clock,
-    GeneratedArtifactIds, ProducerClass, ReasoningAdapter, ReasoningBudget, ReasoningInvocation,
-    ReasoningLimits, ReasoningResponse, ReasoningTrace,
+    CapabilityContract, CapabilityDescriptor, CapabilityId, CapabilityRef, ProducerClass,
+    ReasoningAdapter, ReasoningBudget, ReasoningInvocation, ReasoningLimits, ReasoningResponse,
+    ReasoningTrace,
 };
 use crate::core::{
-    Actor, ActorType, Artifact, ArtifactId, SchemaId, SchemaRegistry, Source, SourceClass,
-    SourceKind, Trust, TrustLevel, VersionId,
+    Actor, ActorType, Artifact, ArtifactId, ArtifactIdGenerator, Clock, GeneratedArtifactIds,
+    SchemaId, SchemaRegistry, Source, SourceClass, SourceKind, Trust, TrustLevel, VersionId,
 };
 use crate::store::SqliteArtifactStore;
 
@@ -45,7 +45,7 @@ impl Clock for FixedClock {
 
 struct FixedIds;
 
-impl crate::adapters::ArtifactIdGenerator for FixedIds {
+impl ArtifactIdGenerator for FixedIds {
     fn next(&mut self, artifact_type: &str) -> GeneratedArtifactIds {
         GeneratedArtifactIds {
             artifact_id: ArtifactId(format!("{artifact_type}-candidate")),

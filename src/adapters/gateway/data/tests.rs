@@ -5,11 +5,11 @@ use serde_json::json;
 use super::*;
 use crate::adapters::{
     ADAPTER_PROTOCOL_VERSION, AdapterCallError, AdapterGrant, AdapterId, AdapterManifest,
-    ArtifactIdGenerator, CapabilityContract, CapabilityDescriptor, CapabilityId, DataAdapter,
-    DataResponse, GeneratedArtifactIds,
+    CapabilityContract, CapabilityDescriptor, CapabilityId, DataAdapter, DataResponse,
 };
 use crate::core::{
-    ActorType, ArtifactId, SchemaRegistry, SourceClass, SourceKind, SubjectId, TrustLevel,
+    ActorType, ArtifactId, ArtifactIdGenerator, Clock, GeneratedArtifactIds, SchemaRegistry,
+    SourceClass, SourceKind, SubjectId, TrustLevel,
 };
 use crate::store::{ArtifactRelation, SqliteArtifactStore};
 
@@ -56,7 +56,7 @@ const OBSERVATION_SCHEMA: &str = r#"{
 
 struct FixedClock;
 
-impl crate::adapters::Clock for FixedClock {
+impl Clock for FixedClock {
     fn now_rfc3339(&self) -> String {
         "2026-07-27T12:00:00Z".into()
     }
