@@ -4,11 +4,13 @@
 //! darüberliegende Runtime entscheidet, ob ein erfolgreicher Netzaufruf einen
 //! bekannten Treffer geliefert hat oder ob kuratiertes Reasoning nötig ist.
 
-use crate::adapters::{AdapterGateway, AdapterGatewayError, ReasoningRequest, ValidatedProposal};
+use crate::reasoning::{ReasoningError, ReasoningRequest, ReasoningService, ValidatedProposal};
 use std::collections::HashSet;
 
 use crate::core::{SchemaId, SchemaRegistry, TrustLevel};
-use crate::store::{ActivatedArtifact, ActiveSource, ArtifactNetwork, NetworkError};
+use crate::store::{
+    ActivatedArtifact, ActiveSource, ArtifactNetwork, NetworkError, SqliteArtifactStore,
+};
 
 /// Core-seitige Eligibility-Regel für deterministische Netztreffer.
 ///
@@ -74,7 +76,7 @@ pub enum RouteResolution {
 pub enum HybridRoutingError {
     Policy(KnownRoutePolicyError),
     Network(NetworkError),
-    Adapter(AdapterGatewayError),
+    Reasoning(ReasoningError),
 }
 
 impl From<KnownRoutePolicyError> for HybridRoutingError {
@@ -89,19 +91,23 @@ impl From<NetworkError> for HybridRoutingError {
     }
 }
 
-impl From<AdapterGatewayError> for HybridRoutingError {
-    fn from(value: AdapterGatewayError) -> Self {
-        Self::Adapter(value)
+impl From<ReasoningError> for HybridRoutingError {
+    fn from(value: ReasoningError) -> Self {
+        Self::Reasoning(value)
     }
 }
 
-pub struct HybridRouter<'gateway, 'resources> {
-    gateway: &'gateway mut AdapterGateway<'resources>,
+pub struct HybridRouter<'store, 'service, 'resources> {
+    store: &'store SqliteArtifactStore,
+    reasoning: &'service mut ReasoningService<'resources>,
 }
 
-impl<'gateway, 'resources> HybridRouter<'gateway, 'resources> {
-    pub fn new(gateway: &'gateway mut AdapterGateway<'resources>) -> Self {
-        Self { gateway }
+impl<'store, 'service, 'resources> HybridRouter<'store, 'service, 'resources> {
+    pub fn new(
+        store: &'store SqliteArtifactStore,
+        reasoning: &'service mut ReasoningService<'resources>,
+    ) -> Self {
+        Self { store, reasoning }
     }
 
     /// Nutzt Reasoning ausschließlich nach einem erfolgreichen Fast-Path-Lauf
@@ -115,19 +121,18 @@ impl<'gateway, 'resources> HybridRouter<'gateway, 'resources> {
     ) -> Result<RouteResolution, HybridRoutingError> {
         // Fehlkonfiguration ist kein unbekannter Weltzustand. Die Policy wird
         // deshalb vor Netzlauf und insbesondere vor jedem Modellaufruf geprüft.
-        known_route_policy.validate(self.gateway.schemas())?;
+        known_route_policy.validate(self.reasoning.schemas())?;
 
         // Das Network wird nur für die Dauer des Fast Paths geborgt. Danach
         // kann der Gateway den auditierbaren ReasoningRequest speichern, ohne
         // dass gleichzeitig eine langfristige Store-Borrow im Router lebt.
-        let mut known =
-            ArtifactNetwork::new(self.gateway.store()).propagate_many(sources, threshold)?;
+        let mut known = ArtifactNetwork::new(self.store).propagate_many(sources, threshold)?;
         known.retain(|candidate| known_route_policy.accepts(candidate));
         if !known.is_empty() {
             return Ok(RouteResolution::KnownCandidates(known));
         }
 
-        let proposals = self.gateway.reason(reasoning_request)?;
+        let proposals = self.reasoning.reason(reasoning_request)?;
         if proposals.is_empty() {
             Ok(RouteResolution::Unresolved)
         } else {
@@ -143,6 +148,3 @@ fn trust_rank(level: TrustLevel) -> u8 {
         TrustLevel::High => 2,
     }
 }
-
-#[cfg(test)]
-mod tests;

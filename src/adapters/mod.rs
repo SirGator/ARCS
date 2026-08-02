@@ -5,18 +5,19 @@
 //! Payloads ungeprüft und erzeugt alle autoritätsrelevanten Envelope-Felder
 //! selbst.
 
-pub mod data;
-pub mod gateway;
 pub mod observation;
 pub mod output;
 pub mod port;
-pub mod reasoning;
 pub mod registration;
 
-pub use data::*;
-pub use gateway::*;
 pub use observation::*;
 pub use output::*;
 pub use port::*;
-pub use reasoning::*;
 pub use registration::*;
+
+// Zeitlich begrenzte Quellkompatibilität. Die Implementierungen und
+// Primärtypen leben bereits in ihren jeweiligen Top-Level-Slices.
+#[doc(hidden)]
+pub use crate::reasoning::*;
+#[doc(hidden)]
+pub use crate::request::{DataAdapter, DataInvocation, DataResponse};

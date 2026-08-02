@@ -5,6 +5,7 @@ use crate::adapters::{
     ManifestError, ProducerClass,
 };
 use crate::core::{MAX_SOURCE_REFERENCE_BYTES, SchemaId, SchemaRegistry, SourceKind};
+use crate::store::{SqliteArtifactStore, StoreError};
 
 /// Fehler beim kontrollierten Installieren oder Auflösen eines Adapters.
 #[derive(Debug)]
@@ -29,6 +30,8 @@ pub enum AdapterRegistryError {
         permission: String,
     },
     UnknownSchema(SchemaId),
+    ReasoningOutputMustBeCandidate(SchemaId),
+    Store(StoreError),
     UnknownAdapter(AdapterId),
     CapabilityNotEnabled {
         adapter: AdapterId,
@@ -65,6 +68,26 @@ pub struct AdapterRegistry {
 impl AdapterRegistry {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Registriert eine bereits transportseitig authentifizierte
+    /// Slice-Integration nach vollständiger Manifest- und Grant-Prüfung.
+    ///
+    /// Die Methode speichert keine Verbindung und erzeugt keine globale
+    /// Gateway-Session. Der jeweilige Slice besitzt seinen Transport selbst.
+    pub fn register(
+        &mut self,
+        manifest: AdapterManifest,
+        grant: AdapterGrant,
+        schemas: &SchemaRegistry,
+        store: &SqliteArtifactStore,
+    ) -> Result<(), AdapterRegistryError> {
+        self.validate_registration(&manifest, &grant, schemas)?;
+        store
+            .bind_schemas(schemas)
+            .map_err(AdapterRegistryError::Store)?;
+        self.insert_validated(manifest, grant);
+        Ok(())
     }
 
     /// Prüft eine Installation vollständig, ohne den Registry-Zustand zu ändern.
@@ -110,7 +133,7 @@ impl AdapterRegistry {
                 AdapterRegistryError::UnknownGrantCapability(capability_id.clone())
             })?;
             needs_observation_source |=
-                capability.contract.is_observation() || capability.contract.is_data();
+                capability.contract.is_observation() || capability.contract.is_request();
             has_reasoning |= capability.contract.is_reasoning();
             for permission in &capability.required_permissions {
                 if !grant
@@ -162,6 +185,20 @@ impl AdapterRegistry {
             {
                 if schemas.get(schema).is_none() {
                     return Err(AdapterRegistryError::UnknownSchema(schema.clone()));
+                }
+            }
+            if capability.contract.is_reasoning() {
+                for schema in capability.contract.emitted_schemas() {
+                    let definition = schemas
+                        .get(schema)
+                        .ok_or_else(|| AdapterRegistryError::UnknownSchema(schema.clone()))?;
+                    if definition.artifact_type != "candidate"
+                        && !definition.artifact_type.ends_with("_candidate")
+                    {
+                        return Err(AdapterRegistryError::ReasoningOutputMustBeCandidate(
+                            schema.clone(),
+                        ));
+                    }
                 }
             }
         }

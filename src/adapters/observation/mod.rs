@@ -17,4 +17,3 @@ pub struct ObservationMessage {
     pub external_reference: String,
     pub payload: Value,
 }
-

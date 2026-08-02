@@ -1,17 +1,17 @@
 use arcs::adapters::{
-    ADAPTER_PROTOCOL_VERSION, AdapterGateway, AdapterGrant, AdapterId, AdapterManifest,
+    ADAPTER_PROTOCOL_VERSION, AdapterGrant, AdapterId, AdapterManifest, AdapterRegistry,
     CapabilityContract, CapabilityDescriptor, CapabilityId, ObservationMessage, ProducerClass,
 };
 use arcs::core::{
     SchemaId, SchemaRegistry, SequenceIdGenerator, SourceKind, SystemClock, TrustLevel,
 };
+use arcs::observation::ObservationService;
 use arcs::store::SqliteArtifactStore;
 use serde_json::json;
 
 fn main() {
     // Die Demo verwendet dieselben eingebetteten Verträge wie der Core.
-    let mut schemas =
-        SchemaRegistry::with_bundled_schemas().expect("bundled schemas must be valid");
+    let schemas = SchemaRegistry::with_bundled_schemas().expect("bundled schemas must be valid");
 
     // Der flüchtige Store hält das Beispiel nebenwirkungsfrei. Für dauerhafte
     // Daten steht `SqliteArtifactStore::open` bereit.
@@ -44,21 +44,21 @@ fn main() {
         reasoning_limits: None,
     };
 
-    let mut gateway = AdapterGateway::new(
-        &mut schemas,
-        &store,
-        Box::new(SystemClock),
-        Box::new(SequenceIdGenerator::new("demo")),
-    );
-    let adapter_session = gateway
-        .register_adapter(manifest, grant, &[])
+    let adapter_id = manifest.adapter_id.clone();
+    let mut registry = AdapterRegistry::new();
+    registry
+        .register(manifest, grant, &schemas, &store)
         .expect("demo adapter registration must be valid");
+
+    let clock = SystemClock;
+    let mut ids = SequenceIdGenerator::new("demo");
+    let mut observation = ObservationService::new(&registry, &schemas, &store, &mut ids, &clock);
 
     // Der Adapter liefert ausschließlich Boundary-Daten. IDs, Zeit,
     // Artifact-Typ, Actor, Trust und Provenance setzt der Core.
-    let input = gateway
-        .ingest_observation(
-            &adapter_session,
+    let input = observation
+        .ingest(
+            &adapter_id,
             ObservationMessage {
                 capability_id: CapabilityId("chat.observe".into()),
                 external_subject: Some("current_user_request".into()),

@@ -9,6 +9,12 @@
 pub mod adapters;
 /// Vertrauenswürdige Domänentypen, Schemas und Validierungsregeln.
 pub mod core;
+/// Unaufgefordert von der Außenwelt gemeldeter Weltzustand.
+pub mod observation;
+/// Kuratierter Fallback für neue oder komplexe Situationen.
+pub mod reasoning;
+/// Gezielt vom Core angeforderte Daten aus externen Quellen.
+pub mod request;
 /// Orchestrierung zwischen bekanntem Fast Path und kuratiertem Reasoning.
 pub mod runtime;
 /// Append-only Persistenz für Artefakte und ihre Versionen.

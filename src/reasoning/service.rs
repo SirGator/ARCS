@@ -4,43 +4,84 @@ use std::collections::HashSet;
 
 use serde_json::{Map, Value, json};
 
-use super::{AdapterGateway, AdapterGatewayError};
-use crate::adapters::reasoning::{
-    ReasoningContextItem, ReasoningInvocation, ReasoningRequest, ValidatedProposal,
-};
-use crate::adapters::registration::{
-    AdapterGrant, AdapterManifest, AdapterRegistry, CapabilityRef, ProducerClass,
-};
+use super::ReasoningError;
+use crate::adapters::registration::{AdapterRegistry, CapabilityRef, ProducerClass};
 use crate::core::{
-    Actor, ActorType, Artifact, MAX_MODEL_TRACE_TEXT_BYTES, Provenance, SchemaId, SchemaRegistry,
-    Source, SourceClass, SourceKind, Trust, TrustLevel, VersionId,
+    Actor, ActorType, Artifact, ArtifactIdGenerator, Clock, MAX_MODEL_TRACE_TEXT_BYTES, Provenance,
+    SchemaId, SchemaRegistry, Source, SourceClass, SourceKind, Trust, TrustLevel, VersionId,
 };
+use crate::reasoning::{
+    ReasoningAdapter, ReasoningContextItem, ReasoningInvocation, ReasoningRequest,
+    ValidatedProposal,
+};
+use crate::store::SqliteArtifactStore;
 
 const REASONING_REQUEST_SCHEMA_ID: &str = "arcs.reasoning_request.v1";
 
-impl AdapterGateway<'_> {
+/// Eigenständiger Reasoning-Slice mit genau einem externen Modellport.
+pub struct ReasoningService<'a> {
+    pub(super) policy: &'a AdapterRegistry,
+    pub(super) schemas: &'a SchemaRegistry,
+    pub(super) store: &'a SqliteArtifactStore,
+    pub(super) ids: &'a mut dyn ArtifactIdGenerator,
+    pub(super) clock: &'a dyn Clock,
+    pub(super) endpoint: &'a dyn ReasoningAdapter,
+    pub(super) used_reasoning_requests: HashSet<(CapabilityRef, String)>,
+    pub(super) committed_proposals: HashSet<(VersionId, usize)>,
+}
+
+impl<'a> ReasoningService<'a> {
+    pub fn new(
+        policy: &'a AdapterRegistry,
+        schemas: &'a SchemaRegistry,
+        store: &'a SqliteArtifactStore,
+        ids: &'a mut dyn ArtifactIdGenerator,
+        clock: &'a dyn Clock,
+        endpoint: &'a dyn ReasoningAdapter,
+    ) -> Self {
+        Self {
+            policy,
+            schemas,
+            store,
+            ids,
+            clock,
+            endpoint,
+            used_reasoning_requests: HashSet::new(),
+            committed_proposals: HashSet::new(),
+        }
+    }
+
+    pub(crate) fn schemas(&self) -> &SchemaRegistry {
+        self.schemas
+    }
+}
+
+impl ReasoningService<'_> {
     /// Ruft einen ReasoningAdapter ausschließlich mit explizit ausgewähltem,
     /// minimiertem Kontext auf und validiert sämtliche Vorschläge.
     ///
     /// Vor dem externen Aufruf wird genau der kuratierte Auftrag als
     /// `ReasoningRequest`-Artifact gespeichert. Ein gültiges Modellergebnis
     /// bleibt trotzdem ein `ValidatedProposal` ohne Execution-Autorität.
-    pub(crate) fn reason(
+    pub fn reason(
         &mut self,
         request: ReasoningRequest,
-    ) -> Result<Vec<ValidatedProposal>, AdapterGatewayError> {
+    ) -> Result<Vec<ValidatedProposal>, ReasoningError> {
         validate_reasoning_budget_and_request(&request)?;
 
         let adapter_id = request.reasoning_capability.adapter_id.clone();
+        if self.endpoint.manifest().adapter_id != adapter_id {
+            return Err(ReasoningError::MissingReasoningEndpoint(adapter_id));
+        }
         let (authorized_capability, emitted_schemas, reasoning_limits) = {
             let (registered, capability) = self
-                .registry
+                .policy
                 .authorized_capability(&adapter_id, &request.reasoning_capability.capability_id)?;
             if !capability.contract.is_reasoning() {
-                return Err(AdapterGatewayError::NotReasoningAdapter(adapter_id.clone()));
+                return Err(ReasoningError::NotReasoningAdapter(adapter_id.clone()));
             }
             if registered.grant().producer_class != ProducerClass::Model {
-                return Err(AdapterGatewayError::ReasoningProducerMustBeModel(
+                return Err(ReasoningError::ReasoningProducerMustBeModel(
                     adapter_id.clone(),
                 ));
             }
@@ -54,14 +95,14 @@ impl AdapterGateway<'_> {
                     .grant()
                     .reasoning_limits
                     .clone()
-                    .ok_or(AdapterGatewayError::ReasoningBudgetExceedsGrant)?,
+                    .ok_or(ReasoningError::ReasoningBudgetExceedsGrant)?,
             )
         };
         if !request.budget.fits_within(&reasoning_limits) {
-            return Err(AdapterGatewayError::ReasoningBudgetExceedsGrant);
+            return Err(ReasoningError::ReasoningBudgetExceedsGrant);
         }
         if !emitted_schemas.contains(&request.target_schema_id) {
-            return Err(AdapterGatewayError::UndeclaredOutputSchema {
+            return Err(ReasoningError::UndeclaredOutputSchema {
                 capability: request.reasoning_capability.capability_id.clone(),
                 schema: request.target_schema_id.clone(),
             });
@@ -69,7 +110,7 @@ impl AdapterGateway<'_> {
         ensure_candidate_schema(self.schemas, &request.target_schema_id)?;
 
         let allowed_capabilities =
-            validate_allowed_capabilities(&self.registry, &request.allowed_capabilities)?;
+            validate_allowed_capabilities(self.policy, &request.allowed_capabilities)?;
         let context = self.build_reasoning_context(&request)?;
         let context_versions = context
             .iter()
@@ -90,7 +131,7 @@ impl AdapterGateway<'_> {
         };
         let context_bytes = serde_json::to_vec(&invocation)?.len();
         if context_bytes > request.budget.max_context_bytes {
-            return Err(AdapterGatewayError::ContextTooLarge {
+            return Err(ReasoningError::ContextTooLarge {
                 actual: context_bytes,
                 maximum: request.budget.max_context_bytes,
             });
@@ -98,14 +139,9 @@ impl AdapterGateway<'_> {
 
         // Ein fehlender Port ist ein Konfigurationsfehler und noch kein
         // tatsächlich vorbereiteter externer Reasoning-Aufruf.
-        if !self.reasoning_endpoints.contains_key(&adapter_id) {
-            return Err(AdapterGatewayError::MissingReasoningEndpoint(
-                adapter_id.clone(),
-            ));
-        }
         let request_key = (authorized_capability.clone(), request.request_id.clone());
         if self.used_reasoning_requests.contains(&request_key) {
-            return Err(AdapterGatewayError::ReasoningRequestAlreadyUsed {
+            return Err(ReasoningError::ReasoningRequestAlreadyUsed {
                 capability: authorized_capability.clone(),
                 request_id: request.request_id.clone(),
             });
@@ -122,24 +158,20 @@ impl AdapterGateway<'_> {
         // nicht unter derselben Korrelation neu interpretiert werden.
         self.used_reasoning_requests.insert(request_key);
 
-        let endpoint = self
-            .reasoning_endpoints
-            .get(&adapter_id)
-            .ok_or_else(|| AdapterGatewayError::MissingReasoningEndpoint(adapter_id.clone()))?;
-        let response = endpoint.propose(&invocation)?;
+        let response = self.endpoint.propose(&invocation)?;
 
         if response.request_id != request.request_id {
-            return Err(AdapterGatewayError::ResponseRequestMismatch);
+            return Err(ReasoningError::ResponseRequestMismatch);
         }
         if response.candidates.len() > request.budget.max_candidates {
-            return Err(AdapterGatewayError::TooManyCandidates {
+            return Err(ReasoningError::TooManyCandidates {
                 actual: response.candidates.len(),
                 maximum: request.budget.max_candidates,
             });
         }
         let response_bytes = serde_json::to_vec(&response)?.len();
         if response_bytes > request.budget.max_output_bytes {
-            return Err(AdapterGatewayError::ResponseTooLarge {
+            return Err(ReasoningError::ResponseTooLarge {
                 actual: response_bytes,
                 maximum: request.budget.max_output_bytes,
             });
@@ -156,20 +188,20 @@ impl AdapterGateway<'_> {
             || !response.trace.temperature.is_finite()
             || response.trace.temperature < 0.0
         {
-            return Err(AdapterGatewayError::InvalidReasoningTrace);
+            return Err(ReasoningError::InvalidReasoningTrace);
         }
 
         let allowed_set = allowed_capabilities.into_iter().collect::<HashSet<_>>();
         let mut proposals = Vec::with_capacity(response.candidates.len());
         for (candidate_index, candidate) in response.candidates.into_iter().enumerate() {
             if candidate.schema_id != request.target_schema_id {
-                return Err(AdapterGatewayError::UnexpectedCandidateSchema(
+                return Err(ReasoningError::UnexpectedCandidateSchema(
                     candidate.schema_id,
                 ));
             }
             self.schemas
                 .validate(&candidate.schema_id, &candidate.payload)
-                .map_err(AdapterGatewayError::InvalidPayload)?;
+                .map_err(ReasoningError::InvalidPayload)?;
             ensure_candidate_schema(self.schemas, &candidate.schema_id)?;
 
             let required_capabilities =
@@ -202,12 +234,12 @@ impl AdapterGateway<'_> {
         target_schema_id: &SchemaId,
         objective: &str,
         context_versions: &[VersionId],
-    ) -> Result<VersionId, AdapterGatewayError> {
+    ) -> Result<VersionId, ReasoningError> {
         let schema_id = SchemaId(REASONING_REQUEST_SCHEMA_ID.into());
         let definition = self
             .schemas
             .get(&schema_id)
-            .ok_or_else(|| AdapterGatewayError::MissingRegisteredSchema(schema_id.clone()))?
+            .ok_or_else(|| ReasoningError::MissingRegisteredSchema(schema_id.clone()))?
             .clone();
         let generated = self.ids.next(&definition.artifact_type);
         let artifact = Artifact {
@@ -220,7 +252,7 @@ impl AdapterGateway<'_> {
             created_at: self.clock.now_rfc3339(),
             created_by: Actor {
                 actor_type: ActorType::System,
-                id: "arcs.reasoning_gateway".into(),
+                id: "arcs.reasoning".into(),
             },
             source: Source {
                 kind: SourceKind::Internal,
@@ -250,11 +282,11 @@ impl AdapterGateway<'_> {
                     .map(|version| version.0.clone())
                     .collect(),
                 rules_applied: vec![
-                    "adapter_gateway.reasoning_context_minimized".into(),
-                    "adapter_gateway.reasoning_budget_validated".into(),
+                    "reasoning.context_minimized".into(),
+                    "reasoning.budget_validated".into(),
                 ],
                 models_used: vec![],
-                transform: Some("adapter_gateway.prepare_reasoning_request".into()),
+                transform: Some("reasoning.prepare_request".into()),
             }),
         };
 
@@ -267,9 +299,9 @@ impl AdapterGateway<'_> {
     fn build_reasoning_context(
         &self,
         request: &ReasoningRequest,
-    ) -> Result<Vec<ReasoningContextItem>, AdapterGatewayError> {
+    ) -> Result<Vec<ReasoningContextItem>, ReasoningError> {
         if request.context.len() > request.budget.max_context_items {
-            return Err(AdapterGatewayError::InvalidReasoningRequest(
+            return Err(ReasoningError::InvalidReasoningRequest(
                 "context item limit exceeded".into(),
             ));
         }
@@ -278,12 +310,12 @@ impl AdapterGateway<'_> {
         let mut context = Vec::with_capacity(request.context.len());
         for selection in &request.context {
             if !seen_versions.insert(selection.version_id.clone()) {
-                return Err(AdapterGatewayError::DuplicateContextArtifact(
+                return Err(ReasoningError::DuplicateContextArtifact(
                     selection.version_id.clone(),
                 ));
             }
             let artifact = self.store.get(&selection.version_id)?.ok_or_else(|| {
-                AdapterGatewayError::MissingContextArtifact(selection.version_id.clone())
+                ReasoningError::MissingContextArtifact(selection.version_id.clone())
             })?;
             let payload = select_payload_fields(&artifact, &selection.payload_fields)?;
             context.push(ReasoningContextItem {
@@ -301,15 +333,13 @@ impl AdapterGateway<'_> {
     }
 }
 
-fn validate_reasoning_budget_and_request(
-    request: &ReasoningRequest,
-) -> Result<(), AdapterGatewayError> {
+fn validate_reasoning_budget_and_request(request: &ReasoningRequest) -> Result<(), ReasoningError> {
     if request.request_id.trim().is_empty()
         || request.request_id.len() > 512
         || request.request_id.chars().any(char::is_control)
         || request.objective.trim().is_empty()
     {
-        return Err(AdapterGatewayError::InvalidReasoningRequest(
+        return Err(ReasoningError::InvalidReasoningRequest(
             "request_id must be non-empty, control-free, and at most 512 bytes; objective must be non-empty"
                 .into(),
         ));
@@ -320,27 +350,9 @@ fn validate_reasoning_budget_and_request(
         || request.budget.max_output_bytes == 0
         || request.budget.max_candidates == 0
     {
-        return Err(AdapterGatewayError::InvalidReasoningRequest(
+        return Err(ReasoningError::InvalidReasoningRequest(
             "all reasoning budget limits must be positive".into(),
         ));
-    }
-    Ok(())
-}
-
-pub(super) fn validate_reasoning_output_schemas(
-    manifest: &AdapterManifest,
-    grant: &AdapterGrant,
-    schemas: &SchemaRegistry,
-) -> Result<(), AdapterGatewayError> {
-    for capability_id in &grant.enabled_capabilities {
-        let Some(capability) = manifest.capability(capability_id) else {
-            continue;
-        };
-        if capability.contract.is_reasoning() {
-            for schema_id in capability.contract.emitted_schemas() {
-                ensure_candidate_schema(schemas, schema_id)?;
-            }
-        }
     }
     Ok(())
 }
@@ -348,13 +360,13 @@ pub(super) fn validate_reasoning_output_schemas(
 pub(super) fn ensure_candidate_schema(
     schemas: &SchemaRegistry,
     schema_id: &SchemaId,
-) -> Result<(), AdapterGatewayError> {
+) -> Result<(), ReasoningError> {
     let definition = schemas
         .get(schema_id)
-        .ok_or_else(|| AdapterGatewayError::MissingRegisteredSchema(schema_id.clone()))?;
+        .ok_or_else(|| ReasoningError::MissingRegisteredSchema(schema_id.clone()))?;
     if definition.artifact_type != "candidate" && !definition.artifact_type.ends_with("_candidate")
     {
-        return Err(AdapterGatewayError::ReasoningOutputMustBeCandidate(
+        return Err(ReasoningError::ReasoningOutputMustBeCandidate(
             schema_id.clone(),
         ));
     }
@@ -364,14 +376,12 @@ pub(super) fn ensure_candidate_schema(
 fn validate_allowed_capabilities(
     registry: &AdapterRegistry,
     capabilities: &[CapabilityRef],
-) -> Result<Vec<CapabilityRef>, AdapterGatewayError> {
+) -> Result<Vec<CapabilityRef>, ReasoningError> {
     let mut seen = HashSet::new();
     let mut validated = Vec::with_capacity(capabilities.len());
     for capability in capabilities {
         if !seen.insert(capability.clone()) || !registry.is_enabled_capability(capability) {
-            return Err(AdapterGatewayError::UnknownAllowedCapability(
-                capability.clone(),
-            ));
+            return Err(ReasoningError::UnknownAllowedCapability(capability.clone()));
         }
         validated.push(capability.clone());
     }
@@ -382,12 +392,12 @@ fn validate_allowed_capabilities(
 fn validate_candidate_capabilities(
     capabilities: &[CapabilityRef],
     allowed: &HashSet<CapabilityRef>,
-) -> Result<Vec<CapabilityRef>, AdapterGatewayError> {
+) -> Result<Vec<CapabilityRef>, ReasoningError> {
     let mut seen = HashSet::new();
     let mut validated = Vec::with_capacity(capabilities.len());
     for capability in capabilities {
         if !seen.insert(capability.clone()) || !allowed.contains(capability) {
-            return Err(AdapterGatewayError::ForbiddenCandidateCapability(
+            return Err(ReasoningError::ForbiddenCandidateCapability(
                 capability.clone(),
             ));
         }
@@ -400,12 +410,12 @@ fn validate_candidate_capabilities(
 fn validate_candidate_references(
     versions: &[VersionId],
     context: &HashSet<VersionId>,
-) -> Result<Vec<VersionId>, AdapterGatewayError> {
+) -> Result<Vec<VersionId>, ReasoningError> {
     let mut seen = HashSet::new();
     let mut validated = Vec::with_capacity(versions.len());
     for version in versions {
         if !seen.insert(version.clone()) || !context.contains(version) {
-            return Err(AdapterGatewayError::CandidateReferenceOutsideContext(
+            return Err(ReasoningError::CandidateReferenceOutsideContext(
                 version.clone(),
             ));
         }
@@ -415,25 +425,23 @@ fn validate_candidate_references(
     Ok(validated)
 }
 
-fn select_payload_fields(
-    artifact: &Artifact,
-    fields: &[String],
-) -> Result<Value, AdapterGatewayError> {
-    let payload = artifact.payload.as_object().ok_or_else(|| {
-        AdapterGatewayError::ContextPayloadMustBeObject(artifact.version_id.clone())
-    })?;
+fn select_payload_fields(artifact: &Artifact, fields: &[String]) -> Result<Value, ReasoningError> {
+    let payload = artifact
+        .payload
+        .as_object()
+        .ok_or_else(|| ReasoningError::ContextPayloadMustBeObject(artifact.version_id.clone()))?;
     let mut selected = Map::new();
     let mut seen = HashSet::new();
     for field in fields {
         if field.trim().is_empty() || !seen.insert(field) {
-            return Err(AdapterGatewayError::InvalidContextField {
+            return Err(ReasoningError::InvalidContextField {
                 version: artifact.version_id.clone(),
                 field: field.clone(),
             });
         }
         let value = payload
             .get(field)
-            .ok_or_else(|| AdapterGatewayError::InvalidContextField {
+            .ok_or_else(|| ReasoningError::InvalidContextField {
                 version: artifact.version_id.clone(),
                 field: field.clone(),
             })?;
@@ -441,6 +449,3 @@ fn select_payload_fields(
     }
     Ok(Value::Object(selected))
 }
-
-#[cfg(test)]
-mod tests;

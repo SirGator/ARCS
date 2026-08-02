@@ -71,7 +71,7 @@ pub enum CapabilityContract {
         emits: Vec<SchemaId>,
     },
     /// Beschafft gezielt Daten als Antwort auf ein Core-Artifact.
-    Data {
+    Request {
         accepts: Vec<SchemaId>,
         emits: Vec<SchemaId>,
     },
@@ -99,7 +99,7 @@ impl CapabilityContract {
         match self {
             Self::Observe { emits }
             | Self::Transform { emits, .. }
-            | Self::Data { emits, .. }
+            | Self::Request { emits, .. }
             | Self::Reason { emits }
             | Self::Act { emits, .. }
             | Self::Output { emits, .. } => emits,
@@ -110,7 +110,7 @@ impl CapabilityContract {
     pub fn accepted_schemas(&self) -> &[SchemaId] {
         match self {
             Self::Transform { accepts, .. }
-            | Self::Data { accepts, .. }
+            | Self::Request { accepts, .. }
             | Self::Act { accepts, .. }
             | Self::Output { accepts, .. } => accepts,
             Self::Observe { .. } | Self::Reason { .. } => &[],
@@ -127,8 +127,8 @@ impl CapabilityContract {
         matches!(self, Self::Observe { .. })
     }
 
-    pub fn is_data(&self) -> bool {
-        matches!(self, Self::Data { .. })
+    pub fn is_request(&self) -> bool {
+        matches!(self, Self::Request { .. })
     }
 
     pub fn is_output(&self) -> bool {
@@ -224,7 +224,7 @@ fn validate_capability(capability: &CapabilityDescriptor) -> Result<(), Manifest
     let needs_accepts = matches!(
         capability.contract,
         CapabilityContract::Transform { .. }
-            | CapabilityContract::Data { .. }
+            | CapabilityContract::Request { .. }
             | CapabilityContract::Act { .. }
             | CapabilityContract::Output { .. }
     );

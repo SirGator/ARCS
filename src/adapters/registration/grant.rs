@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 
 use super::{AdapterId, CapabilityId, ProducerClass};
-use crate::adapters::reasoning::ReasoningLimits;
 use crate::core::{SourceKind, TrustLevel};
+use crate::reasoning::ReasoningLimits;
 
 /// Vom Betreiber erteilte Rechte für genau eine Adapterinstallation.
 ///
@@ -17,7 +17,7 @@ pub struct AdapterGrant {
     pub producer_class: ProducerClass,
     pub enabled_capabilities: Vec<CapabilityId>,
     pub granted_permissions: Vec<String>,
-    /// Tatsächlich jedem akzeptierten Observe- oder Data-Artifact zugewiesener Trust.
+    /// Tatsächlich jedem akzeptierten Observation- oder Request-Artifact zugewiesener Trust.
     pub assigned_trust: TrustLevel,
     /// Vom Betreiber festgelegter Herkunftskanal für Observe- und Data-Antworten.
     ///

@@ -1,25 +1,25 @@
 //! Use Case zum einmaligen Persistieren eines validierten Modellkandidaten.
 
-use super::reasoning::ensure_candidate_schema;
-use super::{AdapterGateway, AdapterGatewayError};
-use crate::adapters::reasoning::ValidatedProposal;
+use super::service::ensure_candidate_schema;
+use super::{ReasoningError, ReasoningService};
 use crate::core::{
     Actor, ActorType, Artifact, ModelUse, Provenance, Source, SourceClass, SourceKind, Trust,
     TrustLevel,
 };
+use crate::reasoning::ValidatedProposal;
 use crate::store::relation_kinds;
 
-impl AdapterGateway<'_> {
+impl ReasoningService<'_> {
     /// Speichert einen zuvor validierten Modellvorschlag als niedrig
     /// vertrauenswürdiges Candidate-Artifact. Dies autorisiert oder dispatcht
     /// die vorgeschlagenen Fähigkeiten ausdrücklich nicht.
     pub fn commit_proposal(
         &mut self,
         proposal: ValidatedProposal,
-    ) -> Result<Artifact, AdapterGatewayError> {
+    ) -> Result<Artifact, ReasoningError> {
         for capability in &proposal.required_capabilities {
-            if !self.registry.is_enabled_capability(capability) {
-                return Err(AdapterGatewayError::ForbiddenCandidateCapability(
+            if !self.policy.is_enabled_capability(capability) {
+                return Err(ReasoningError::ForbiddenCandidateCapability(
                     capability.clone(),
                 ));
             }
@@ -32,7 +32,7 @@ impl AdapterGateway<'_> {
             proposal.candidate_index,
         );
         if self.committed_proposals.contains(&proposal_key) {
-            return Err(AdapterGatewayError::ProposalAlreadyCommitted {
+            return Err(ReasoningError::ProposalAlreadyCommitted {
                 adapter: proposal.adapter_id,
                 request_id: proposal.request_id,
                 candidate_index: proposal.candidate_index,
@@ -41,13 +41,11 @@ impl AdapterGateway<'_> {
         ensure_candidate_schema(self.schemas, &proposal.schema_id)?;
         self.schemas
             .validate(&proposal.schema_id, &proposal.payload)
-            .map_err(AdapterGatewayError::InvalidPayload)?;
+            .map_err(ReasoningError::InvalidPayload)?;
         let definition = self
             .schemas
             .get(&proposal.schema_id)
-            .ok_or_else(|| {
-                AdapterGatewayError::MissingRegisteredSchema(proposal.schema_id.clone())
-            })?
+            .ok_or_else(|| ReasoningError::MissingRegisteredSchema(proposal.schema_id.clone()))?
             .clone();
         let generated = self.ids.next(&definition.artifact_type);
         let artifact = Artifact {
@@ -93,9 +91,9 @@ impl AdapterGateway<'_> {
                     .map(|version| version.0.clone())
                     .collect(),
                 rules_applied: vec![
-                    "adapter_gateway.reasoning_context_minimized".into(),
-                    "adapter_gateway.proposal_schema_validated".into(),
-                    "adapter_gateway.candidate_capabilities_bounded".into(),
+                    "reasoning.context_minimized".into(),
+                    "reasoning.proposal_schema_validated".into(),
+                    "reasoning.candidate_capabilities_bounded".into(),
                 ],
                 models_used: vec![ModelUse {
                     name: proposal.trace.model_name,
@@ -131,6 +129,3 @@ impl AdapterGateway<'_> {
         Ok(artifact)
     }
 }
-
-#[cfg(test)]
-mod tests;

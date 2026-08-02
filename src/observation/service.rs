@@ -8,9 +8,9 @@ use crate::core::{
 };
 use crate::store::SqliteArtifactStore;
 
-use super::ObservationIngressError;
+use super::ObservationError;
 
-pub struct ObservationIngress<'a> {
+pub struct ObservationService<'a> {
     policy: &'a AdapterRegistry,
     schemas: &'a SchemaRegistry,
     store: &'a SqliteArtifactStore,
@@ -18,8 +18,8 @@ pub struct ObservationIngress<'a> {
     clock: &'a dyn Clock,
 }
 
-impl<'a> ObservationIngress<'a> {
-    pub(crate) fn new(
+impl<'a> ObservationService<'a> {
+    pub fn new(
         policy: &'a AdapterRegistry,
         schemas: &'a SchemaRegistry,
         store: &'a SqliteArtifactStore,
@@ -35,13 +35,13 @@ impl<'a> ObservationIngress<'a> {
         }
     }
 
-    pub(crate) fn ingest(
+    pub fn ingest(
         &mut self,
         adapter_id: &AdapterId,
         message: ObservationMessage,
-    ) -> Result<Artifact, ObservationIngressError> {
+    ) -> Result<Artifact, ObservationError> {
         if message.external_reference.trim().is_empty() {
-            return Err(ObservationIngressError::InvalidExternalReference);
+            return Err(ObservationError::InvalidExternalReference);
         }
 
         let (registered, descriptor) = self
@@ -52,10 +52,10 @@ impl<'a> ObservationIngress<'a> {
             capability_id: message.capability_id.clone(),
         };
         let CapabilityContract::Observe { emits } = &descriptor.contract else {
-            return Err(ObservationIngressError::CapabilityIsNotObserve(capability));
+            return Err(ObservationError::CapabilityIsNotObserve(capability));
         };
         if emits.len() != 1 {
-            return Err(ObservationIngressError::InvalidObserveSchemaCount {
+            return Err(ObservationError::InvalidObserveSchemaCount {
                 capability,
                 actual: emits.len(),
             });
@@ -73,14 +73,14 @@ impl<'a> ObservationIngress<'a> {
 
         let reference_size = message.external_reference.len();
         if reference_size > maximum_reference {
-            return Err(ObservationIngressError::ExternalReferenceTooLarge {
+            return Err(ObservationError::ExternalReferenceTooLarge {
                 actual: reference_size,
                 maximum: maximum_reference,
             });
         }
         let payload_size = serde_json::to_vec(&message.payload)?.len();
         if payload_size > maximum_payload {
-            return Err(ObservationIngressError::PayloadTooLarge {
+            return Err(ObservationError::PayloadTooLarge {
                 actual: payload_size,
                 maximum: maximum_payload,
             });
@@ -88,17 +88,17 @@ impl<'a> ObservationIngress<'a> {
 
         self.schemas
             .validate(&schema_id, &message.payload)
-            .map_err(ObservationIngressError::InvalidPayload)?;
+            .map_err(ObservationError::InvalidPayload)?;
         let definition = self
             .schemas
             .get(&schema_id)
-            .ok_or_else(|| ObservationIngressError::MissingRegisteredSchema(schema_id.clone()))?
+            .ok_or_else(|| ObservationError::MissingRegisteredSchema(schema_id.clone()))?
             .clone();
 
         let external_subject = message
             .external_subject
             .filter(|subject| !subject.trim().is_empty())
-            .ok_or(ObservationIngressError::MissingExternalSubject)?;
+            .ok_or(ObservationError::MissingExternalSubject)?;
         let subject = observation_subject(adapter_id, &message.capability_id.0, &external_subject);
         let stream_key = observation_stream_key(&subject, &definition.id.0);
 
@@ -124,8 +124,8 @@ impl<'a> ObservationIngress<'a> {
             provenance: Some(Provenance {
                 parents: vec![],
                 rules_applied: vec![
-                    "runtime.observation_capability_authorized".into(),
-                    "runtime.observation_payload_validated".into(),
+                    "observation.capability_authorized".into(),
+                    "observation.payload_validated".into(),
                 ],
                 models_used: vec![],
                 transform: Some(format!("adapter:{}", adapter_id.0)),

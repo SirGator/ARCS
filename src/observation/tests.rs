@@ -132,7 +132,7 @@ fn valid_observation_is_stored_with_runtime_envelope() {
     let mut ids = TestIds { next: 1 };
     let clock = FixedClock;
 
-    let artifact = ObservationIngress::new(&registry, &schemas, &store, &mut ids, &clock)
+    let artifact = ObservationService::new(&registry, &schemas, &store, &mut ids, &clock)
         .ingest(
             &AdapterId("input.demo".into()),
             message(json!({"reading": 21.5})),
@@ -153,8 +153,8 @@ fn valid_observation_is_stored_with_runtime_envelope() {
     assert_eq!(
         artifact.provenance.as_ref().unwrap().rules_applied,
         vec![
-            "runtime.observation_capability_authorized",
-            "runtime.observation_payload_validated",
+            "observation.capability_authorized",
+            "observation.payload_validated",
         ]
     );
     assert_eq!(store.get(&artifact.version_id).unwrap(), Some(artifact));
@@ -171,7 +171,7 @@ fn current_state_is_updated_and_repeated_subject_uses_same_stream() {
     );
     let mut ids = TestIds { next: 1 };
     let clock = FixedClock;
-    let mut ingress = ObservationIngress::new(&registry, &schemas, &store, &mut ids, &clock);
+    let mut ingress = ObservationService::new(&registry, &schemas, &store, &mut ids, &clock);
 
     let first = ingress
         .ingest(
@@ -214,13 +214,10 @@ fn invalid_payload_does_not_mutate_store() {
     let mut ids = TestIds { next: 1 };
     let clock = FixedClock;
 
-    let result = ObservationIngress::new(&registry, &schemas, &store, &mut ids, &clock)
+    let result = ObservationService::new(&registry, &schemas, &store, &mut ids, &clock)
         .ingest(&AdapterId("input.demo".into()), message(json!({})));
 
-    assert!(matches!(
-        result,
-        Err(ObservationIngressError::InvalidPayload(_))
-    ));
+    assert!(matches!(result, Err(ObservationError::InvalidPayload(_))));
     assert!(store.is_empty().unwrap());
 }
 
@@ -247,12 +244,12 @@ fn unauthorized_capability_is_rejected() {
     let mut unauthorized = message(json!({"reading": 21.5}));
     unauthorized.capability_id = CapabilityId("input.disabled".into());
 
-    let result = ObservationIngress::new(&registry, &schemas, &store, &mut ids, &clock)
+    let result = ObservationService::new(&registry, &schemas, &store, &mut ids, &clock)
         .ingest(&AdapterId("input.demo".into()), unauthorized);
 
     assert!(matches!(
         result,
-        Err(ObservationIngressError::Authorization(
+        Err(ObservationError::Authorization(
             crate::adapters::AdapterRegistryError::CapabilityNotEnabled { .. }
         ))
     ));
@@ -294,12 +291,12 @@ fn act_capability_cannot_push_observation() {
     let mut act_message = message(json!({"reading": 21.5}));
     act_message.capability_id = CapabilityId("device.set".into());
 
-    let result = ObservationIngress::new(&registry, &schemas, &store, &mut ids, &clock)
+    let result = ObservationService::new(&registry, &schemas, &store, &mut ids, &clock)
         .ingest(&AdapterId("action.demo".into()), act_message);
 
     assert!(matches!(
         result,
-        Err(ObservationIngressError::CapabilityIsNotObserve(_))
+        Err(ObservationError::CapabilityIsNotObserve(_))
     ));
     assert!(store.is_empty().unwrap());
 }
@@ -316,14 +313,14 @@ fn oversized_payload_is_rejected() {
     let mut ids = TestIds { next: 1 };
     let clock = FixedClock;
 
-    let result = ObservationIngress::new(&registry, &schemas, &store, &mut ids, &clock).ingest(
+    let result = ObservationService::new(&registry, &schemas, &store, &mut ids, &clock).ingest(
         &AdapterId("input.demo".into()),
         message(json!({"reading": 21.5})),
     );
 
     assert!(matches!(
         result,
-        Err(ObservationIngressError::PayloadTooLarge { maximum: 8, .. })
+        Err(ObservationError::PayloadTooLarge { maximum: 8, .. })
     ));
     assert!(store.is_empty().unwrap());
 }
@@ -338,12 +335,12 @@ fn empty_external_reference_is_rejected_first() {
     let mut invalid = message(json!({"reading": 21.5}));
     invalid.external_reference = " \t".into();
 
-    let result = ObservationIngress::new(&registry, &schemas, &store, &mut ids, &clock)
+    let result = ObservationService::new(&registry, &schemas, &store, &mut ids, &clock)
         .ingest(&AdapterId("unknown".into()), invalid);
 
     assert!(matches!(
         result,
-        Err(ObservationIngressError::InvalidExternalReference)
+        Err(ObservationError::InvalidExternalReference)
     ));
 }
 
@@ -359,7 +356,7 @@ fn schema_is_derived_exclusively_from_capability() {
     let mut ids = TestIds { next: 1 };
     let clock = FixedClock;
 
-    let artifact = ObservationIngress::new(&registry, &schemas, &store, &mut ids, &clock)
+    let artifact = ObservationService::new(&registry, &schemas, &store, &mut ids, &clock)
         .ingest(
             &AdapterId("input.demo".into()),
             message(json!({"reading": 21.5})),
@@ -393,14 +390,14 @@ fn observe_capability_must_emit_exactly_one_schema() {
     let mut ids = TestIds { next: 1 };
     let clock = FixedClock;
 
-    let result = ObservationIngress::new(&registry, &schemas, &store, &mut ids, &clock).ingest(
+    let result = ObservationService::new(&registry, &schemas, &store, &mut ids, &clock).ingest(
         &AdapterId("input.demo".into()),
         message(json!({"reading": 21.5})),
     );
 
     assert!(matches!(
         result,
-        Err(ObservationIngressError::InvalidObserveSchemaCount { actual: 2, .. })
+        Err(ObservationError::InvalidObserveSchemaCount { actual: 2, .. })
     ));
 }
 
@@ -416,7 +413,7 @@ fn trust_is_taken_from_grant() {
     let mut ids = TestIds { next: 1 };
     let clock = FixedClock;
 
-    let artifact = ObservationIngress::new(&registry, &schemas, &store, &mut ids, &clock)
+    let artifact = ObservationService::new(&registry, &schemas, &store, &mut ids, &clock)
         .ingest(
             &AdapterId("input.demo".into()),
             message(json!({"reading": 21.5})),
@@ -445,7 +442,7 @@ fn runtime_namespaces_external_subject() {
     let mut ids = TestIds { next: 1 };
     let clock = FixedClock;
 
-    let mut ingress = ObservationIngress::new(&registry, &schemas, &store, &mut ids, &clock);
+    let mut ingress = ObservationService::new(&registry, &schemas, &store, &mut ids, &clock);
     let artifact = ingress
         .ingest(
             &AdapterId("input.demo".into()),
@@ -483,12 +480,12 @@ fn missing_external_subject_is_rejected() {
     let mut missing = message(json!({"reading": 21.5}));
     missing.external_subject = None;
 
-    let result = ObservationIngress::new(&registry, &schemas, &store, &mut ids, &clock)
+    let result = ObservationService::new(&registry, &schemas, &store, &mut ids, &clock)
         .ingest(&AdapterId("input.demo".into()), missing);
 
     assert!(matches!(
         result,
-        Err(ObservationIngressError::MissingExternalSubject)
+        Err(ObservationError::MissingExternalSubject)
     ));
     assert!(store.is_empty().unwrap());
 }
