@@ -1,6 +1,6 @@
 use crate::adapters::{
     AdapterId, AdapterRegistry, AdapterRegistryError, CapabilityContract, CapabilityRef,
-    ObservationMessage, ProducerClass,
+    ProducerClass,
 };
 use crate::core::{
     Actor, ActorType, Artifact, ArtifactFactory, ArtifactFactoryInput, ArtifactIdGenerator, Clock,
@@ -8,7 +8,7 @@ use crate::core::{
 };
 use crate::store::SqliteArtifactStore;
 
-use super::ObservationError;
+use super::{ObservationError, ObservationMessage};
 
 pub struct ObservationService<'a> {
     policy: &'a AdapterRegistry,

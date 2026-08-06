@@ -1,0 +1,11 @@
+{
+  "$id": "arcs.reasoning_result.v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ARCS Reasoning Result",
+  "type": "object",
+  "required": ["response"],
+  "properties": {
+    "response": {"type": "object"}
+  },
+  "additionalProperties": false
+}

@@ -12,11 +12,16 @@ use crate::core::{
 };
 use crate::reasoning::{
     ReasoningAdapter, ReasoningContextItem, ReasoningInvocation, ReasoningRequest,
-    ValidatedProposal,
+    ReasoningResponse, ValidatedProposal,
+};
+use crate::runtime::{
+    InvocationKind, InvocationService, InvocationSpec, InvocationStatus,
+    deterministic_invocation_id,
 };
 use crate::store::SqliteArtifactStore;
 
 const REASONING_REQUEST_SCHEMA_ID: &str = "arcs.reasoning_request.v1";
+const REASONING_RESULT_SCHEMA_ID: &str = "arcs.reasoning_result.v1";
 
 /// Eigenständiger Reasoning-Slice mit genau einem externen Modellport.
 pub struct ReasoningService<'a> {
@@ -26,8 +31,6 @@ pub struct ReasoningService<'a> {
     pub(super) ids: &'a mut dyn ArtifactIdGenerator,
     pub(super) clock: &'a dyn Clock,
     pub(super) endpoint: &'a dyn ReasoningAdapter,
-    pub(super) used_reasoning_requests: HashSet<(CapabilityRef, String)>,
-    pub(super) committed_proposals: HashSet<(VersionId, usize)>,
 }
 
 impl<'a> ReasoningService<'a> {
@@ -46,8 +49,6 @@ impl<'a> ReasoningService<'a> {
             ids,
             clock,
             endpoint,
-            used_reasoning_requests: HashSet::new(),
-            committed_proposals: HashSet::new(),
         }
     }
 
@@ -116,16 +117,24 @@ impl ReasoningService<'_> {
             .iter()
             .map(|item| item.version_id.clone())
             .collect::<Vec<_>>();
-        let context_set = context_versions.iter().cloned().collect::<HashSet<_>>();
 
+        let invocation_id = deterministic_invocation_id(
+            InvocationKind::Reasoning,
+            &[
+                &authorized_capability.adapter_id.0,
+                &authorized_capability.capability_id.0,
+                &request.request_id,
+            ],
+        );
         let invocation = ReasoningInvocation {
+            invocation_id: invocation_id.clone(),
             request_id: request.request_id.clone(),
             capability: authorized_capability.clone(),
-            objective: request.objective,
+            objective: request.objective.clone(),
             context,
             target_schema_id: request.target_schema_id.clone(),
             allowed_capabilities: allowed_capabilities.clone(),
-            constraints: request.constraints,
+            constraints: request.constraints.clone(),
             max_output_tokens: request.budget.max_output_tokens,
             max_candidates: request.budget.max_candidates,
         };
@@ -137,29 +146,115 @@ impl ReasoningService<'_> {
             });
         }
 
-        // Ein fehlender Port ist ein Konfigurationsfehler und noch kein
-        // tatsächlich vorbereiteter externer Reasoning-Aufruf.
-        let request_key = (authorized_capability.clone(), request.request_id.clone());
-        if self.used_reasoning_requests.contains(&request_key) {
-            return Err(ReasoningError::ReasoningRequestAlreadyUsed {
-                capability: authorized_capability.clone(),
-                request_id: request.request_id.clone(),
-            });
+        let existing =
+            InvocationService::new(self.store, self.schemas, self.clock).lookup(&invocation_id)?;
+        if let Some(existing) = &existing {
+            if existing.status == InvocationStatus::Succeeded {
+                let result_version = existing
+                    .result_version
+                    .clone()
+                    .ok_or(crate::runtime::InvocationError::MissingResult)?;
+                let result = self
+                    .store
+                    .get(&result_version)?
+                    .ok_or(crate::runtime::InvocationError::MissingResult)?;
+                let response: ReasoningResponse = serde_json::from_value(
+                    result.payload.get("response").cloned().ok_or_else(|| {
+                        ReasoningError::InvalidReasoningRequest("stored result is malformed".into())
+                    })?,
+                )?;
+                return self.validate_response(
+                    response,
+                    &request,
+                    &authorized_capability,
+                    &context_versions,
+                    &allowed_capabilities,
+                    &existing.input_version,
+                    &invocation_id,
+                );
+            }
         }
-        let reasoning_request_version = self.persist_reasoning_request(
-            &request.request_id,
-            &authorized_capability,
-            &request.target_schema_id,
-            &invocation.objective,
-            &context_versions,
-        )?;
-        // Ab dem Audit-Commit bezeichnet diese ID genau einen externen
-        // Reasoning-Versuch. Auch ein Transport- oder Validierungsfehler darf
-        // nicht unter derselben Korrelation neu interpretiert werden.
-        self.used_reasoning_requests.insert(request_key);
 
-        let response = self.endpoint.propose(&invocation)?;
+        let audit = if existing.is_none() {
+            Some(self.build_reasoning_request_artifact(
+                &request.request_id,
+                &authorized_capability,
+                &request.target_schema_id,
+                &invocation.objective,
+                &context_versions,
+            )?)
+        } else {
+            None
+        };
+        let (prepared, reasoning_request_version) = if let Some(existing) = existing {
+            let version = existing.input_version.clone();
+            (existing, version)
+        } else {
+            let audit = audit.ok_or_else(|| {
+                ReasoningError::InvalidReasoningRequest(
+                    "missing audit artifact for new invocation".into(),
+                )
+            })?;
+            let version = audit.version_id.clone();
+            let prepared = InvocationService::new(self.store, self.schemas, self.clock)
+                .prepare_with_event(
+                    InvocationSpec {
+                        invocation_id: invocation_id.clone(),
+                        kind: InvocationKind::Reasoning,
+                        capability: capability_name(&authorized_capability),
+                        input_version: version.clone(),
+                    },
+                    &audit,
+                )?;
+            (prepared, version)
+        };
+        let dispatched = {
+            let invocations = InvocationService::new(self.store, self.schemas, self.clock);
+            let recovered = invocations.recover(&prepared)?;
+            invocations.dispatch(&recovered)?
+        };
+        let outcome = (|| {
+            let response = self.endpoint.propose(&invocation)?;
+            let proposals = self.validate_response(
+                response.clone(),
+                &request,
+                &authorized_capability,
+                &context_versions,
+                &allowed_capabilities,
+                &reasoning_request_version,
+                &invocation_id,
+            )?;
+            let result = self.build_reasoning_result_artifact(&invocation_id, response)?;
+            InvocationService::new(self.store, self.schemas, self.clock).succeed_with_event(
+                &dispatched,
+                &result,
+                &[],
+            )?;
+            Ok(proposals)
+        })();
+        if let Err(error) = &outcome {
+            let _ = InvocationService::new(self.store, self.schemas, self.clock).fail(
+                &dispatched,
+                format!("{error:?}"),
+                is_retryable(error),
+            );
+        }
+        outcome
+    }
 
+    fn validate_response(
+        &self,
+        response: ReasoningResponse,
+        request: &ReasoningRequest,
+        authorized_capability: &CapabilityRef,
+        context_versions: &[VersionId],
+        allowed_capabilities: &[CapabilityRef],
+        reasoning_request_version: &VersionId,
+        invocation_id: &str,
+    ) -> Result<Vec<ValidatedProposal>, ReasoningError> {
+        if response.invocation_id != invocation_id {
+            return Err(ReasoningError::InvocationResponseMismatch);
+        }
         if response.request_id != request.request_id {
             return Err(ReasoningError::ResponseRequestMismatch);
         }
@@ -191,7 +286,8 @@ impl ReasoningService<'_> {
             return Err(ReasoningError::InvalidReasoningTrace);
         }
 
-        let allowed_set = allowed_capabilities.into_iter().collect::<HashSet<_>>();
+        let context_set = context_versions.iter().cloned().collect::<HashSet<_>>();
+        let allowed_set = allowed_capabilities.iter().cloned().collect::<HashSet<_>>();
         let mut proposals = Vec::with_capacity(response.candidates.len());
         for (candidate_index, candidate) in response.candidates.into_iter().enumerate() {
             if candidate.schema_id != request.target_schema_id {
@@ -209,14 +305,15 @@ impl ReasoningService<'_> {
             let referenced_versions =
                 validate_candidate_references(&candidate.referenced_versions, &context_set)?;
             proposals.push(ValidatedProposal {
-                adapter_id: adapter_id.clone(),
+                adapter_id: authorized_capability.adapter_id.clone(),
+                reasoning_capability: authorized_capability.clone(),
                 request_id: request.request_id.clone(),
                 reasoning_request_version: reasoning_request_version.clone(),
                 candidate_index,
                 schema_id: candidate.schema_id,
                 required_capabilities,
                 referenced_versions,
-                context_versions: context_versions.clone(),
+                context_versions: context_versions.to_vec(),
                 payload: candidate.payload,
                 trace: response.trace.clone(),
             });
@@ -224,17 +321,16 @@ impl ReasoningService<'_> {
         Ok(proposals)
     }
 
-    /// Persistiert den auditierbaren Core-Auftrag. Es werden absichtlich nur
-    /// Ziel und Versionsreferenzen gespeichert, niemals die ausgewählten
-    /// Payloadfelder oder weitere Store-Inhalte.
-    fn persist_reasoning_request(
+    /// Baut den auditierbaren Core-Auftrag. Der Invocation-Service speichert
+    /// ihn zusammen mit `prepared` atomar, bevor ein Modellport aufgerufen wird.
+    fn build_reasoning_request_artifact(
         &mut self,
         request_id: &str,
         reasoning_capability: &CapabilityRef,
         target_schema_id: &SchemaId,
         objective: &str,
         context_versions: &[VersionId],
-    ) -> Result<VersionId, ReasoningError> {
+    ) -> Result<Artifact, ReasoningError> {
         let schema_id = SchemaId(REASONING_REQUEST_SCHEMA_ID.into());
         let definition = self
             .schemas
@@ -290,10 +386,52 @@ impl ReasoningService<'_> {
             }),
         };
 
-        // Der Store validiert das geschlossene Bundled Schema erneut. Erst
-        // nach erfolgreichem Commit darf der externe Port aufgerufen werden.
-        self.store.append(&artifact, self.schemas)?;
-        Ok(artifact.version_id)
+        Ok(artifact)
+    }
+
+    fn build_reasoning_result_artifact(
+        &mut self,
+        invocation_id: &str,
+        response: ReasoningResponse,
+    ) -> Result<Artifact, ReasoningError> {
+        let schema_id = SchemaId(REASONING_RESULT_SCHEMA_ID.into());
+        let definition = self
+            .schemas
+            .get(&schema_id)
+            .ok_or_else(|| ReasoningError::MissingRegisteredSchema(schema_id.clone()))?
+            .clone();
+        let generated = self.ids.next(&definition.artifact_type);
+        Ok(Artifact {
+            artifact_id: generated.artifact_id,
+            version_id: generated.version_id,
+            version: 1,
+            artifact_type: definition.artifact_type,
+            schema_id: definition.id,
+            schema_version: definition.version,
+            created_at: self.clock.now_rfc3339(),
+            created_by: Actor {
+                actor_type: ActorType::System,
+                id: "arcs.reasoning".into(),
+            },
+            source: Source {
+                kind: SourceKind::Internal,
+                reference: format!("reasoning-result:{invocation_id}"),
+            },
+            trust: Trust {
+                level: TrustLevel::High,
+                source_class: SourceClass::System,
+            },
+            stream_key: format!("reasoning:{invocation_id}"),
+            subject: None,
+            tags: vec![format!("invocation:{invocation_id}")],
+            payload: json!({"response": response}),
+            provenance: Some(Provenance {
+                parents: vec![],
+                rules_applied: vec!["reasoning.response_validated".into()],
+                models_used: vec![],
+                transform: Some("reasoning.persist_result".into()),
+            }),
+        })
     }
 
     fn build_reasoning_context(
@@ -355,6 +493,20 @@ fn validate_reasoning_budget_and_request(request: &ReasoningRequest) -> Result<(
         ));
     }
     Ok(())
+}
+
+fn is_retryable(error: &ReasoningError) -> bool {
+    matches!(
+        error,
+        ReasoningError::AdapterCall(
+            crate::adapters::AdapterCallError::Unavailable(_)
+                | crate::adapters::AdapterCallError::Timeout
+        )
+    )
+}
+
+fn capability_name(capability: &CapabilityRef) -> String {
+    format!("{}/{}", capability.adapter_id.0, capability.capability_id.0)
 }
 
 pub(super) fn ensure_candidate_schema(

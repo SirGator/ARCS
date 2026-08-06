@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use serde_json::json;
@@ -70,6 +72,7 @@ impl ReasoningAdapter for MockReasoner {
     ) -> Result<ReasoningResponse, AdapterCallError> {
         self.calls.lock().unwrap().push(request.clone());
         Ok(ReasoningResponse {
+            invocation_id: request.invocation_id.clone(),
             request_id: request.request_id.clone(),
             candidates: vec![ProposalSubmission {
                 schema_id: request.target_schema_id.clone(),
@@ -238,18 +241,115 @@ fn reasoning_slice_audits_request_and_commits_low_trust_candidate() {
     };
 
     let proposals = service.reason(request.clone()).unwrap();
-    let replay = service.reason(request);
-    let candidate = service
-        .commit_proposal(proposals.into_iter().next().unwrap())
-        .unwrap();
+    let replay = service.reason(request).unwrap();
+    let proposal = proposals.into_iter().next().unwrap();
+    let candidate = service.commit_proposal(proposal.clone()).unwrap();
+    let duplicate = service.commit_proposal(proposal).unwrap();
 
-    assert!(matches!(
-        replay,
-        Err(ReasoningError::ReasoningRequestAlreadyUsed { .. })
-    ));
+    assert_eq!(replay.len(), 1);
     assert_eq!(calls.lock().unwrap().len(), 1);
+    assert_eq!(duplicate, candidate);
     assert_eq!(candidate.created_by.actor_type, ActorType::Model);
     assert_eq!(candidate.trust.level, TrustLevel::Low);
     assert_eq!(candidate.trust.source_class, SourceClass::Model);
-    assert_eq!(store.len().unwrap(), 3);
+    assert!(store.len().unwrap() >= 6);
+}
+
+struct TemporaryDatabase {
+    path: PathBuf,
+}
+
+impl TemporaryDatabase {
+    fn new() -> Self {
+        static NEXT_DATABASE: AtomicU64 = AtomicU64::new(1);
+        let sequence = NEXT_DATABASE.fetch_add(1, Ordering::Relaxed);
+        Self {
+            path: std::env::temp_dir().join(format!(
+                "arcs-reasoning-invocation-{}-{sequence}.sqlite",
+                std::process::id()
+            )),
+        }
+    }
+}
+
+impl Drop for TemporaryDatabase {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+fn request_for(context: &Artifact) -> ReasoningRequest {
+    ReasoningRequest {
+        request_id: "reasoning-restart-1".into(),
+        reasoning_capability: CapabilityRef::new("reasoning.test", "reasoning.propose"),
+        objective: "find a safe next step".into(),
+        context: vec![ContextSelection {
+            version_id: context.version_id.clone(),
+            payload_fields: vec!["raw_text".into()],
+        }],
+        target_schema_id: SchemaId("arcs.route_candidate.reasoning_slice_test.v1".into()),
+        allowed_capabilities: vec![CapabilityRef::new("action.test", "device.set")],
+        constraints: json!({}),
+        budget: ReasoningBudget {
+            max_context_items: 2,
+            max_context_bytes: 4096,
+            max_output_tokens: 256,
+            max_output_bytes: 4096,
+            max_candidates: 1,
+        },
+    }
+}
+
+#[test]
+fn successful_reasoning_is_not_dispatched_again_after_restart() {
+    let schemas = schemas();
+    let database = TemporaryDatabase::new();
+    let context = context();
+    let manifest = reasoning_manifest();
+    let mut registry = AdapterRegistry::new();
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let endpoint = MockReasoner {
+        manifest: manifest.clone(),
+        context_version: context.version_id.clone(),
+        calls: Arc::clone(&calls),
+    };
+
+    let first = {
+        let store = SqliteArtifactStore::open(&database.path).unwrap();
+        store.append(&context, &schemas).unwrap();
+        registry
+            .register(manifest, reasoning_grant(), &schemas, &store)
+            .unwrap();
+        registry
+            .register(action_manifest(), action_grant(), &schemas, &store)
+            .unwrap();
+        let mut ids = TestIds(1);
+        ReasoningService::new(
+            &registry,
+            &schemas,
+            &store,
+            &mut ids,
+            &FixedClock,
+            &endpoint,
+        )
+        .reason(request_for(&context))
+        .unwrap()
+    };
+    let replay = {
+        let store = SqliteArtifactStore::open(&database.path).unwrap();
+        let mut ids = TestIds(99);
+        ReasoningService::new(
+            &registry,
+            &schemas,
+            &store,
+            &mut ids,
+            &FixedClock,
+            &endpoint,
+        )
+        .reason(request_for(&context))
+        .unwrap()
+    };
+
+    assert_eq!(replay, first);
+    assert_eq!(calls.lock().unwrap().len(), 1);
 }

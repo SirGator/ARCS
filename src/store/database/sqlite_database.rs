@@ -210,6 +210,68 @@ impl SqliteArtifactStore {
         Ok(())
     }
 
+    /// Speichert einen neuen Current-State zusammen mit einem unveränderlichen
+    /// Ereignis im selben Commit. Invocation-Status und fachliches Resultat
+    /// können dadurch nach einem Neustart nicht auseinanderlaufen.
+    pub(crate) fn append_current_with_event(
+        &self,
+        current: &Artifact,
+        event: &Artifact,
+        registry: &SchemaRegistry,
+        event_relations: &[(VersionId, RelationKind)],
+    ) -> Result<(), StoreError> {
+        validate_artifact(current, registry).map_err(StoreError::Validation)?;
+        validate_artifact(event, registry).map_err(StoreError::Validation)?;
+        let subject = current.subject.as_ref().ok_or(StoreError::MissingSubject)?;
+
+        let transaction = self.connection.unchecked_transaction()?;
+        append_validated(&transaction, event)?;
+        append_validated(&transaction, current)?;
+        transaction.execute(
+            "INSERT INTO current_artifacts (subject, schema_id, version_id)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(subject, schema_id) DO UPDATE SET
+                 version_id = excluded.version_id,
+                 updated_at = CURRENT_TIMESTAMP",
+            params![subject.0, current.schema_id.0, current.version_id.0],
+        )?;
+        insert_relations(&transaction, &event.version_id, event_relations)?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    /// Speichert zwei Current-State-Updates atomar. Dies wird für Resultate
+    /// benötigt, die selbst ihren fachlichen Current-State fortschreiben.
+    pub(crate) fn append_two_current_related(
+        &self,
+        first: &Artifact,
+        first_relations: &[(VersionId, RelationKind)],
+        second: &Artifact,
+        registry: &SchemaRegistry,
+    ) -> Result<(), StoreError> {
+        validate_artifact(first, registry).map_err(StoreError::Validation)?;
+        validate_artifact(second, registry).map_err(StoreError::Validation)?;
+        let first_subject = first.subject.as_ref().ok_or(StoreError::MissingSubject)?;
+        let second_subject = second.subject.as_ref().ok_or(StoreError::MissingSubject)?;
+
+        let transaction = self.connection.unchecked_transaction()?;
+        append_validated(&transaction, first)?;
+        append_validated(&transaction, second)?;
+        for (artifact, subject) in [(first, first_subject), (second, second_subject)] {
+            transaction.execute(
+                "INSERT INTO current_artifacts (subject, schema_id, version_id)
+                 VALUES (?1, ?2, ?3)
+                 ON CONFLICT(subject, schema_id) DO UPDATE SET
+                     version_id = excluded.version_id,
+                     updated_at = CURRENT_TIMESTAMP",
+                params![subject.0, artifact.schema_id.0, artifact.version_id.0],
+            )?;
+        }
+        insert_relations(&transaction, &first.version_id, first_relations)?;
+        transaction.commit()?;
+        Ok(())
+    }
+
     /// Atomare Event-Aufnahme mit ausgehenden semantischen Relationen.
     pub(crate) fn append_related(
         &self,

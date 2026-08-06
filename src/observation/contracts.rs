@@ -1,4 +1,4 @@
-//! Technischer Adaptervertrag für ungefragt eintreffende Beobachtungen.
+//! Verträge an der Grenze für ungefragt eintreffende Beobachtungen.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -9,7 +9,7 @@ use crate::adapters::registration::CapabilityId;
 ///
 /// Schema, interne Identitäten, Herkunft und Trust werden ausschließlich aus
 /// Runtime-Konfiguration und Betreiber-Grant abgeleitet.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ObservationMessage {
     pub capability_id: CapabilityId,

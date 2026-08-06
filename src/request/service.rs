@@ -1,9 +1,11 @@
-use std::collections::HashSet;
-
 use crate::adapters::{AdapterRegistry, CapabilityContract, CapabilityRef, ProducerClass};
 use crate::core::{
     Actor, ActorType, Artifact, ArtifactFactory, ArtifactFactoryInput, ArtifactIdGenerator, Clock,
     Provenance, SchemaId, SchemaRegistry, Source, SourceClass, Trust, TrustLevel, VersionId,
+};
+use crate::runtime::{
+    InvocationKind, InvocationService, InvocationSpec, InvocationStatus,
+    deterministic_invocation_id,
 };
 use crate::store::{SqliteArtifactStore, relation_kinds};
 
@@ -20,7 +22,6 @@ pub struct RequestService<'a> {
     store: &'a SqliteArtifactStore,
     ids: &'a mut dyn ArtifactIdGenerator,
     clock: &'a dyn Clock,
-    completed: HashSet<(CapabilityRef, VersionId, SchemaId)>,
 }
 
 impl<'a> RequestService<'a> {
@@ -37,7 +38,6 @@ impl<'a> RequestService<'a> {
             store,
             ids,
             clock,
-            completed: HashSet::new(),
         }
     }
 
@@ -48,19 +48,6 @@ impl<'a> RequestService<'a> {
         request_version: &VersionId,
         response_schema: &SchemaId,
     ) -> Result<Artifact, RequestError> {
-        let completion_key = (
-            capability.clone(),
-            request_version.clone(),
-            response_schema.clone(),
-        );
-        if self.completed.contains(&completion_key) {
-            return Err(RequestError::InvocationAlreadyCompleted {
-                capability: capability.clone(),
-                input: request_version.clone(),
-                response_schema: response_schema.clone(),
-            });
-        }
-
         if endpoint.manifest().adapter_id != capability.adapter_id {
             return Err(RequestError::Authorization(
                 crate::adapters::AdapterRegistryError::UnknownAdapter(
@@ -112,6 +99,27 @@ impl<'a> RequestService<'a> {
             .ok_or_else(|| RequestError::MissingRegisteredSchema(response_schema.clone()))?
             .clone();
         let invocation_id = invocation_id(capability, request_version, response_schema);
+        let dispatched = {
+            let invocations = InvocationService::new(self.store, self.schemas, self.clock);
+            let prepared = invocations.prepare(InvocationSpec {
+                invocation_id: invocation_id.clone(),
+                kind: InvocationKind::Request,
+                capability: capability_name(capability),
+                input_version: request.version_id.clone(),
+            })?;
+            if prepared.status == InvocationStatus::Succeeded {
+                let result = prepared
+                    .result_version
+                    .ok_or(crate::runtime::InvocationError::MissingResult)?;
+                return self
+                    .store
+                    .get(&result)?
+                    .ok_or(crate::runtime::InvocationError::MissingResult)
+                    .map_err(RequestError::from);
+            }
+            let recovered = invocations.recover(&prepared)?;
+            invocations.dispatch(&recovered)?
+        };
         let invocation = RequestInvocation {
             invocation_id: invocation_id.clone(),
             capability: capability.clone(),
@@ -123,92 +131,112 @@ impl<'a> RequestService<'a> {
             max_response_bytes: grant.max_payload_bytes,
         };
 
-        let response = endpoint.fetch(&invocation)?;
-        if response.invocation_id != invocation_id {
-            return Err(RequestError::InvocationResponseMismatch);
-        }
-        if response.external_reference.trim().is_empty() {
-            return Err(RequestError::InvalidExternalReference);
-        }
-        let reference_size = response.external_reference.len();
-        if reference_size > grant.max_external_reference_bytes {
-            return Err(RequestError::ExternalReferenceTooLarge {
-                actual: reference_size,
-                maximum: grant.max_external_reference_bytes,
-            });
-        }
-        let payload_size = serde_json::to_vec(&response.payload)?.len();
-        if payload_size > grant.max_payload_bytes {
-            return Err(RequestError::PayloadTooLarge {
-                actual: payload_size,
-                maximum: grant.max_payload_bytes,
-            });
-        }
-        self.schemas
-            .validate(response_schema, &response.payload)
-            .map_err(RequestError::InvalidPayload)?;
+        let outcome = (|| {
+            let response = endpoint.fetch(&invocation)?;
+            if response.invocation_id != invocation_id {
+                return Err(RequestError::InvocationResponseMismatch);
+            }
+            if response.external_reference.trim().is_empty() {
+                return Err(RequestError::InvalidExternalReference);
+            }
+            let reference_size = response.external_reference.len();
+            if reference_size > grant.max_external_reference_bytes {
+                return Err(RequestError::ExternalReferenceTooLarge {
+                    actual: reference_size,
+                    maximum: grant.max_external_reference_bytes,
+                });
+            }
+            let payload_size = serde_json::to_vec(&response.payload)?.len();
+            if payload_size > grant.max_payload_bytes {
+                return Err(RequestError::PayloadTooLarge {
+                    actual: payload_size,
+                    maximum: grant.max_payload_bytes,
+                });
+            }
+            self.schemas
+                .validate(response_schema, &response.payload)
+                .map_err(RequestError::InvalidPayload)?;
 
-        let mut factory = ArtifactFactory::new(self.clock, self.ids);
-        let artifact = factory.create(ArtifactFactoryInput {
-            schema: definition,
-            created_by: Actor {
-                actor_type: actor_type_for(grant.producer_class),
-                id: capability.adapter_id.0.clone(),
-            },
-            source: Source {
-                kind: source_kind,
-                reference: response.external_reference,
-            },
-            trust: trust_for(grant.producer_class, grant.assigned_trust),
-            stream_key: request.stream_key.clone(),
-            subject,
-            tags: vec![
-                format!("adapter:{}", capability.adapter_id.0),
-                format!("capability:{}", capability.capability_id.0),
-                format!("request:{}", request.version_id.0),
-            ],
-            payload: response.payload,
-            provenance: Some(Provenance {
-                parents: vec![request.version_id.0.clone()],
-                rules_applied: vec![
-                    "request.capability_authorized".into(),
-                    "request.response_correlated".into(),
-                    "request.payload_schema_validated".into(),
+            let mut factory = ArtifactFactory::new(self.clock, self.ids);
+            let artifact = factory.create(ArtifactFactoryInput {
+                schema: definition,
+                created_by: Actor {
+                    actor_type: actor_type_for(grant.producer_class),
+                    id: capability.adapter_id.0.clone(),
+                },
+                source: Source {
+                    kind: source_kind,
+                    reference: response.external_reference,
+                },
+                trust: trust_for(grant.producer_class, grant.assigned_trust),
+                stream_key: request.stream_key.clone(),
+                subject,
+                tags: vec![
+                    format!("adapter:{}", capability.adapter_id.0),
+                    format!("capability:{}", capability.capability_id.0),
+                    format!("request:{}", request.version_id.0),
                 ],
-                models_used: vec![],
-                transform: Some(format!("request:{}", capability.adapter_id.0)),
-            }),
-        })?;
-
-        self.store.append_current_related(
-            &artifact,
-            self.schemas,
-            &[
-                (request.version_id.clone(), relation_kinds::fulfills()),
-                (request.version_id, relation_kinds::caused_by()),
-            ],
-        )?;
-        self.completed.insert(completion_key);
-        Ok(artifact)
+                payload: response.payload,
+                provenance: Some(Provenance {
+                    parents: vec![request.version_id.0.clone()],
+                    rules_applied: vec![
+                        "request.capability_authorized".into(),
+                        "request.response_correlated".into(),
+                        "request.payload_schema_validated".into(),
+                    ],
+                    models_used: vec![],
+                    transform: Some(format!("request:{}", capability.adapter_id.0)),
+                }),
+            })?;
+            InvocationService::new(self.store, self.schemas, self.clock).succeed_with_current(
+                &dispatched,
+                &artifact,
+                &[
+                    (request.version_id.clone(), relation_kinds::fulfills()),
+                    (request.version_id.clone(), relation_kinds::caused_by()),
+                ],
+            )?;
+            Ok(artifact)
+        })();
+        if let Err(error) = &outcome {
+            let _ = InvocationService::new(self.store, self.schemas, self.clock).fail(
+                &dispatched,
+                format!("{error:?}"),
+                is_retryable(error),
+            );
+        }
+        outcome
     }
 }
 
-fn invocation_id(
+fn is_retryable(error: &RequestError) -> bool {
+    matches!(
+        error,
+        RequestError::AdapterCall(
+            crate::adapters::AdapterCallError::Unavailable(_)
+                | crate::adapters::AdapterCallError::Timeout
+        )
+    )
+}
+
+pub(super) fn invocation_id(
     capability: &CapabilityRef,
     request: &VersionId,
     response_schema: &SchemaId,
 ) -> String {
-    format!(
-        "request:{}:{}:{}:{}:{}:{}:{}:{}",
-        capability.adapter_id.0.len(),
-        capability.adapter_id.0,
-        capability.capability_id.0.len(),
-        capability.capability_id.0,
-        request.0.len(),
-        request.0,
-        response_schema.0.len(),
-        response_schema.0
+    deterministic_invocation_id(
+        InvocationKind::Request,
+        &[
+            &capability.adapter_id.0,
+            &capability.capability_id.0,
+            &request.0,
+            &response_schema.0,
+        ],
     )
+}
+
+pub(super) fn capability_name(capability: &CapabilityRef) -> String {
+    format!("{}/{}", capability.adapter_id.0, capability.capability_id.0)
 }
 
 fn actor_type_for(producer: ProducerClass) -> ActorType {

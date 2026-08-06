@@ -1,0 +1,19 @@
+{
+  "$id": "arcs.invocation.v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ARCS Invocation State",
+  "type": "object",
+  "required": ["invocation_id", "kind", "capability", "input_version", "status", "result_version", "error", "created_at", "updated_at"],
+  "properties": {
+    "invocation_id": {"type": "string", "minLength": 1},
+    "kind": {"type": "string", "enum": ["request", "reasoning", "output"]},
+    "capability": {"type": "string", "minLength": 1},
+    "input_version": {"type": "string", "minLength": 1},
+    "status": {"type": "string", "enum": ["prepared", "dispatched", "succeeded", "failed", "unknown"]},
+    "result_version": {"type": "string"},
+    "error": {"type": "string"},
+    "created_at": {"type": "string", "minLength": 1},
+    "updated_at": {"type": "string", "minLength": 1}
+  },
+  "additionalProperties": false
+}

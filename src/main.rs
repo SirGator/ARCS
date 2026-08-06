@@ -1,11 +1,11 @@
 use arcs::adapters::{
     ADAPTER_PROTOCOL_VERSION, AdapterGrant, AdapterId, AdapterManifest, AdapterRegistry,
-    CapabilityContract, CapabilityDescriptor, CapabilityId, ObservationMessage, ProducerClass,
+    CapabilityContract, CapabilityDescriptor, CapabilityId, ProducerClass,
 };
 use arcs::core::{
     SchemaId, SchemaRegistry, SequenceIdGenerator, SourceKind, SystemClock, TrustLevel,
 };
-use arcs::observation::ObservationService;
+use arcs::observation::{ObservationMessage, ObservationService};
 use arcs::store::SqliteArtifactStore;
 use serde_json::json;
 

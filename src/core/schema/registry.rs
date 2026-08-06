@@ -10,7 +10,9 @@ use super::{SchemaDefinition, SchemaViolation};
 // damit zur Laufzeit nicht von einem veränderbaren Arbeitsverzeichnis ab.
 const BUNDLED_SCHEMAS: &[&str] = &[
     include_str!("../../../schemas/v1/input.schema.json"),
+    include_str!("../../../schemas/v1/invocation.schema.json"),
     include_str!("../../../schemas/v1/reasoning_request.schema.json"),
+    include_str!("../../../schemas/v1/reasoning_result.schema.json"),
 ];
 
 /// Fehler beim Einlesen eines Schemas in die Registry.

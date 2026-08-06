@@ -93,6 +93,9 @@ pub struct ReasoningContextItem {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReasoningInvocation {
+    /// Stabile, vom Core erzeugte Invocation-ID. Der externe Modellservice
+    /// muss sie ebenfalls deduplizieren.
+    pub invocation_id: String,
     pub request_id: String,
     /// Exakt die autorisierte Reasoning-Fähigkeit, die diesen Auftrag erhält.
     ///
@@ -135,6 +138,7 @@ pub struct ReasoningTrace {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReasoningResponse {
+    pub invocation_id: String,
     pub request_id: String,
     pub candidates: Vec<ProposalSubmission>,
     pub trace: ReasoningTrace,
@@ -159,6 +163,7 @@ pub trait ReasoningAdapter: Send + Sync {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ValidatedProposal {
     pub(crate) adapter_id: AdapterId,
+    pub(crate) reasoning_capability: CapabilityRef,
     pub(crate) request_id: String,
     /// Exakte Core-Version des Audit-Artefakts, das vor dem externen
     /// Reasoning-Aufruf gespeichert wurde.

@@ -148,3 +148,6 @@ fn trust_rank(level: TrustLevel) -> u8 {
         TrustLevel::High => 2,
     }
 }
+
+#[cfg(test)]
+mod tests;

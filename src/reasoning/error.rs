@@ -2,6 +2,7 @@ use crate::adapters::{
     AdapterCallError, AdapterId, AdapterRegistryError, CapabilityId, CapabilityRef,
 };
 use crate::core::{SchemaId, SchemaViolation, VersionId};
+use crate::runtime::InvocationError;
 use crate::store::StoreError;
 
 /// Fehler ausschließlich innerhalb des kuratierten Reasoning-Slices.
@@ -11,6 +12,7 @@ pub enum ReasoningError {
     Store(StoreError),
     Serialization(serde_json::Error),
     AdapterCall(AdapterCallError),
+    Invocation(InvocationError),
     NotReasoningAdapter(AdapterId),
     ReasoningProducerMustBeModel(AdapterId),
     ReasoningBudgetExceedsGrant,
@@ -22,10 +24,6 @@ pub enum ReasoningError {
     MissingRegisteredSchema(SchemaId),
     UnknownAllowedCapability(CapabilityRef),
     MissingReasoningEndpoint(AdapterId),
-    ReasoningRequestAlreadyUsed {
-        capability: CapabilityRef,
-        request_id: String,
-    },
     InvalidReasoningRequest(String),
     MissingContextArtifact(VersionId),
     DuplicateContextArtifact(VersionId),
@@ -38,6 +36,7 @@ pub enum ReasoningError {
         actual: usize,
         maximum: usize,
     },
+    InvocationResponseMismatch,
     ResponseRequestMismatch,
     ResponseTooLarge {
         actual: usize,
@@ -52,11 +51,6 @@ pub enum ReasoningError {
     InvalidPayload(Vec<SchemaViolation>),
     ForbiddenCandidateCapability(CapabilityRef),
     CandidateReferenceOutsideContext(VersionId),
-    ProposalAlreadyCommitted {
-        adapter: AdapterId,
-        request_id: String,
-        candidate_index: usize,
-    },
 }
 
 impl From<AdapterRegistryError> for ReasoningError {
@@ -80,5 +74,11 @@ impl From<serde_json::Error> for ReasoningError {
 impl From<AdapterCallError> for ReasoningError {
     fn from(value: AdapterCallError) -> Self {
         Self::AdapterCall(value)
+    }
+}
+
+impl From<InvocationError> for ReasoningError {
+    fn from(value: InvocationError) -> Self {
+        Self::Invocation(value)
     }
 }

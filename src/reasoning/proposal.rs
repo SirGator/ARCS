@@ -7,6 +7,10 @@ use crate::core::{
     TrustLevel,
 };
 use crate::reasoning::ValidatedProposal;
+use crate::runtime::{
+    InvocationKind, InvocationService, InvocationSpec, InvocationStatus,
+    deterministic_invocation_id,
+};
 use crate::store::relation_kinds;
 
 impl ReasoningService<'_> {
@@ -24,20 +28,41 @@ impl ReasoningService<'_> {
                 ));
             }
         }
-        // Die persistierte ReasoningRequest-Version ist die eindeutige
-        // Core-Identität eines Modellaufrufs. Adapter und frei gewählte
-        // request_id reichen bei mehreren Reason-Capabilities nicht aus.
-        let proposal_key = (
-            proposal.reasoning_request_version.clone(),
-            proposal.candidate_index,
+        let candidate_index = proposal.candidate_index.to_string();
+        let invocation_id = deterministic_invocation_id(
+            InvocationKind::Reasoning,
+            &[
+                &proposal.reasoning_capability.adapter_id.0,
+                &proposal.reasoning_capability.capability_id.0,
+                &proposal.reasoning_request_version.0,
+                &candidate_index,
+            ],
         );
-        if self.committed_proposals.contains(&proposal_key) {
-            return Err(ReasoningError::ProposalAlreadyCommitted {
-                adapter: proposal.adapter_id,
-                request_id: proposal.request_id,
-                candidate_index: proposal.candidate_index,
-            });
-        }
+        let dispatched = {
+            let invocations = InvocationService::new(self.store, self.schemas, self.clock);
+            let prepared = invocations.prepare(InvocationSpec {
+                invocation_id,
+                kind: InvocationKind::Reasoning,
+                capability: format!(
+                    "{}/{}",
+                    proposal.reasoning_capability.adapter_id.0,
+                    proposal.reasoning_capability.capability_id.0
+                ),
+                input_version: proposal.reasoning_request_version.clone(),
+            })?;
+            if prepared.status == InvocationStatus::Succeeded {
+                let result = prepared
+                    .result_version
+                    .ok_or(crate::runtime::InvocationError::MissingResult)?;
+                return self
+                    .store
+                    .get(&result)?
+                    .ok_or(crate::runtime::InvocationError::MissingResult)
+                    .map_err(ReasoningError::from);
+            }
+            let recovered = invocations.recover(&prepared)?;
+            invocations.dispatch(&recovered)?
+        };
         ensure_candidate_schema(self.schemas, &proposal.schema_id)?;
         self.schemas
             .validate(&proposal.schema_id, &proposal.payload)
@@ -123,9 +148,11 @@ impl ReasoningService<'_> {
                 relation_kinds::generated_by(),
             )])
             .collect::<Vec<_>>();
-        self.store
-            .append_related(&artifact, self.schemas, &relations)?;
-        self.committed_proposals.insert(proposal_key);
+        InvocationService::new(self.store, self.schemas, self.clock).succeed_with_event(
+            &dispatched,
+            &artifact,
+            &relations,
+        )?;
         Ok(artifact)
     }
 }

@@ -55,14 +55,5 @@ pub trait RequestAdapter: Send + Sync {
     fn fetch(&self, request: &RequestInvocation) -> Result<RequestResponse, AdapterCallError>;
 }
 
-// Zeitlich begrenzte Quellkompatibilität für bestehende Integrationen. Neue
-// Aufrufer verwenden ausschließlich die Request-Namen dieses Moduls.
-#[doc(hidden)]
-pub use RequestAdapter as DataAdapter;
-#[doc(hidden)]
-pub use RequestInvocation as DataInvocation;
-#[doc(hidden)]
-pub use RequestResponse as DataResponse;
-
 #[cfg(test)]
 mod tests;

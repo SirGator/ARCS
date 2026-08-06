@@ -1,7 +1,10 @@
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use serde_json::json;
 
+use super::service::{capability_name, invocation_id};
 use super::*;
 use crate::adapters::{
     ADAPTER_PROTOCOL_VERSION, AdapterGrant, AdapterId, AdapterManifest, AdapterRegistry,
@@ -12,6 +15,7 @@ use crate::core::{
     SchemaId, SchemaRegistry, Source, SourceClass, SourceKind, SubjectId, Trust, TrustLevel,
     VersionId,
 };
+use crate::runtime::{InvocationKind, InvocationService, InvocationSpec, InvocationStatus};
 use crate::store::SqliteArtifactStore;
 
 const REQUEST_SCHEMA: &str = r#"{
@@ -166,20 +170,84 @@ fn response_is_correlated_persisted_and_replay_protected_inside_request_slice() 
     let response = service
         .execute(&endpoint, &capability, &input.version_id, &response_schema)
         .unwrap();
-    let replay = service.execute(&endpoint, &capability, &input.version_id, &response_schema);
+    let replay = service
+        .execute(&endpoint, &capability, &input.version_id, &response_schema)
+        .unwrap();
 
-    assert!(matches!(
-        replay,
-        Err(RequestError::InvocationAlreadyCompleted { .. })
-    ));
     assert_eq!(calls.lock().unwrap().len(), 1);
+    assert_eq!(replay, response);
     assert_eq!(response.subject, Some(SubjectId("server-01/cpu".into())));
     assert_eq!(response.trust.level, TrustLevel::Medium);
-    assert_eq!(store.len().unwrap(), 2);
+    assert!(store.len().unwrap() >= 4);
+}
+
+struct TemporaryDatabase {
+    path: PathBuf,
+}
+
+impl TemporaryDatabase {
+    fn new() -> Self {
+        static NEXT_DATABASE: AtomicU64 = AtomicU64::new(1);
+        let sequence = NEXT_DATABASE.fetch_add(1, Ordering::Relaxed);
+        Self {
+            path: std::env::temp_dir().join(format!(
+                "arcs-request-invocation-{}-{sequence}.sqlite",
+                std::process::id()
+            )),
+        }
+    }
+}
+
+impl Drop for TemporaryDatabase {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
 }
 
 #[test]
-fn mismatched_external_correlation_does_not_mutate_store() {
+fn successful_request_is_not_dispatched_again_after_restart() {
+    let schemas = schemas();
+    let database = TemporaryDatabase::new();
+    let input = input();
+    let endpoint_manifest = manifest();
+    let mut registry = AdapterRegistry::new();
+    {
+        let store = SqliteArtifactStore::open(&database.path).unwrap();
+        registry
+            .register(endpoint_manifest.clone(), grant(), &schemas, &store)
+            .unwrap();
+    }
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let endpoint = RecordingEndpoint {
+        manifest: endpoint_manifest,
+        calls: Arc::clone(&calls),
+        mismatched_correlation: false,
+    };
+    let capability = CapabilityRef::new("metrics.request-test", "metrics.fetch");
+    let response_schema = SchemaId("arcs.observation.request_slice_test.v1".into());
+
+    let first = {
+        let store = SqliteArtifactStore::open(&database.path).unwrap();
+        store.append(&input, &schemas).unwrap();
+        let mut ids = TestIds;
+        RequestService::new(&registry, &schemas, &store, &mut ids, &FixedClock)
+            .execute(&endpoint, &capability, &input.version_id, &response_schema)
+            .unwrap()
+    };
+    let replay = {
+        let store = SqliteArtifactStore::open(&database.path).unwrap();
+        let mut ids = TestIds;
+        RequestService::new(&registry, &schemas, &store, &mut ids, &FixedClock)
+            .execute(&endpoint, &capability, &input.version_id, &response_schema)
+            .unwrap()
+    };
+
+    assert_eq!(replay, first);
+    assert_eq!(calls.lock().unwrap().len(), 1);
+}
+
+#[test]
+fn dispatched_request_is_recovered_with_the_same_invocation_id() {
     let schemas = schemas();
     let store = SqliteArtifactStore::in_memory().unwrap();
     let input = input();
@@ -189,9 +257,59 @@ fn mismatched_external_correlation_does_not_mutate_store() {
     registry
         .register(endpoint_manifest.clone(), grant(), &schemas, &store)
         .unwrap();
+    let calls = Arc::new(Mutex::new(Vec::new()));
     let endpoint = RecordingEndpoint {
         manifest: endpoint_manifest,
-        calls: Arc::new(Mutex::new(Vec::new())),
+        calls: Arc::clone(&calls),
+        mismatched_correlation: false,
+    };
+    let capability = CapabilityRef::new("metrics.request-test", "metrics.fetch");
+    let response_schema = SchemaId("arcs.observation.request_slice_test.v1".into());
+    let invocation_id = invocation_id(&capability, &input.version_id, &response_schema);
+    let invocations = InvocationService::new(&store, &schemas, &FixedClock);
+    let prepared = invocations
+        .prepare(InvocationSpec {
+            invocation_id: invocation_id.clone(),
+            kind: InvocationKind::Request,
+            capability: capability_name(&capability),
+            input_version: input.version_id.clone(),
+        })
+        .unwrap();
+    invocations.dispatch(&prepared).unwrap();
+
+    let mut ids = TestIds;
+    let response = RequestService::new(&registry, &schemas, &store, &mut ids, &FixedClock)
+        .execute(&endpoint, &capability, &input.version_id, &response_schema)
+        .unwrap();
+
+    assert_eq!(calls.lock().unwrap().len(), 1);
+    assert_eq!(calls.lock().unwrap()[0].invocation_id, invocation_id);
+    assert_eq!(
+        InvocationService::new(&store, &schemas, &FixedClock)
+            .lookup(&invocation_id)
+            .unwrap()
+            .unwrap()
+            .status,
+        InvocationStatus::Succeeded
+    );
+    assert_eq!(store.get(&response.version_id).unwrap(), Some(response));
+}
+
+#[test]
+fn mismatched_external_correlation_records_failed_invocation_without_result() {
+    let schemas = schemas();
+    let store = SqliteArtifactStore::in_memory().unwrap();
+    let input = input();
+    store.append(&input, &schemas).unwrap();
+    let endpoint_manifest = manifest();
+    let mut registry = AdapterRegistry::new();
+    registry
+        .register(endpoint_manifest.clone(), grant(), &schemas, &store)
+        .unwrap();
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let endpoint = RecordingEndpoint {
+        manifest: endpoint_manifest,
+        calls: Arc::clone(&calls),
         mismatched_correlation: true,
     };
     let mut ids = TestIds;
@@ -208,5 +326,22 @@ fn mismatched_external_correlation_does_not_mutate_store() {
         result,
         Err(RequestError::InvocationResponseMismatch)
     ));
-    assert_eq!(store.len().unwrap(), 1);
+    let invocation_id = calls.lock().unwrap()[0].invocation_id.clone();
+    let invocation = InvocationService::new(&store, &schemas, &FixedClock)
+        .lookup(&invocation_id)
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(calls.lock().unwrap().len(), 1);
+    assert_eq!(invocation.status, InvocationStatus::Failed);
+    assert_eq!(invocation.result_version, None);
+    assert_eq!(
+        store
+            .current(
+                &SubjectId("server-01/cpu".into()),
+                &SchemaId("arcs.observation.request_slice_test.v1".into()),
+            )
+            .unwrap(),
+        None
+    );
 }

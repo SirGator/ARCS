@@ -1,14 +1,15 @@
 use serde_json::json;
 
-use super::*;
+use super::{ObservationError, ObservationService};
 use crate::adapters::{
     ADAPTER_PROTOCOL_VERSION, AdapterGrant, AdapterId, AdapterManifest, AdapterRegistry,
-    CapabilityContract, CapabilityDescriptor, CapabilityId, ObservationMessage, ProducerClass,
+    CapabilityContract, CapabilityDescriptor, CapabilityId, ProducerClass,
 };
 use crate::core::{
     ActorType, ArtifactId, ArtifactIdGenerator, Clock, GeneratedArtifactIds, SchemaId,
     SchemaRegistry, SourceClass, SourceKind, SubjectId, TrustLevel, VersionId,
 };
+use crate::observation::ObservationMessage;
 use crate::store::SqliteArtifactStore;
 
 const OBSERVATION_SCHEMA: &str = r#"{

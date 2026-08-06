@@ -5,12 +5,10 @@
 //! Payloads ungeprüft und erzeugt alle autoritätsrelevanten Envelope-Felder
 //! selbst.
 
-pub mod observation;
 pub mod output;
 pub mod port;
 pub mod registration;
 
-pub use observation::*;
 pub use output::*;
 pub use port::*;
 pub use registration::*;
@@ -19,5 +17,3 @@ pub use registration::*;
 // Primärtypen leben bereits in ihren jeweiligen Top-Level-Slices.
 #[doc(hidden)]
 pub use crate::reasoning::*;
-#[doc(hidden)]
-pub use crate::request::{DataAdapter, DataInvocation, DataResponse};
