@@ -1,0 +1,22 @@
+{
+  "$id": "arcs.outcome.v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ARCS Outcome",
+  "type": "object",
+  "required": ["execution_result_version", "verdict", "detail"],
+  "properties": {
+    "execution_result_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "verdict": {
+      "type": "string",
+      "enum": ["success", "failure", "unknown"]
+    },
+    "detail": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "additionalProperties": false
+}

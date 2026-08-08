@@ -6,7 +6,7 @@
   "required": ["invocation_id", "kind", "capability", "input_version", "input_fingerprint", "status", "result_version", "error", "created_at", "updated_at"],
   "properties": {
     "invocation_id": {"type": "string", "minLength": 1},
-    "kind": {"type": "string", "enum": ["request", "reasoning", "output"]},
+    "kind": {"type": "string", "enum": ["request", "reasoning", "execution", "output"]},
     "capability": {"type": "string", "minLength": 1},
     "input_version": {"type": "string", "minLength": 1},
     "input_fingerprint": {"type": "string", "minLength": 1},

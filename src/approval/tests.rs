@@ -274,6 +274,59 @@ fn verification_for_another_candidate_is_rejected() {
 }
 
 #[test]
+fn verification_payload_without_verifies_relation_cannot_authorize() {
+    let schemas = schemas();
+    let store = SqliteArtifactStore::in_memory().unwrap();
+    let candidate = candidate(1);
+    store.append(&candidate, &schemas).unwrap();
+    let report = Artifact::new(
+        "verification-report-without-relation",
+        "verification-report-without-relation-v1",
+        "verification_report",
+        "arcs.verification_report.v1",
+        "2026-08-08T15:00:00Z",
+        Actor {
+            actor_type: ActorType::System,
+            id: "arcs.verification".into(),
+        },
+        Source {
+            kind: SourceKind::Internal,
+            reference: "verification:without-relation".into(),
+        },
+        Trust {
+            level: TrustLevel::High,
+            source_class: SourceClass::System,
+        },
+        "verification:without-relation",
+        json!({
+            "target_version": candidate.version_id.0,
+            "verdict": "pass",
+            "findings": [{
+                "check": "permission",
+                "verdict": "pass",
+                "detail": "required capability is enabled"
+            }]
+        }),
+    );
+    store.append(&report, &schemas).unwrap();
+    let mut ids = TestIds(1);
+
+    let result = ApprovalService::new(&schemas, &store, &mut ids, &FixedClock).decide(
+        &candidate.version_id,
+        &report.version_id,
+        ApprovalDecision::Approved,
+        human_approver(),
+        "payload alone must not authorize".into(),
+    );
+
+    assert!(matches!(
+        result,
+        Err(ApprovalError::MissingVerificationRelation)
+    ));
+    assert_eq!(store.len().unwrap(), 2);
+}
+
+#[test]
 fn model_cannot_approve_its_own_candidate() {
     let schemas = schemas();
     let store = SqliteArtifactStore::in_memory().unwrap();

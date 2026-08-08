@@ -1,0 +1,15 @@
+{
+  "$id": "arcs.execution_result.v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ARCS Execution Result",
+  "type": "object",
+  "required": ["action_version", "result"],
+  "properties": {
+    "action_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "result": {}
+  },
+  "additionalProperties": false
+}

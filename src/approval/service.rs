@@ -74,6 +74,14 @@ impl<'a> ApprovalService<'a> {
         if verification.target_version != target.0 {
             return Err(ApprovalError::VerificationTargetMismatch);
         }
+        let verifies_target = self
+            .store
+            .outgoing_relations(verification_report)?
+            .into_iter()
+            .any(|relation| relation.to == *target && relation.kind == relation_kinds::verifies());
+        if !verifies_target {
+            return Err(ApprovalError::MissingVerificationRelation);
+        }
 
         match (verification.verdict, decision) {
             (VerificationVerdict::Pass, ApprovalDecision::Approved) => {}

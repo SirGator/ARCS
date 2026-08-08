@@ -88,4 +88,8 @@ pub mod relation_kinds {
     pub fn based_on() -> RelationKind {
         known("based_on")
     }
+
+    pub fn evaluates() -> RelationKind {
+        known("evaluates")
+    }
 }

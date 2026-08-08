@@ -1,0 +1,44 @@
+{
+  "$id": "arcs.action.v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ARCS Materialized Action",
+  "type": "object",
+  "required": [
+    "target_version",
+    "approval_version",
+    "capability",
+    "input_schema_id",
+    "payload"
+  ],
+  "properties": {
+    "target_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "approval_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "capability": {
+      "type": "object",
+      "required": ["adapter_id", "capability_id"],
+      "properties": {
+        "adapter_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "capability_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "input_schema_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "payload": {}
+  },
+  "additionalProperties": false
+}

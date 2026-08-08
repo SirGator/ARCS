@@ -19,6 +19,7 @@ const PERMANENT_ERROR_PREFIX: &str = "permanent:";
 pub enum InvocationKind {
     Request,
     Reasoning,
+    Execution,
     Output,
 }
 
@@ -72,7 +73,7 @@ impl From<StoreError> for InvocationError {
     }
 }
 
-/// Gemeinsame, Store-basierte Idempotenz für Request, Reasoning und Output.
+/// Gemeinsame, Store-basierte Idempotenz für externe Runtime-Aufrufe.
 pub struct InvocationService<'a> {
     store: &'a SqliteArtifactStore,
     schemas: &'a SchemaRegistry,
@@ -271,6 +272,7 @@ pub fn deterministic_invocation_id(kind: InvocationKind, parts: &[&str]) -> Stri
     let prefix = match kind {
         InvocationKind::Request => "request",
         InvocationKind::Reasoning => "reasoning",
+        InvocationKind::Execution => "execution",
         InvocationKind::Output => "output",
     };
     format!("{prefix}:{hash:016x}")
@@ -482,6 +484,7 @@ fn kind_name(kind: InvocationKind) -> &'static str {
     match kind {
         InvocationKind::Request => "request",
         InvocationKind::Reasoning => "reasoning",
+        InvocationKind::Execution => "execution",
         InvocationKind::Output => "output",
     }
 }
