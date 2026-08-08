@@ -21,12 +21,39 @@ fn prepared_invocation_is_recovered_from_current_state() {
         kind: InvocationKind::Request,
         capability: "adapter/capability".into(),
         input_version: crate::core::VersionId("input-v1".into()),
+        input_fingerprint: "input:test-1".into(),
     };
     let prepared = service.prepare(spec.clone()).unwrap();
     let loaded = service.prepare(spec).unwrap();
 
     assert_eq!(prepared, loaded);
     assert_eq!(loaded.status, InvocationStatus::Prepared);
+    assert_eq!(store.len().unwrap(), 1);
+}
+
+#[test]
+fn reused_invocation_id_with_different_input_fingerprint_is_rejected() {
+    let schemas = SchemaRegistry::with_bundled_schemas().unwrap();
+    let store = SqliteArtifactStore::in_memory().unwrap();
+    let service = InvocationService::new(&store, &schemas, &FixedClock);
+    let first = InvocationSpec {
+        invocation_id: "same-id".into(),
+        kind: InvocationKind::Request,
+        capability: "adapter/capability".into(),
+        input_version: crate::core::VersionId("input-v1".into()),
+        input_fingerprint: "abc".into(),
+    };
+
+    service.prepare(first.clone()).unwrap();
+    let conflict = service.prepare(InvocationSpec {
+        input_fingerprint: "xyz".into(),
+        ..first
+    });
+
+    assert!(matches!(
+        conflict,
+        Err(InvocationError::IdentityConflict(invocation_id)) if invocation_id == "same-id"
+    ));
     assert_eq!(store.len().unwrap(), 1);
 }
 
@@ -41,6 +68,7 @@ fn dispatched_invocation_is_marked_unknown_then_redispatched() {
             kind: InvocationKind::Request,
             capability: "adapter/capability".into(),
             input_version: crate::core::VersionId("input-v1".into()),
+            input_fingerprint: "input:test-2".into(),
         })
         .unwrap();
     let dispatched = service.dispatch(&prepared).unwrap();
@@ -67,6 +95,7 @@ fn only_retryable_failure_returns_to_prepared() {
             kind: InvocationKind::Request,
             capability: "adapter/retryable".into(),
             input_version: crate::core::VersionId("input-1".into()),
+            input_fingerprint: "input:test-3".into(),
         })
         .unwrap();
     let retryable = service.dispatch(&retryable).unwrap();
@@ -85,6 +114,7 @@ fn only_retryable_failure_returns_to_prepared() {
             kind: InvocationKind::Request,
             capability: "adapter/invalid".into(),
             input_version: crate::core::VersionId("input-3".into()),
+            input_fingerprint: "input:test-4".into(),
         })
         .unwrap();
     assert!(matches!(
@@ -101,6 +131,7 @@ fn only_retryable_failure_returns_to_prepared() {
             kind: InvocationKind::Request,
             capability: "adapter/permanent".into(),
             input_version: crate::core::VersionId("input-2".into()),
+            input_fingerprint: "input:test-5".into(),
         })
         .unwrap();
     let permanent = service.dispatch(&permanent).unwrap();

@@ -316,6 +316,21 @@ impl SqliteArtifactStore {
             .transpose()
     }
 
+    /// Liest das zuerst gespeicherte Artefakt eines stabilen Streams.
+    pub fn find_by_stream_key(&self, stream_key: &str) -> Result<Option<Artifact>, StoreError> {
+        let json: Option<String> = self
+            .connection
+            .query_row(
+                "SELECT artifact_json FROM artifact_versions
+                 WHERE stream_key = ?1 ORDER BY sequence LIMIT 1",
+                params![stream_key],
+                |row| row.get(0),
+            )
+            .optional()?;
+        json.map(|json| serde_json::from_str(&json).map_err(StoreError::Serialization))
+            .transpose()
+    }
+
     /// Liest ausschließlich die aktuellste Sicht auf ein fachliches Subject.
     ///
     /// Historische Versionen bleiben weiterhin über `get` erreichbar.

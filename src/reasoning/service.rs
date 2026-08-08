@@ -16,7 +16,7 @@ use crate::reasoning::{
 };
 use crate::runtime::{
     InvocationKind, InvocationService, InvocationSpec, InvocationStatus,
-    deterministic_invocation_id,
+    deterministic_input_fingerprint, deterministic_invocation_id,
 };
 use crate::store::SqliteArtifactStore;
 
@@ -138,6 +138,7 @@ impl ReasoningService<'_> {
             max_output_tokens: request.budget.max_output_tokens,
             max_candidates: request.budget.max_candidates,
         };
+        let input_fingerprint = reasoning_fingerprint(&invocation)?;
         let context_bytes = serde_json::to_vec(&invocation)?.len();
         if context_bytes > request.budget.max_context_bytes {
             return Err(ReasoningError::ContextTooLarge {
@@ -146,8 +147,18 @@ impl ReasoningService<'_> {
             });
         }
 
-        let existing =
-            InvocationService::new(self.store, self.schemas, self.clock).lookup(&invocation_id)?;
+        let invocations = InvocationService::new(self.store, self.schemas, self.clock);
+        let existing = invocations.lookup(&invocation_id)?;
+        if let Some(existing) = &existing {
+            let spec = InvocationSpec {
+                invocation_id: invocation_id.clone(),
+                kind: InvocationKind::Reasoning,
+                capability: capability_name(&authorized_capability),
+                input_version: existing.input_version.clone(),
+                input_fingerprint: input_fingerprint.clone(),
+            };
+            invocations.assert_identity(existing, &spec)?;
+        }
         if let Some(existing) = &existing {
             if existing.status == InvocationStatus::Succeeded {
                 let result_version = existing
@@ -203,6 +214,7 @@ impl ReasoningService<'_> {
                         kind: InvocationKind::Reasoning,
                         capability: capability_name(&authorized_capability),
                         input_version: version.clone(),
+                        input_fingerprint: input_fingerprint.clone(),
                     },
                     &audit,
                 )?;
@@ -469,6 +481,11 @@ impl ReasoningService<'_> {
         context.sort_by(|left, right| left.version_id.0.cmp(&right.version_id.0));
         Ok(context)
     }
+}
+
+fn reasoning_fingerprint(invocation: &ReasoningInvocation) -> Result<String, ReasoningError> {
+    let serialized = serde_json::to_string(invocation)?;
+    Ok(deterministic_input_fingerprint(&[&serialized]))
 }
 
 fn validate_reasoning_budget_and_request(request: &ReasoningRequest) -> Result<(), ReasoningError> {

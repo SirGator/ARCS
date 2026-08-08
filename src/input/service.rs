@@ -1,3 +1,5 @@
+//! Use Case für einmalige, aktive Ereignisse an externen Eingangsgrenzen.
+
 use crate::adapters::{
     AdapterId, AdapterRegistry, AdapterRegistryError, CapabilityContract, CapabilityRef,
     ProducerClass,
@@ -8,9 +10,10 @@ use crate::core::{
 };
 use crate::store::SqliteArtifactStore;
 
-use super::{ObservationError, ObservationMessage};
+use super::{InputError, InputMessage};
 
-pub struct ObservationService<'a> {
+/// Kontrollierte Ingress-Grenze für historische Input-Ereignisse.
+pub struct InputService<'a> {
     policy: &'a AdapterRegistry,
     schemas: &'a SchemaRegistry,
     store: &'a SqliteArtifactStore,
@@ -18,7 +21,7 @@ pub struct ObservationService<'a> {
     clock: &'a dyn Clock,
 }
 
-impl<'a> ObservationService<'a> {
+impl<'a> InputService<'a> {
     pub fn new(
         policy: &'a AdapterRegistry,
         schemas: &'a SchemaRegistry,
@@ -35,13 +38,14 @@ impl<'a> ObservationService<'a> {
         }
     }
 
+    /// Validiert einen externen Input und speichert ihn als historisches Ereignis.
     pub fn ingest(
         &mut self,
         adapter_id: &AdapterId,
-        message: ObservationMessage,
-    ) -> Result<Artifact, ObservationError> {
+        message: InputMessage,
+    ) -> Result<Artifact, InputError> {
         if message.external_reference.trim().is_empty() {
-            return Err(ObservationError::InvalidExternalReference);
+            return Err(InputError::InvalidExternalReference);
         }
 
         let (registered, descriptor) = self
@@ -51,11 +55,11 @@ impl<'a> ObservationService<'a> {
             adapter_id: adapter_id.clone(),
             capability_id: message.capability_id.clone(),
         };
-        let CapabilityContract::Observe { emits } = &descriptor.contract else {
-            return Err(ObservationError::CapabilityIsNotObserve(capability));
+        let CapabilityContract::Input { emits } = &descriptor.contract else {
+            return Err(InputError::CapabilityIsNotInput(capability));
         };
         if emits.len() != 1 {
-            return Err(ObservationError::InvalidObserveSchemaCount {
+            return Err(InputError::InvalidInputSchemaCount {
                 capability,
                 actual: emits.len(),
             });
@@ -73,14 +77,14 @@ impl<'a> ObservationService<'a> {
 
         let reference_size = message.external_reference.len();
         if reference_size > maximum_reference {
-            return Err(ObservationError::ExternalReferenceTooLarge {
+            return Err(InputError::ExternalReferenceTooLarge {
                 actual: reference_size,
                 maximum: maximum_reference,
             });
         }
         let payload_size = serde_json::to_vec(&message.payload)?.len();
         if payload_size > maximum_payload {
-            return Err(ObservationError::PayloadTooLarge {
+            return Err(InputError::PayloadTooLarge {
                 actual: payload_size,
                 maximum: maximum_payload,
             });
@@ -88,19 +92,34 @@ impl<'a> ObservationService<'a> {
 
         self.schemas
             .validate(&schema_id, &message.payload)
-            .map_err(ObservationError::InvalidPayload)?;
+            .map_err(InputError::InvalidPayload)?;
         let definition = self
             .schemas
             .get(&schema_id)
-            .ok_or_else(|| ObservationError::MissingRegisteredSchema(schema_id.clone()))?
+            .ok_or_else(|| InputError::MissingRegisteredSchema(schema_id.clone()))?
             .clone();
 
         let external_subject = message
             .external_subject
             .filter(|subject| !subject.trim().is_empty())
-            .ok_or(ObservationError::MissingExternalSubject)?;
-        let subject = observation_subject(adapter_id, &message.capability_id.0, &external_subject);
-        let stream_key = observation_stream_key(&subject, &definition.id.0);
+            .ok_or(InputError::MissingExternalSubject)?;
+        let subject = input_subject(adapter_id, &message.capability_id.0, &external_subject);
+        let stream_key = input_stream_key(
+            adapter_id,
+            &message.capability_id.0,
+            &message.external_reference,
+        );
+
+        if let Some(existing) = self.store.find_by_stream_key(&stream_key)? {
+            let same_input = existing.schema_id == definition.id
+                && existing.subject.as_ref() == Some(&subject)
+                && existing.source.reference == message.external_reference
+                && existing.payload == message.payload;
+            if same_input {
+                return Ok(existing);
+            }
+            return Err(InputError::IdentityConflict(stream_key));
+        }
 
         let mut factory = ArtifactFactory::new(self.clock, self.ids);
         let artifact = factory.create(ArtifactFactoryInput {
@@ -124,26 +143,22 @@ impl<'a> ObservationService<'a> {
             provenance: Some(Provenance {
                 parents: vec![],
                 rules_applied: vec![
-                    "observation.capability_authorized".into(),
-                    "observation.payload_validated".into(),
+                    "input.capability_authorized".into(),
+                    "input.payload_validated".into(),
                 ],
                 models_used: vec![],
                 transform: Some(format!("adapter:{}", adapter_id.0)),
             }),
         })?;
 
-        self.store.append_current(&artifact, self.schemas)?;
+        self.store.append(&artifact, self.schemas)?;
         Ok(artifact)
     }
 }
 
-fn observation_subject(
-    adapter_id: &AdapterId,
-    capability_id: &str,
-    external_subject: &str,
-) -> SubjectId {
+fn input_subject(adapter_id: &AdapterId, capability_id: &str, external_subject: &str) -> SubjectId {
     SubjectId(format!(
-        "observe:{}:{}:{}:{}:{}:{}",
+        "input:{}:{}:{}:{}:{}:{}",
         adapter_id.0.len(),
         adapter_id.0,
         capability_id.len(),
@@ -153,13 +168,19 @@ fn observation_subject(
     ))
 }
 
-fn observation_stream_key(subject: &SubjectId, schema_id: &str) -> String {
+fn input_stream_key(
+    adapter_id: &AdapterId,
+    capability_id: &str,
+    external_reference: &str,
+) -> String {
     format!(
-        "observe:{}:{}:{}:{}",
-        subject.0.len(),
-        subject.0,
-        schema_id.len(),
-        schema_id,
+        "input:{}:{}:{}:{}:{}:{}",
+        adapter_id.0.len(),
+        adapter_id.0,
+        capability_id.len(),
+        capability_id,
+        external_reference.len(),
+        external_reference,
     )
 }
 

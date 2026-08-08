@@ -136,3 +136,6 @@ impl<'a> AgentCycle<'a> {
         Ok(reasoning.commit_proposal(proposal)?)
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -121,7 +121,7 @@ fn reasoning_grant() -> AdapterGrant {
         enabled_capabilities: vec![CapabilityId("reasoning.propose".into())],
         granted_permissions: vec![],
         assigned_trust: TrustLevel::Low,
-        observation_source_kind: None,
+        ingress_source_kind: None,
         max_payload_bytes: 8192,
         max_external_reference_bytes: 512,
         reasoning_limits: Some(ReasoningLimits {
@@ -160,7 +160,7 @@ fn action_grant() -> AdapterGrant {
         enabled_capabilities: vec![CapabilityId("device.set".into())],
         granted_permissions: vec!["device.write".into()],
         assigned_trust: TrustLevel::Medium,
-        observation_source_kind: None,
+        ingress_source_kind: None,
         max_payload_bytes: 4096,
         max_external_reference_bytes: 512,
         reasoning_limits: None,
@@ -352,4 +352,63 @@ fn successful_reasoning_is_not_dispatched_again_after_restart() {
 
     assert_eq!(replay, first);
     assert_eq!(calls.lock().unwrap().len(), 1);
+}
+
+fn assert_changed_reasoning_input_causes_identity_conflict(
+    change: impl FnOnce(&mut ReasoningRequest),
+) {
+    let schemas = schemas();
+    let store = SqliteArtifactStore::in_memory().unwrap();
+    let context = context();
+    store.append(&context, &schemas).unwrap();
+    let manifest = reasoning_manifest();
+    let mut registry = AdapterRegistry::new();
+    registry
+        .register(manifest.clone(), reasoning_grant(), &schemas, &store)
+        .unwrap();
+    registry
+        .register(action_manifest(), action_grant(), &schemas, &store)
+        .unwrap();
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let endpoint = MockReasoner {
+        manifest,
+        context_version: context.version_id.clone(),
+        calls: Arc::clone(&calls),
+    };
+    let mut ids = TestIds(1);
+    let mut service = ReasoningService::new(
+        &registry,
+        &schemas,
+        &store,
+        &mut ids,
+        &FixedClock,
+        &endpoint,
+    );
+
+    service.reason(request_for(&context)).unwrap();
+    let mut changed = request_for(&context);
+    change(&mut changed);
+    let result = service.reason(changed);
+
+    assert!(matches!(
+        result,
+        Err(ReasoningError::Invocation(
+            crate::runtime::InvocationError::IdentityConflict(_)
+        ))
+    ));
+    assert_eq!(calls.lock().unwrap().len(), 1);
+}
+
+#[test]
+fn reasoning_rejects_a_reused_request_id_with_a_different_objective() {
+    assert_changed_reasoning_input_causes_identity_conflict(|changed| {
+        changed.objective = "completely different objective".into();
+    });
+}
+
+#[test]
+fn reasoning_rejects_a_reused_request_id_with_different_constraints() {
+    assert_changed_reasoning_input_causes_identity_conflict(|changed| {
+        changed.constraints = json!({"do_not_enter": "room-4"});
+    });
 }

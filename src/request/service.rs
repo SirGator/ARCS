@@ -5,7 +5,7 @@ use crate::core::{
 };
 use crate::runtime::{
     InvocationKind, InvocationService, InvocationSpec, InvocationStatus,
-    deterministic_invocation_id,
+    deterministic_input_fingerprint, deterministic_invocation_id,
 };
 use crate::store::{SqliteArtifactStore, relation_kinds};
 
@@ -91,7 +91,7 @@ impl<'a> RequestService<'a> {
 
         let grant = registered.grant();
         let source_kind = grant
-            .observation_source_kind
+            .ingress_source_kind
             .ok_or(RequestError::MissingSourceKind)?;
         let definition = self
             .schemas
@@ -106,6 +106,7 @@ impl<'a> RequestService<'a> {
                 kind: InvocationKind::Request,
                 capability: capability_name(capability),
                 input_version: request.version_id.clone(),
+                input_fingerprint: deterministic_input_fingerprint(&[&invocation_id]),
             })?;
             if prepared.status == InvocationStatus::Succeeded {
                 let result = prepared

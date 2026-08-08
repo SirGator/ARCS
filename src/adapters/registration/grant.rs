@@ -17,13 +17,13 @@ pub struct AdapterGrant {
     pub producer_class: ProducerClass,
     pub enabled_capabilities: Vec<CapabilityId>,
     pub granted_permissions: Vec<String>,
-    /// Tatsächlich jedem akzeptierten Observation- oder Request-Artifact zugewiesener Trust.
+    /// Tatsächlich jedem akzeptierten Ingress-Artifact zugewiesener Trust.
     pub assigned_trust: TrustLevel,
-    /// Vom Betreiber festgelegter Herkunftskanal für Observe- und Data-Antworten.
+    /// Vom Betreiber festgelegter Herkunftskanal für externe Eingänge.
     ///
     /// Der Adapter darf `Internal` oder einen anderen Kanal nicht pro Nachricht
     /// selbst behaupten.
-    pub observation_source_kind: Option<SourceKind>,
+    pub ingress_source_kind: Option<SourceKind>,
     pub max_payload_bytes: usize,
     pub max_external_reference_bytes: usize,
     /// Absolute Obergrenzen des Betreibers. Ein Request darf sie nur weiter

@@ -113,7 +113,7 @@ fn grant() -> AdapterGrant {
         enabled_capabilities: vec![CapabilityId("metrics.fetch".into())],
         granted_permissions: vec!["metrics.read".into()],
         assigned_trust: TrustLevel::Medium,
-        observation_source_kind: Some(SourceKind::Api),
+        ingress_source_kind: Some(SourceKind::Api),
         max_payload_bytes: 1024,
         max_external_reference_bytes: 256,
         reasoning_limits: None,
@@ -273,6 +273,7 @@ fn dispatched_request_is_recovered_with_the_same_invocation_id() {
             kind: InvocationKind::Request,
             capability: capability_name(&capability),
             input_version: input.version_id.clone(),
+            input_fingerprint: crate::runtime::deterministic_input_fingerprint(&[&invocation_id]),
         })
         .unwrap();
     invocations.dispatch(&prepared).unwrap();

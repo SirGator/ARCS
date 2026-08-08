@@ -9,7 +9,7 @@ use crate::core::{
 use crate::reasoning::ValidatedProposal;
 use crate::runtime::{
     InvocationKind, InvocationService, InvocationSpec, InvocationStatus,
-    deterministic_invocation_id,
+    deterministic_input_fingerprint, deterministic_invocation_id,
 };
 use crate::store::relation_kinds;
 
@@ -41,7 +41,7 @@ impl ReasoningService<'_> {
         let dispatched = {
             let invocations = InvocationService::new(self.store, self.schemas, self.clock);
             let prepared = invocations.prepare(InvocationSpec {
-                invocation_id,
+                invocation_id: invocation_id.clone(),
                 kind: InvocationKind::Reasoning,
                 capability: format!(
                     "{}/{}",
@@ -49,6 +49,7 @@ impl ReasoningService<'_> {
                     proposal.reasoning_capability.capability_id.0
                 ),
                 input_version: proposal.reasoning_request_version.clone(),
+                input_fingerprint: deterministic_input_fingerprint(&[&invocation_id]),
             })?;
             if prepared.status == InvocationStatus::Succeeded {
                 let result = prepared

@@ -9,6 +9,8 @@
 pub mod adapters;
 /// Vertrauenswürdige Domänentypen, Schemas und Validierungsregeln.
 pub mod core;
+/// Einmalige, aktive Ereignisse von externen Eingangsgrenzen.
+pub mod input;
 /// Unaufgefordert von der Außenwelt gemeldeter Weltzustand.
 pub mod observation;
 /// Kuratierter Fallback für neue oder komplexe Situationen.

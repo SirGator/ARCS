@@ -29,6 +29,7 @@ pub struct InvocationSpec {
     pub kind: InvocationKind,
     pub capability: String,
     pub input_version: VersionId,
+    pub input_fingerprint: String,
 }
 
 /// Aus einem Current-State-Artifact gelesener Invocation-Zustand.
@@ -38,6 +39,7 @@ pub struct InvocationState {
     pub kind: InvocationKind,
     pub capability: String,
     pub input_version: VersionId,
+    pub input_fingerprint: String,
     pub status: InvocationStatus,
     pub result_version: Option<VersionId>,
     pub error: Option<String>,
@@ -99,10 +101,19 @@ impl<'a> InvocationService<'a> {
             .transpose()
     }
 
+    /// Prüft, ob ein persistierter State exakt zu einem aktuellen Aufruf gehört.
+    pub fn assert_identity(
+        &self,
+        state: &InvocationState,
+        spec: &InvocationSpec,
+    ) -> Result<(), InvocationError> {
+        assert_same_identity(state, spec)
+    }
+
     /// Persistiert `prepared`, wenn die Korrelation noch unbekannt ist.
     pub fn prepare(&self, spec: InvocationSpec) -> Result<InvocationState, InvocationError> {
         if let Some(state) = self.lookup(&spec.invocation_id)? {
-            assert_same_identity(&state, &spec)?;
+            self.assert_identity(&state, &spec)?;
             return Ok(state);
         }
         let now = self.clock.now_rfc3339();
@@ -119,7 +130,7 @@ impl<'a> InvocationService<'a> {
         event: &Artifact,
     ) -> Result<InvocationState, InvocationError> {
         if let Some(state) = self.lookup(&spec.invocation_id)? {
-            assert_same_identity(&state, &spec)?;
+            self.assert_identity(&state, &spec)?;
             return Ok(state);
         }
         let now = self.clock.now_rfc3339();
@@ -241,6 +252,7 @@ impl<'a> InvocationService<'a> {
             kind: state.kind,
             capability: state.capability.clone(),
             input_version: state.input_version.clone(),
+            input_fingerprint: state.input_fingerprint.clone(),
             status,
             result_version,
             error,
@@ -255,6 +267,21 @@ impl<'a> InvocationService<'a> {
 
 /// Stabile, begrenzte Korrelation für externe Adapter und Store-Subjects.
 pub fn deterministic_invocation_id(kind: InvocationKind, parts: &[&str]) -> String {
+    let hash = deterministic_hash(parts);
+    let prefix = match kind {
+        InvocationKind::Request => "request",
+        InvocationKind::Reasoning => "reasoning",
+        InvocationKind::Output => "output",
+    };
+    format!("{prefix}:{hash:016x}")
+}
+
+/// Stabiler Fingerprint für den vollständigen, semantischen Invocation-Input.
+pub fn deterministic_input_fingerprint(parts: &[&str]) -> String {
+    format!("input:{:016x}", deterministic_hash(parts))
+}
+
+fn deterministic_hash(parts: &[&str]) -> u64 {
     let mut hash = 0xcbf29ce484222325_u64;
     for part in parts {
         for byte in part.as_bytes().iter().chain([0xff].iter()) {
@@ -262,12 +289,7 @@ pub fn deterministic_invocation_id(kind: InvocationKind, parts: &[&str]) -> Stri
             hash = hash.wrapping_mul(0x100000001b3);
         }
     }
-    let prefix = match kind {
-        InvocationKind::Request => "request",
-        InvocationKind::Reasoning => "reasoning",
-        InvocationKind::Output => "output",
-    };
-    format!("{prefix}:{hash:016x}")
+    hash
 }
 
 fn new_state(spec: InvocationSpec, now: String) -> InvocationState {
@@ -277,6 +299,7 @@ fn new_state(spec: InvocationSpec, now: String) -> InvocationState {
         kind: spec.kind,
         capability: spec.capability,
         input_version: spec.input_version,
+        input_fingerprint: spec.input_fingerprint,
         status: InvocationStatus::Prepared,
         result_version: None,
         error: None,
@@ -295,6 +318,7 @@ fn assert_same_identity(
     if state.kind != spec.kind
         || state.capability != spec.capability
         || state.input_version != spec.input_version
+        || state.input_fingerprint != spec.input_fingerprint
     {
         return Err(InvocationError::IdentityConflict(
             spec.invocation_id.clone(),
@@ -347,6 +371,7 @@ fn state_artifact(
             "kind": kind_name(state.kind),
             "capability": state.capability,
             "input_version": state.input_version.0,
+            "input_fingerprint": state.input_fingerprint,
             "status": status_name(state.status),
             "result_version": state.result_version.as_ref().map_or("", |value| &value.0),
             "error": stored_error(state),
@@ -369,6 +394,7 @@ fn parse_state(artifact: Artifact) -> Result<InvocationState, InvocationError> {
         kind: InvocationKind,
         capability: String,
         input_version: String,
+        input_fingerprint: String,
         status: InvocationStatus,
         result_version: String,
         error: String,
@@ -383,6 +409,7 @@ fn parse_state(artifact: Artifact) -> Result<InvocationState, InvocationError> {
         kind: payload.kind,
         capability: payload.capability,
         input_version: VersionId(payload.input_version),
+        input_fingerprint: payload.input_fingerprint,
         status: payload.status,
         result_version: (!payload.result_version.is_empty())
             .then_some(VersionId(payload.result_version)),

@@ -153,7 +153,7 @@ fn grant() -> AdapterGrant {
         enabled_capabilities: vec![CapabilityId("propose".into())],
         granted_permissions: vec![],
         assigned_trust: TrustLevel::Low,
-        observation_source_kind: None,
+        ingress_source_kind: None,
         max_payload_bytes: 4096,
         max_external_reference_bytes: 512,
         reasoning_limits: Some(ReasoningLimits {

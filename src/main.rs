@@ -38,7 +38,7 @@ fn main() {
         enabled_capabilities: vec![CapabilityId("chat.observe".into())],
         granted_permissions: vec![],
         assigned_trust: TrustLevel::Medium,
-        observation_source_kind: Some(SourceKind::Chat),
+        ingress_source_kind: Some(SourceKind::Chat),
         max_payload_bytes: 4096,
         max_external_reference_bytes: 512,
         reasoning_limits: None,

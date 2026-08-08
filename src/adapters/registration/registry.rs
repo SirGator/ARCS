@@ -16,8 +16,8 @@ pub enum AdapterRegistryError {
     EmptyGrant,
     InvalidPayloadLimit,
     InvalidExternalReferenceLimit,
-    MissingObservationSource,
-    UnexpectedObservationSource,
+    MissingIngressSource,
+    UnexpectedIngressSource,
     InternalSourceRequiresSystemProducer,
     MissingReasoningLimits,
     UnexpectedReasoningLimits,
@@ -121,7 +121,7 @@ impl AdapterRegistry {
         }
 
         let mut enabled = HashSet::new();
-        let mut needs_observation_source = false;
+        let mut needs_ingress_source = false;
         let mut has_reasoning = false;
         for capability_id in &grant.enabled_capabilities {
             if !enabled.insert(capability_id.clone()) {
@@ -132,8 +132,9 @@ impl AdapterRegistry {
             let capability = manifest.capability(capability_id).ok_or_else(|| {
                 AdapterRegistryError::UnknownGrantCapability(capability_id.clone())
             })?;
-            needs_observation_source |=
-                capability.contract.is_observation() || capability.contract.is_request();
+            needs_ingress_source |= capability.contract.is_input()
+                || capability.contract.is_observation()
+                || capability.contract.is_request();
             has_reasoning |= capability.contract.is_reasoning();
             for permission in &capability.required_permissions {
                 if !grant
@@ -149,9 +150,9 @@ impl AdapterRegistry {
             }
         }
 
-        match (needs_observation_source, grant.observation_source_kind) {
-            (true, None) => return Err(AdapterRegistryError::MissingObservationSource),
-            (false, Some(_)) => return Err(AdapterRegistryError::UnexpectedObservationSource),
+        match (needs_ingress_source, grant.ingress_source_kind) {
+            (true, None) => return Err(AdapterRegistryError::MissingIngressSource),
+            (false, Some(_)) => return Err(AdapterRegistryError::UnexpectedIngressSource),
             (true, Some(SourceKind::Internal)) if grant.producer_class != ProducerClass::System => {
                 return Err(AdapterRegistryError::InternalSourceRequiresSystemProducer);
             }
@@ -287,7 +288,7 @@ mod tests {
             enabled_capabilities: vec![CapabilityId("sensor.observe".into())],
             granted_permissions: vec![],
             assigned_trust: TrustLevel::Medium,
-            observation_source_kind: Some(SourceKind::Sensor),
+            ingress_source_kind: Some(SourceKind::Sensor),
             max_payload_bytes: 1024,
             max_external_reference_bytes: 256,
             reasoning_limits: None,
@@ -310,7 +311,7 @@ mod tests {
             enabled_capabilities: vec![CapabilityId("sensor.observe".into())],
             granted_permissions: vec!["sensor.read".into()],
             assigned_trust: TrustLevel::Medium,
-            observation_source_kind: Some(SourceKind::Internal),
+            ingress_source_kind: Some(SourceKind::Internal),
             max_payload_bytes: 1024,
             max_external_reference_bytes: 256,
             reasoning_limits: None,

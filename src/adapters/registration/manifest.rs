@@ -63,6 +63,8 @@ pub enum ProducerClass {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum CapabilityContract {
+    /// Erzeugt ein einmaliges, aktives Ereignis an der Core-Grenze.
+    Input { emits: Vec<SchemaId> },
     /// Beobachtet die Außenwelt und erzeugt Boundary-Payloads.
     Observe { emits: Vec<SchemaId> },
     /// Übersetzt geprüfte Eingaben in neue Candidate- oder Boundary-Payloads.
@@ -97,7 +99,8 @@ impl CapabilityContract {
     /// Alle Verträge, die diese Fähigkeit als Ausgabe erzeugen darf.
     pub fn emitted_schemas(&self) -> &[SchemaId] {
         match self {
-            Self::Observe { emits }
+            Self::Input { emits }
+            | Self::Observe { emits }
             | Self::Transform { emits, .. }
             | Self::Request { emits, .. }
             | Self::Reason { emits }
@@ -113,8 +116,13 @@ impl CapabilityContract {
             | Self::Request { accepts, .. }
             | Self::Act { accepts, .. }
             | Self::Output { accepts, .. } => accepts,
-            Self::Observe { .. } | Self::Reason { .. } => &[],
+            Self::Input { .. } | Self::Observe { .. } | Self::Reason { .. } => &[],
         }
+    }
+
+    /// Kennzeichnet einmalige, aktive Ereignisse wie User- oder HTTP-Input.
+    pub fn is_input(&self) -> bool {
+        matches!(self, Self::Input { .. })
     }
 
     /// Kennzeichnet den speziellen Reasoning-Port.
@@ -291,6 +299,34 @@ fn valid_identifier(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn input_requires_an_emitted_schema_but_accepts_no_schema() {
+        let schema = SchemaId("arcs.input.chat.v1".into());
+        let contract = CapabilityContract::Input {
+            emits: vec![schema.clone()],
+        };
+        assert!(contract.is_input());
+        assert!(!contract.is_observation());
+        assert!(contract.accepted_schemas().is_empty());
+        assert_eq!(contract.emitted_schemas(), &[schema]);
+
+        let manifest = AdapterManifest {
+            protocol_version: ADAPTER_PROTOCOL_VERSION,
+            adapter_id: AdapterId("chat.input".into()),
+            adapter_version: "1.0.0".into(),
+            capabilities: vec![CapabilityDescriptor {
+                id: CapabilityId("chat.receive".into()),
+                contract: CapabilityContract::Input { emits: vec![] },
+                required_permissions: vec![],
+            }],
+        };
+
+        assert!(matches!(
+            manifest.validate(),
+            Err(ManifestError::MissingSchemaContract(_))
+        ));
+    }
 
     #[test]
     fn rejects_every_action_without_permission_and_idempotency() {
