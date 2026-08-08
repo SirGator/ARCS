@@ -102,6 +102,82 @@ fn propagates_activation_across_persisted_edges() {
 }
 
 #[test]
+fn existing_edge_weight_can_be_changed() {
+    let registry = SchemaRegistry::with_bundled_schemas().unwrap();
+    let store = SqliteArtifactStore::in_memory().unwrap();
+    let source = input("source");
+    let target = input("target");
+    store.append(&source, &registry).unwrap();
+    store.append(&target, &registry).unwrap();
+
+    let network = ArtifactNetwork::new(&store);
+    network
+        .connect(source.version_id.clone(), target.version_id.clone(), 0.4)
+        .unwrap();
+    network
+        .set_weight(&source.version_id, &target.version_id, 0.7)
+        .unwrap();
+
+    let edge = network
+        .edge(&source.version_id, &target.version_id)
+        .unwrap()
+        .expect("the updated edge should still exist");
+    assert_eq!(edge.weight, 0.7);
+
+    let activated = network.propagate_once(&source.version_id, 1.0).unwrap();
+    assert_eq!(activated.len(), 1);
+    assert_eq!(activated[0].artifact, target);
+    assert_eq!(activated[0].activation, 0.7);
+}
+
+#[test]
+fn setting_weight_of_missing_edge_fails() {
+    let registry = SchemaRegistry::with_bundled_schemas().unwrap();
+    let store = SqliteArtifactStore::in_memory().unwrap();
+    let source = input("source");
+    let target = input("target");
+    store.append(&source, &registry).unwrap();
+    store.append(&target, &registry).unwrap();
+
+    let network = ArtifactNetwork::new(&store);
+    assert!(matches!(
+        network.set_weight(&source.version_id, &target.version_id, 0.7),
+        Err(NetworkError::MissingEdge { from, to })
+            if from == source.version_id && to == target.version_id
+    ));
+}
+
+#[test]
+fn invalid_updated_weight_is_rejected() {
+    let registry = SchemaRegistry::with_bundled_schemas().unwrap();
+    let store = SqliteArtifactStore::in_memory().unwrap();
+    let source = input("source");
+    let target = input("target");
+    store.append(&source, &registry).unwrap();
+    store.append(&target, &registry).unwrap();
+
+    let network = ArtifactNetwork::new(&store);
+    network
+        .connect(source.version_id.clone(), target.version_id.clone(), 0.4)
+        .unwrap();
+
+    assert!(matches!(
+        network.set_weight(&source.version_id, &target.version_id, 1.1),
+        Err(NetworkError::Store(StoreError::InvalidEdgeWeight(value))) if value == 1.1
+    ));
+    assert!(matches!(
+        network.set_weight(&source.version_id, &target.version_id, f64::NAN),
+        Err(NetworkError::Store(StoreError::InvalidEdgeWeight(value))) if value.is_nan()
+    ));
+
+    let edge = network
+        .edge(&source.version_id, &target.version_id)
+        .unwrap()
+        .expect("the edge should remain after rejected updates");
+    assert_eq!(edge.weight, 0.4);
+}
+
+#[test]
 fn only_the_combination_of_input_and_state_activates_target() {
     let registry = SchemaRegistry::with_bundled_schemas().unwrap();
     let store = SqliteArtifactStore::in_memory().unwrap();

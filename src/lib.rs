@@ -7,10 +7,14 @@
 
 /// Universelle Verträge und kontrollierte Grenze für externe Adapter.
 pub mod adapters;
+/// Explizites Autoritäts-Gate zwischen Verification und späterer Execution.
+pub mod approval;
 /// Vertrauenswürdige Domänentypen, Schemas und Validierungsregeln.
 pub mod core;
 /// Einmalige, aktive Ereignisse von externen Eingangsgrenzen.
 pub mod input;
+/// Explizite lokale Gewichtsänderungen im gespeicherten Artifact-Netz.
+pub mod learning;
 /// Unaufgefordert von der Außenwelt gemeldeter Weltzustand.
 pub mod observation;
 /// Kuratierter Fallback für neue oder komplexe Situationen.
@@ -21,3 +25,5 @@ pub mod request;
 pub mod runtime;
 /// Append-only Persistenz für Artefakte und ihre Versionen.
 pub mod store;
+/// Auditierbare Prüfung von Kandidaten ohne Freigabe- oder Ausführungswirkung.
+pub mod verification;

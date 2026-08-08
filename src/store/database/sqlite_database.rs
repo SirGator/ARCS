@@ -418,6 +418,49 @@ impl SqliteArtifactStore {
         Ok(edges)
     }
 
+    /// Liest genau eine gerichtete Kante zwischen zwei Artifact-Versionen.
+    pub(crate) fn edge(
+        &self,
+        from: &VersionId,
+        to: &VersionId,
+    ) -> Result<Option<NetworkEdge>, StoreError> {
+        self.connection
+            .query_row(
+                "SELECT from_version_id, to_version_id, weight
+                 FROM artifact_edges
+                 WHERE from_version_id = ?1 AND to_version_id = ?2",
+                params![from.0, to.0],
+                |row| {
+                    Ok(NetworkEdge {
+                        from: VersionId(row.get(0)?),
+                        to: VersionId(row.get(1)?),
+                        weight: row.get(2)?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(StoreError::from)
+    }
+
+    /// Aktualisiert ausschließlich das Gewicht einer bereits bekannten Kante.
+    pub(crate) fn update_edge_weight(
+        &self,
+        from: &VersionId,
+        to: &VersionId,
+        weight: f64,
+    ) -> Result<(), StoreError> {
+        if !weight.is_finite() || !(-1.0..=1.0).contains(&weight) {
+            return Err(StoreError::InvalidEdgeWeight(weight));
+        }
+
+        self.connection.execute(
+            "UPDATE artifact_edges SET weight = ?3
+             WHERE from_version_id = ?1 AND to_version_id = ?2",
+            params![from.0, to.0, weight],
+        )?;
+        Ok(())
+    }
+
     /// Speichert eine semantische Relation unabhängig von Netzgewichten.
     pub(crate) fn connect_relation(&self, relation: &ArtifactRelation) -> Result<(), StoreError> {
         self.connection.execute(

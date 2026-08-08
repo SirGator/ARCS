@@ -1,0 +1,40 @@
+{
+  "$id": "arcs.verification_report.v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ARCS Verification Report",
+  "type": "object",
+  "required": ["target_version", "verdict", "findings"],
+  "properties": {
+    "target_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "verdict": {
+      "type": "string",
+      "enum": ["pass", "fail", "unknown"]
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["check", "verdict", "detail"],
+        "properties": {
+          "check": {
+            "type": "string",
+            "minLength": 1
+          },
+          "verdict": {
+            "type": "string",
+            "enum": ["pass", "fail", "unknown"]
+          },
+          "detail": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

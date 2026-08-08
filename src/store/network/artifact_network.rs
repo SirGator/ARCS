@@ -18,6 +18,8 @@ pub enum NetworkError {
     DuplicateSource(VersionId),
     /// Eine Aktivierung darf nicht auf eine unbekannte Artifact-Version zeigen.
     MissingSource(VersionId),
+    /// Ein Gewichtsupdate darf keine neue strukturelle Verbindung erzeugen.
+    MissingEdge { from: VersionId, to: VersionId },
 }
 
 impl From<StoreError> for NetworkError {
@@ -37,6 +39,32 @@ impl<'a> ArtifactNetwork<'a> {
 
     pub fn connect(&self, from: VersionId, to: VersionId, weight: f64) -> Result<(), NetworkError> {
         self.store.connect(&NetworkEdge { from, to, weight })?;
+        Ok(())
+    }
+
+    /// Liest genau eine gerichtete Kante, falls sie bereits existiert.
+    pub fn edge(
+        &self,
+        from: &VersionId,
+        to: &VersionId,
+    ) -> Result<Option<NetworkEdge>, NetworkError> {
+        Ok(self.store.edge(from, to)?)
+    }
+
+    /// Ändert das Gewicht einer bestehenden Kante, ohne Struktur zu erzeugen.
+    pub fn set_weight(
+        &self,
+        from: &VersionId,
+        to: &VersionId,
+        weight: f64,
+    ) -> Result<(), NetworkError> {
+        if self.edge(from, to)?.is_none() {
+            return Err(NetworkError::MissingEdge {
+                from: from.clone(),
+                to: to.clone(),
+            });
+        }
+        self.store.update_edge_weight(from, to, weight)?;
         Ok(())
     }
 

@@ -1,0 +1,31 @@
+{
+  "$id": "arcs.approval.v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ARCS Approval",
+  "type": "object",
+  "required": [
+    "target_version",
+    "verification_report_version",
+    "decision",
+    "reason"
+  ],
+  "properties": {
+    "target_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "verification_report_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "decision": {
+      "type": "string",
+      "enum": ["approved", "rejected"]
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "additionalProperties": false
+}

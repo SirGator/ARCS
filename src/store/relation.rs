@@ -72,4 +72,20 @@ pub mod relation_kinds {
     pub fn result_of() -> RelationKind {
         known("result_of")
     }
+
+    pub fn verifies() -> RelationKind {
+        known("verifies")
+    }
+
+    pub fn approves() -> RelationKind {
+        known("approves")
+    }
+
+    pub fn rejects() -> RelationKind {
+        known("rejects")
+    }
+
+    pub fn based_on() -> RelationKind {
+        known("based_on")
+    }
 }
