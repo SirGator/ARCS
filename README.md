@@ -26,14 +26,14 @@ $$
 \pi^* = \arg\max_\pi
 \mathbb{E}_\pi\left[
 \sum_{t=0}^{T}
-\left(R_t-\lambda_C C_t-\lambda_L L_t-\lambda_R \operatorname{Risk}_t\right)
+\left(R_t-\lambda_C C_t-\lambda_L L_t-\lambda_R \rho_t\right)
 \right]
 $$
 
 Dabei bezeichnet $R_t$ den erwarteten Nutzen, $C_t$ die Rechenkosten, $L_t$
-die Latenz und $\operatorname{Risk}_t$ das erwartete Fehlerrisiko. Die
-Gewichte $\lambda_C$, $\lambda_L$ und $\lambda_R$ machen die gewünschte
-Abwägung explizit und konfigurierbar.
+die Latenz und $\rho_t$ das erwartete Fehlerrisiko. Die Gewichte $\lambda_C$,
+$\lambda_L$ und $\lambda_R$ machen die gewünschte Abwägung explizit und
+konfigurierbar.
 
 Die angestrebte Agentenschleife lautet:
 
@@ -106,17 +106,18 @@ b_t = B(b_{t-1}, o_t)
 $$
 
 Im aktuellen ersten Slice bestimmt jede persistierte Observation genau einen
-Zustandsslot:
+Zustandsslot. Dabei bildet $e(o)$ das namespaced Subject auf eine `EntityId`
+ab und $\sigma(o)$ bezeichnet die versionierte `SchemaId`:
 
 $$
-k(o) = \bigl(\operatorname{EntityId}(\operatorname{subject}(o)),
-              \operatorname{SchemaId}(o)\bigr)
+k(o) = \bigl(e(o),\sigma(o)\bigr)
 $$
 
-Der deterministische Latest-Observation-Reducer ist definiert als:
+Mit $\hat{s}(o)$ als dem aus der Observation erzeugten `StateEstimate` ist der
+deterministische Latest-Observation-Reducer definiert als:
 
 $$
-B(b,o)[k(o)] = \operatorname{estimate}(o)
+B(b,o)[k(o)] = \hat{s}(o)
 $$
 
 Für alle anderen Schlüssel $k' \neq k(o)$ gilt
@@ -219,7 +220,7 @@ Die wichtigsten Einstiegspunkte sind:
    $$
    r^*=\arg\max_r\left[
    P(\mathrm{success}\mid r,x)V
-   -\lambda_C C(r)-\lambda_L L(r)-\lambda_R\operatorname{Risk}(r)
+   -\lambda_C C(r)-\lambda_L L(r)-\lambda_R\rho(r)
    \right]
    $$
 
