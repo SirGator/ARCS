@@ -10,7 +10,7 @@ use crate::core::{
     SchemaRegistry, SourceClass, SourceKind, SubjectId, TrustLevel, VersionId,
 };
 use crate::observation::ObservationMessage;
-use crate::store::SqliteArtifactStore;
+use crate::store::{SqliteArtifactStore, StoreError};
 
 const OBSERVATION_SCHEMA: &str = r#"{
     "$id": "arcs.observation.demo.v2",
@@ -489,4 +489,54 @@ fn missing_external_subject_is_rejected() {
         Err(ObservationError::MissingExternalSubject)
     ));
     assert!(store.is_empty().unwrap());
+}
+
+#[test]
+fn failed_store_commit_never_yields_recorded_observation() {
+    struct CollidingIds;
+
+    impl ArtifactIdGenerator for CollidingIds {
+        fn next(&mut self, artifact_type: &str) -> GeneratedArtifactIds {
+            GeneratedArtifactIds {
+                artifact_id: ArtifactId(format!("{artifact_type}-collision")),
+                version_id: VersionId(format!("{artifact_type}-collision-v1")),
+            }
+        }
+    }
+
+    let schemas = schemas();
+    let store = SqliteArtifactStore::in_memory().unwrap();
+    let registry = registry(
+        &schemas,
+        observe_manifest("input.demo"),
+        grant("input.demo", &["input.observe"], TrustLevel::Medium, 4096),
+    );
+    let mut ids = CollidingIds;
+    let clock = FixedClock;
+    let mut ingress = ObservationService::new(&registry, &schemas, &store, &mut ids, &clock);
+    let first = ingress
+        .ingest_recorded(
+            &AdapterId("input.demo".into()),
+            message(json!({"reading": 21.5})),
+        )
+        .unwrap();
+    let artifacts_before_failure = store.len().unwrap();
+
+    let second = ingress.ingest_recorded(
+        &AdapterId("input.demo".into()),
+        message(json!({"reading": 22.0})),
+    );
+
+    assert!(matches!(
+        second,
+        Err(ObservationError::Store(StoreError::VersionConflict {
+            expected: 2,
+            actual: 1,
+        }))
+    ));
+    assert_eq!(store.len().unwrap(), artifacts_before_failure);
+    assert_eq!(
+        store.get(&first.artifact().version_id).unwrap(),
+        Some(first.into_artifact())
+    );
 }

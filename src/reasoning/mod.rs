@@ -8,6 +8,8 @@
 //! Der Slice besitzt seine Wire-Verträge selbst. Gemeinsame Capability- und
 //! Grant-Typen werden später separat aus dem alten Adapter-Sammelmodul gelöst.
 
+pub mod routing;
+
 mod contracts;
 mod error;
 mod proposal;

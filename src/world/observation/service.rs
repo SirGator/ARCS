@@ -8,7 +8,10 @@ use crate::core::{
 };
 use crate::store::SqliteArtifactStore;
 
-use super::{ObservationError, ObservationMessage};
+use super::{
+    CAPABILITY_AUTHORIZED_RULE, ObservationError, ObservationMessage, PAYLOAD_VALIDATED_RULE,
+    RecordedObservation,
+};
 
 pub struct ObservationService<'a> {
     policy: &'a AdapterRegistry,
@@ -40,6 +43,17 @@ impl<'a> ObservationService<'a> {
         adapter_id: &AdapterId,
         message: ObservationMessage,
     ) -> Result<Artifact, ObservationError> {
+        self.ingest_recorded(adapter_id, message)
+            .map(RecordedObservation::into_artifact)
+    }
+
+    /// Nimmt eine Observation auf und gibt erst nach erfolgreichem Commit den
+    /// für World-State-Updates benötigten Herkunftsnachweis zurück.
+    pub fn ingest_recorded(
+        &mut self,
+        adapter_id: &AdapterId,
+        message: ObservationMessage,
+    ) -> Result<RecordedObservation, ObservationError> {
         if message.external_reference.trim().is_empty() {
             return Err(ObservationError::InvalidExternalReference);
         }
@@ -124,16 +138,16 @@ impl<'a> ObservationService<'a> {
             provenance: Some(Provenance {
                 parents: vec![],
                 rules_applied: vec![
-                    "observation.capability_authorized".into(),
-                    "observation.payload_validated".into(),
+                    CAPABILITY_AUTHORIZED_RULE.into(),
+                    PAYLOAD_VALIDATED_RULE.into(),
                 ],
                 models_used: vec![],
                 transform: Some(format!("adapter:{}", adapter_id.0)),
             }),
         })?;
 
-        self.store.append_current(&artifact, self.schemas)?;
-        Ok(artifact)
+        let sequence = self.store.append_current(&artifact, self.schemas)?;
+        Ok(RecordedObservation::from_committed(artifact, sequence))
     }
 }
 

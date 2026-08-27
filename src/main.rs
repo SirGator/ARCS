@@ -7,6 +7,7 @@ use arcs::core::{
 };
 use arcs::observation::{ObservationMessage, ObservationService};
 use arcs::store::SqliteArtifactStore;
+use arcs::world::{WorldReducer, WorldState};
 use serde_json::json;
 
 fn main() {
@@ -56,8 +57,8 @@ fn main() {
 
     // Der Adapter liefert ausschließlich Boundary-Daten. IDs, Zeit,
     // Artifact-Typ, Actor, Trust und Provenance setzt der Core.
-    let input = observation
-        .ingest(
+    let recorded = observation
+        .ingest_recorded(
             &adapter_id,
             ObservationMessage {
                 capability_id: CapabilityId("chat.observe".into()),
@@ -69,6 +70,11 @@ fn main() {
             },
         )
         .expect("valid adapter input must be committed");
+    let mut world = WorldState::new();
+    WorldReducer::new()
+        .reduce(&mut world, &recorded)
+        .expect("committed observation must update the world state");
+    let input = recorded.into_artifact();
 
     let loaded = store
         .get(&input.version_id)

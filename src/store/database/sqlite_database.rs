@@ -26,6 +26,13 @@ pub enum StoreError {
     SchemaDrift(SchemaId),
 }
 
+/// Ein Eintrag des global geordneten, unveränderlichen Artifact-Logs.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CommittedArtifact {
+    pub sequence: u64,
+    pub artifact: Artifact,
+}
+
 // Diese Konvertierungen halten `?` lesbar und bewahren die Fehlerursache.
 impl From<rusqlite::Error> for StoreError {
     fn from(value: rusqlite::Error) -> Self {
@@ -137,7 +144,7 @@ impl SqliteArtifactStore {
     ) -> Result<(), StoreError> {
         // Kein Artefakt darf die Schema-Sicherheitsgrenze umgehen.
         validate_artifact(artifact, registry).map_err(StoreError::Validation)?;
-        append_validated(&self.connection, artifact)
+        append_validated(&self.connection, artifact).map(|_| ())
     }
 
     /// Bindet alle bekannten Schema-IDs atomar an ihre kanonischen Dokumente.
@@ -178,7 +185,7 @@ impl SqliteArtifactStore {
         &self,
         artifact: &Artifact,
         registry: &SchemaRegistry,
-    ) -> Result<(), StoreError> {
+    ) -> Result<u64, StoreError> {
         self.append_current_related(artifact, registry, &[])
     }
 
@@ -188,7 +195,7 @@ impl SqliteArtifactStore {
         artifact: &Artifact,
         registry: &SchemaRegistry,
         relations: &[(VersionId, RelationKind)],
-    ) -> Result<(), StoreError> {
+    ) -> Result<u64, StoreError> {
         validate_artifact(artifact, registry).map_err(StoreError::Validation)?;
         let subject = artifact
             .subject
@@ -196,7 +203,7 @@ impl SqliteArtifactStore {
             .ok_or(StoreError::MissingSubject)?;
 
         let transaction = self.connection.unchecked_transaction()?;
-        append_validated(&transaction, artifact)?;
+        let sequence = append_validated(&transaction, artifact)?;
         transaction.execute(
             "INSERT INTO current_artifacts (subject, schema_id, version_id)
              VALUES (?1, ?2, ?3)
@@ -207,7 +214,7 @@ impl SqliteArtifactStore {
         )?;
         insert_relations(&transaction, &artifact.version_id, relations)?;
         transaction.commit()?;
-        Ok(())
+        Ok(sequence)
     }
 
     /// Speichert einen neuen Current-State zusammen mit einem unveränderlichen
@@ -299,6 +306,33 @@ impl SqliteArtifactStore {
             .optional()?;
         json.map(|json| serde_json::from_str(&json).map_err(StoreError::Serialization))
             .transpose()
+    }
+
+    /// Liest das globale Artifact-Log nach einem exklusiven Commit-Cursor.
+    ///
+    /// Die Reihenfolge entspricht exakt der SQLite-Commit-Sequenz. Darauf
+    /// können abgeleitete Read-Models nach einem Neustart deterministisch
+    /// aufgebaut werden, ohne ihre eigene Historie zu persistieren.
+    pub fn committed_after(&self, sequence: u64) -> Result<Vec<CommittedArtifact>, StoreError> {
+        let sequence = sequence.min(i64::MAX as u64) as i64;
+        let mut statement = self.connection.prepare(
+            "SELECT sequence, artifact_json
+             FROM artifact_versions
+             WHERE sequence > ?1
+             ORDER BY sequence",
+        )?;
+        let rows = statement.query_map(params![sequence], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })?;
+
+        rows.map(|row| {
+            let (sequence, json) = row?;
+            Ok(CommittedArtifact {
+                sequence: sequence as u64,
+                artifact: serde_json::from_str(&json)?,
+            })
+        })
+        .collect()
     }
 
     /// Liest die höchste bekannte Version einer Artefaktidentität.
@@ -521,7 +555,7 @@ impl SqliteArtifactStore {
 
 /// Führt den gemeinsamen append-only Teil auf einer Connection oder
 /// Transaction aus. Validierung erfolgt immer vor dem Aufruf.
-fn append_validated(connection: &Connection, artifact: &Artifact) -> Result<(), StoreError> {
+fn append_validated(connection: &Connection, artifact: &Artifact) -> Result<u64, StoreError> {
     // Die erste Version muss 1 sein; danach ist nur der direkte Nachfolger
     // erlaubt. So entstehen keine nicht replaybaren Lücken.
     let latest: Option<i64> = connection
@@ -555,7 +589,7 @@ fn append_validated(connection: &Connection, artifact: &Artifact) -> Result<(), 
             json
         ],
     )?;
-    Ok(())
+    Ok(connection.last_insert_rowid() as u64)
 }
 
 /// Ergänzt ältere Datenbanken um die indexierbare Subject-Spalte.

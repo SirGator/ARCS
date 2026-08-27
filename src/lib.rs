@@ -9,27 +9,26 @@
 pub mod action;
 /// Universelle Verträge und kontrollierte Grenze für externe Adapter.
 pub mod adapters;
-/// Explizites Autoritäts-Gate zwischen Verification und späterer Execution.
-pub mod approval;
 /// Vertrauenswürdige Domänentypen, Schemas und Validierungsregeln.
 pub mod core;
-/// Kontrollierte Ausführung ausschließlich explizit freigegebener Kandidaten.
-pub mod execution;
-/// Einmalige, aktive Ereignisse von externen Eingangsgrenzen.
-pub mod input;
+/// Prüfung und explizite Autorisierung vorgeschlagener Handlungen.
+#[path = "dicision/mod.rs"]
+pub mod decision;
+/// Kontrollierte Kommunikation mit externen Systemen.
+pub mod io;
 /// Explizite lokale Gewichtsänderungen im gespeicherten Artifact-Netz.
 pub mod learning;
-/// Unaufgefordert von der Außenwelt gemeldeter Weltzustand.
-pub mod observation;
-/// Auditierbare Erfolgsbewertung ausgeführter Wirkungen vor jeder Lernentscheidung.
-pub mod outcome;
 /// Kuratierter Fallback für neue oder komplexe Situationen.
 pub mod reasoning;
-/// Gezielt vom Core angeforderte Daten aus externen Quellen.
-pub mod request;
 /// Orchestrierung zwischen bekanntem Fast Path und kuratiertem Reasoning.
 pub mod runtime;
 /// Append-only Persistenz für Artefakte und ihre Versionen.
 pub mod store;
-/// Auditierbare Prüfung von Kandidaten ohne Freigabe- oder Ausführungswirkung.
-pub mod verification;
+/// Interne, kontrolliert aufgebaute Sicht auf die Außenwelt.
+pub mod world;
+
+// Rückwärtskompatible Modulpfade für bestehende Nutzer der Bibliothek.
+pub use action::{execution, outcome};
+pub use decision::{approval, verification};
+pub use io::{input, request};
+pub use world::observation;
