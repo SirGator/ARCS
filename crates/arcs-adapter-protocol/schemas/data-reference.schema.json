@@ -1,0 +1,11 @@
+{
+  "$id": "arcs.data.reference.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "media_type", "size_bytes"],
+  "properties": {
+    "id": {"type": "string", "minLength": 1},
+    "media_type": {"type": "string", "minLength": 3},
+    "size_bytes": {"type": "integer", "minimum": 0, "maximum": 67108864}
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "$id": "arcs.state.fan.v1",
+  "type": "object",
+  "required": [
+    "device_id",
+    "enabled",
+    "actuation_count"
+  ],
+  "properties": {
+    "device_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "enabled": {
+      "type": "boolean"
+    },
+    "actuation_count": {
+      "type": "integer",
+      "minimum": 0
+    }
+  },
+  "additionalProperties": false
+}

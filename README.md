@@ -16,7 +16,113 @@ weiterhin verifiziert, freigegeben und als eigene Actions ausgeführt werden.
 > implementiert. Goals, eigenständige Skills und ein gelerntes
 > kostenoptimierendes Routing sind noch Roadmap.
 
+## Projektstruktur
+
+ARCS ist ein Cargo-Workspace mit getrennten Paketen:
+
+```text
+ARCS/
+├── Cargo.toml                       Workspace und gemeinsame Abhängigkeitsversionen
+├── crates/
+│   ├── arcs-core/                   Allgemeine Logik, Store und Kontrolle
+│   │   ├── src/                     World, Reasoning, Decision, Action, Runtime …
+│   │   └── schemas/v1/              Allgemeine Artefakt-Schemas
+│   ├── arcs-adapter-protocol/       IDs, Manifeste, Nachrichten und JSON-Framing
+│   └── arcs-adapter-sdk/            Gemeinsame externe Observe-/Request-/Act-Session
+├── adapters/
+│   ├── simulated-sensor/           Eigenes Cargo-Paket und ausführbarer Adapter
+│   │   ├── src/
+│   │   ├── config/profile.json
+│   │   └── schemas/
+│   ├── simulated-fan/              Eigenes Cargo-Paket mit persistentem Simulator
+│   │   ├── src/
+│   │   ├── config/profile.json
+│   │   └── schemas/
+│   └── file-data/                  Allgemeine Dateiquelle mit persistenten Snapshots
+│       ├── src/
+│       └── config/profile.json
+├── apps/
+│   ├── adapter-host/               Allgemeiner Host mit JSON-Konfiguration
+│   │   ├── src/                    CLI und Bibliothek ohne Geräteabhängigkeit
+│   │   ├── config/                 Programme, Profile, Schemas, Grants und Abfragen
+│   │   └── tests/                  Prozess- und Konfigurationstests
+│   └── demo-host/                  Beispielanwendungen, Regeln und System-Freigabe
+│       ├── src/                    Minimale Demo sowie Sensor- und Lüfter-Host
+│       ├── config/                 Betreiber-Grants
+│       └── tests/                  Tests mit echten externen Adapterprozessen
+└── config/                         Historische C++/Worker-Beispiele; nicht geladen
+```
+
+Sensor und Lüfter nutzen das gemeinsame Protokoll, das Adapter-SDK und ihre
+eigenen Bibliotheken. Der Lüfter nutzt SQLite für seinen simulierten
+Gerätezustand. Kein Adapter hängt von `arcs-core` ab. Auch der Core hat keine
+Abhängigkeit von konkreten Adaptern. Das Protokoll benötigt nur Serde/JSON.
+
+`crates/arcs-core/src/adapters/` enthält die **Core-seitige Anschlussstelle**:
+Registry, Betreiber-Grants, Ports und den Host-Transport. Dort liegt kein
+konkreter Geräteadapter. Die öffentliche Rust-Bibliothek des Pakets
+`arcs-core` heißt weiterhin `arcs`; vorhandene Modulpfade bleiben erhalten.
+Gemeinsame Nachrichten werden dafür aus `arcs-adapter-protocol` reexportiert.
+
+`crates/arcs-adapter-sdk` übernimmt auf der Adapterseite Anmeldung,
+Nachrichtenaustausch, Routing und Fehlerantworten. Sensor und Lüfter nutzen
+dieselbe Implementierung. Das SDK ist vom Core und von konkreten Geräten
+unabhängig; Treiber ergänzen ihre fachlichen Operationen.
+
+Die Anwendung `apps/demo-host` verbindet die Pakete. Sie benutzt die
+fachlichen Schema-/Profiltypen der Adapter-Bibliotheken; deren eigentliche
+Treiber laufen weiterhin in separaten Prozessen. Schwellenwerte,
+Verifikation und Freigabepolicy des Beispiels werden vom Demo-Host angewendet.
+
+`apps/adapter-host` ergänzt den allgemeinen Host. Er hängt von keinem
+konkreten Adapter-Paket ab und lädt die gesamte Anschlusskonfiguration aus
+JSON. Profile bleiben beim jeweiligen Adapter; fachliche Steuerungsregeln
+und die Erteilung von Approvals bleiben in der Anwendung.
+
+`adapters/file-data` ergänzt eine allgemeine Quelle für beliebige Dateiinhalte.
+Der Adapter speichert unveränderliche Snapshots, veröffentlicht kleine
+Metadaten-Referenzen und liefert Inhalte blockweise. Der Host benötigt dafür
+eine gesonderte Datenfreigabe. Das funktioniert mit Bildern ebenso wie mit
+anderen Binärdaten; eine Kamera oder Bildauswertung ist noch nicht enthalten.
+Start und Export stehen in der [Dateiquellen-Dokumentation](adapters/file-data/README.md).
+
+Die Komponenten lassen sich innerhalb des Workspace getrennt bauen:
+
+```bash
+cargo build --locked -p arcs-simulated-sensor
+cargo build --locked -p arcs-simulated-fan
+cargo test --locked -p arcs-core
+```
+
+Ein neuer Adapter kann ein weiteres Paket unter `adapters/` oder ein externes
+Programm in einer anderen Sprache sein. Er implementiert die JSON-Verträge;
+eine Änderung am Core ist dafür nicht erforderlich.
+
 ## Zielbild
+
+**Universalität ist eine verbindliche Architekturvorgabe.** ARCS bleibt ein
+allgemeines Agenten-Framework. Die Drohnensuche dient als erster großer
+Anwendungs- und Bewährungsfall. Allgemeine Zielverfolgung, Beobachtung,
+Planung und kontrollierte Ausführung sollen auch für andere Aufgaben nutzbar
+sein; Gerätewissen und aufgabenspezifische Regeln bleiben austauschbar.
+
+Das erste große Anwendungsziel ist: **ARCS steuert eine simulierte Drohne
+durch einen simulierten Raum und findet darin ein vorgegebenes Zielobjekt
+mithilfe der Drohnenkamera.**
+
+Die Drohne soll dafür wiederholt beobachten, eine Suchentscheidung treffen,
+eine freigegebene Bewegung ausführen und das Ergebnis erneut beobachten.
+Ein Fund muss auf Kamerabildern beruhen und mit gespeicherter Evidenz
+nachvollziehbar sein. Drohnenadapter und Simulation bleiben außerhalb des
+Core. Aktuell sind die allgemeine Adapteranbindung und die kontrollierte
+Action-Pipeline vorhanden; Drohne, Kamera und Suchsteuerung sind noch nicht
+implementiert.
+
+Etappen, Zuständigkeiten und Erfolgskriterien stehen im
+[Plan für die Drohnensuche](docs/DRONE_SEARCH.md).
+Die Entwicklungsreihenfolge lautet: zuerst die
+[allgemeinen Adapterfähigkeiten](docs/GENERAL_ADAPTERS.md) ausbauen und
+nachweisen, anschließend damit die Drohne anbinden.
 
 ARCS betrachtet Agentenverhalten als Optimierungsproblem. Neben dem
 Aufgabennutzen gehören Rechenkosten, Latenz und Risiko ausdrücklich zur
@@ -49,6 +155,12 @@ Observation → Belief Update → Goal → Memory/Skill Retrieval
 | --- | --- |
 | Versionierte Artefakte, Schemas, Provenance und Trust | Implementiert |
 | Adapter-Manifeste und getrennte Betreiber-Grants | Implementiert |
+| Gemeinsames Adapter-SDK für Observe, Request und Act | Implementiert, von Sensor und Lüfter verwendet |
+| Referenzierte Binärdaten mit begrenztem Abruf und separaten Grants | Implementiert, allgemeine Dateiquelle als Prozessnachweis |
+| Allgemeiner Host mit JSON-Konfiguration und mehreren Adapterprozessen | Implementiert, einschließlich konfigurierter Datenabfragen |
+| Externer stdio-Adapter mit Geräteprofil, ACK und persistentem Replay | Erster Observation-Slice implementiert |
+| Request und freigegebene Action über stdio | Implementiert, inklusive persistentem Lüfter-Simulator |
+| Deterministische Host-Vorschläge mit Regel und Evidenz | Implementiert, separate Verification und Approval |
 | Observation → Entity → StateEstimate → WorldState | Implementiert |
 | Append-only SQLite-Store und deterministisches Replay | Implementiert |
 | Artifact-Netz als bekannter Fast Path | Implementiert |
@@ -91,7 +203,7 @@ Die öffentlichen Rust-Module teilen diese Verantwortung auf:
 | `world` | Observations, Entities, Beliefs, WorldState und Reducer |
 | `store` | Append-only Persistenz, Relationen und Artifact-Netz |
 | `reasoning` | Validierte, aber noch nicht autorisierte Vorschläge |
-| `decision` | Verification und explizite Approval-Entscheidungen |
+| `decision` | Deterministische Vorschläge, Verification und explizite Approval-Entscheidungen |
 | `action` | Materialisierung, Ausführung und Outcomes |
 | `runtime` | Orchestrierung von Routing, Reasoning und Agentenzyklen |
 | `learning` | Kontrollierte lokale Gewichtsänderungen im Artifact-Netz |
@@ -162,15 +274,45 @@ ARCS setzt Autorität an mehreren Stellen ausdrücklich nicht voraus:
 Voraussetzung ist eine Rust-Toolchain mit Unterstützung für Edition 2024.
 SQLite wird über die `bundled`-Option von `rusqlite` eingebunden.
 
+Der allgemeine Host verbindet beide Simulatoren ausschließlich über
+Konfiguration:
+
 ```bash
-cargo run --quiet
+cargo build --locked --workspace --bins
+cargo run --locked -p arcs-host -- \
+  --config apps/adapter-host/config/host.json
 ```
 
-Die Demo in [`src/main.rs`](src/main.rs) registriert einen simulierten
+Die Ausgabe enthält Sensormessungen, abgefragte Lüfterdaten und den
+World-State. Dieser Host führt standardmäßig einen begrenzten Lauf aus und
+schaltet den Lüfter nicht selbstständig ein. Vollständige Konfiguration,
+Pfadregeln, Request-IDs und Bibliotheks-API stehen in
+[apps/adapter-host/README.md](apps/adapter-host/README.md).
+
+Das minimale Beispiel ohne externe Prozesse bleibt separat verfügbar:
+
+```bash
+cargo run --locked -p arcs-demo-host --bin arcs --quiet
+```
+
+Die Demo in [`apps/demo-host/src/main.rs`](apps/demo-host/src/main.rs) registriert einen simulierten
 Chat-Adapter samt Grant, nimmt eine Observation entgegen, schreibt sie in
 einen flüchtigen SQLite-Store und reduziert sie in einen neuen World-State.
 Anschließend gibt sie das gespeicherte Artefakt als JSON aus. Für persistente
 Daten steht `SqliteArtifactStore::open` zur Verfügung.
+
+Ein zweites Beispiel verbindet einen eigenständigen Sensor-Adapter über stdio
+mit einem persistenten Store und dem World-State. Geräteprofil und
+Temperatur-Schema liegen außerhalb des Cores. Startbefehle, Nachrichtenformate
+und Wiederholungsverhalten stehen in [ADAPTER_PROTOCOL.md](ADAPTER_PROTOCOL.md).
+
+Die Lüfter-Demo ergänzt den vollständigen Regelkreis über denselben Transport:
+gezielte Temperaturabfrage, deterministischer Vorschlag, Verification,
+System-Freigabe für den Simulator, Action, Rückabfrage, Outcome und World-State.
+Sie verwendet einen eigenen persistenten Adapterzustand und schützt auch
+nach Prozessneustarts vor wiederholten Wirkungen. Start und Grenzen sind im
+[Abschnitt zum Lüfter-Zyklus](ADAPTER_PROTOCOL.md#vollständigen-lüfter-zyklus-starten)
+beschrieben.
 
 Der zentrale World-State-Schritt sieht nach erfolgreichem Ingest so aus:
 
@@ -187,25 +329,33 @@ let reduction = WorldReducer::new()
 
 ```bash
 # Gesamte Testsuite
-cargo test --locked --all-targets
+cargo test --locked --workspace --all-targets
 
 # Formatierung prüfen
 cargo fmt --all -- --check
 
 # Statische Analyse
-cargo clippy --all-targets --all-features
+cargo clippy --locked --workspace --all-targets --all-features
 
 # API-Dokumentation bauen
-cargo doc --no-deps
+cargo doc --locked --workspace --no-deps
 ```
 
 Die wichtigsten Einstiegspunkte sind:
 
-- [`src/lib.rs`](src/lib.rs) für die öffentliche Modulstruktur,
-- [`src/world`](src/world) für das aktuelle World Model,
-- [`src/runtime`](src/runtime) für die Agentenorchestrierung,
-- [`src/reasoning`](src/reasoning) für Fast Path und Reasoning-Fallback und
-- [`src/main.rs`](src/main.rs) für ein minimales ausführbares Beispiel.
+- [`crates/arcs-core/src/lib.rs`](crates/arcs-core/src/lib.rs) für die öffentliche Modulstruktur,
+- [`crates/arcs-core/src/world`](crates/arcs-core/src/world) für das aktuelle World Model,
+- [`crates/arcs-adapter-protocol/src`](crates/arcs-adapter-protocol/src) für die unabhängigen Kommunikationsverträge,
+- [`adapters`](adapters) für konkrete Adapter und ihre Geräteprofile und
+- [`apps/demo-host/src`](apps/demo-host/src) für ausführbare Beispiele und die Lüfter-Regel.
+
+Der konfigurierbare Host startet in
+[`apps/adapter-host/src`](apps/adapter-host/src); seine Beispielkonfiguration
+liegt unter [`apps/adapter-host/config`](apps/adapter-host/config).
+
+Die Integrationstests bauen die Adapter-Binaries einmal pro Testsuite separat,
+da Cargo `CARGO_BIN_EXE` nur für Programme des eigenen Pakets bereitstellt.
+Anschließend starten sie die echten ausführbaren Adapter direkt über stdio.
 
 ## Nächste formale Schritte
 

@@ -3,10 +3,79 @@
 version = 4
 
 [[package]]
-name = "arcs"
+name = "arcs-adapter-protocol"
 version = "0.1.0"
 dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "arcs-adapter-sdk"
+version = "0.1.0"
+dependencies = [
+ "arcs-adapter-protocol",
+ "serde_json",
+]
+
+[[package]]
+name = "arcs-core"
+version = "0.1.0"
+dependencies = [
+ "arcs-adapter-protocol",
  "rusqlite",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "arcs-demo-host"
+version = "0.1.0"
+dependencies = [
+ "arcs-core",
+ "arcs-simulated-fan",
+ "arcs-simulated-sensor",
+ "rusqlite",
+ "serde_json",
+]
+
+[[package]]
+name = "arcs-file-data"
+version = "0.1.0"
+dependencies = [
+ "arcs-adapter-protocol",
+ "arcs-adapter-sdk",
+ "rusqlite",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "arcs-host"
+version = "0.1.0"
+dependencies = [
+ "arcs-core",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "arcs-simulated-fan"
+version = "0.1.0"
+dependencies = [
+ "arcs-adapter-protocol",
+ "arcs-adapter-sdk",
+ "rusqlite",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "arcs-simulated-sensor"
+version = "0.1.0"
+dependencies = [
+ "arcs-adapter-protocol",
+ "arcs-adapter-sdk",
  "serde",
  "serde_json",
 ]

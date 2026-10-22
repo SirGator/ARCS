@@ -1,0 +1,13 @@
+[package]
+name = "arcs-core"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+name = "arcs"
+
+[dependencies]
+arcs-adapter-protocol.workspace = true
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true

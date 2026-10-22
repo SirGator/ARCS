@@ -1,0 +1,11 @@
+[package]
+name = "arcs-simulated-fan"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+arcs-adapter-sdk.workspace = true
+arcs-adapter-protocol.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+rusqlite.workspace = true

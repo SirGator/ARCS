@@ -1,0 +1,54 @@
+{
+  "config_version": 1,
+  "database": "../../../var/host.sqlite",
+  "node_id": "adapter-host",
+  "schemas": [
+    "../../../adapters/simulated-sensor/schemas/temperature.schema.json",
+    "../../../adapters/simulated-fan/schemas/request-temperature.schema.json",
+    "../../../adapters/simulated-fan/schemas/request-fan.schema.json",
+    "../../../adapters/simulated-fan/schemas/fan-candidate.schema.json",
+    "../../../adapters/simulated-fan/schemas/fan-state.schema.json",
+    "../../../adapters/simulated-fan/schemas/fan-execution-result.schema.json"
+  ],
+  "adapters": [
+    {
+      "program": "../../../target/debug/arcs-simulated-sensor",
+      "profile": "../../../adapters/simulated-sensor/config/profile.json",
+      "grant_file": "grants/sensor.json",
+      "timeout_ms": 5000
+    },
+    {
+      "program": "../../../target/debug/arcs-simulated-fan",
+      "profile": "../../../adapters/simulated-fan/config/profile.json",
+      "args": [
+        {
+          "path": "../../../var/host-fan-adapter.sqlite"
+        }
+      ],
+      "grant_file": "grants/fan.json",
+      "timeout_ms": 5000,
+      "requests": [
+        {
+          "id": "fan-temperature-1",
+          "capability_id": "temperature.read",
+          "input_schema_id": "arcs.request.temperature.v1",
+          "response_schema_id": "arcs.measurement.temperature.v1",
+          "subject": "temperature-01",
+          "payload": {
+            "device_id": "temperature-01"
+          }
+        },
+        {
+          "id": "fan-state-1",
+          "capability_id": "fan.read",
+          "input_schema_id": "arcs.request.fan.v1",
+          "response_schema_id": "arcs.state.fan.v1",
+          "subject": "fan-01",
+          "payload": {
+            "device_id": "fan-01"
+          }
+        }
+      ]
+    }
+  ]
+}

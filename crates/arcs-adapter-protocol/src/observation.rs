@@ -1,0 +1,16 @@
+use crate::CapabilityId;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+/// Nicht vertrauenswürdige Nachricht an der Observation-Grenze.
+///
+/// Schema, interne Identitäten, Herkunft und Trust werden ausschließlich aus
+/// Runtime-Konfiguration und Betreiber-Grant abgeleitet.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ObservationMessage {
+    pub capability_id: CapabilityId,
+    pub external_subject: Option<String>,
+    pub external_reference: String,
+    pub payload: Value,
+}

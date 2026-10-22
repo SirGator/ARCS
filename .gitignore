@@ -35,8 +35,11 @@ json/
 
 phases/
 
-/docs
+/docs/*
+!/docs/DRONE_SEARCH.md
+!/docs/GENERAL_ADAPTERS.md
 /target/
 **/target/
 /target
+/var/
 

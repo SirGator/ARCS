@@ -1,0 +1,37 @@
+{
+  "$id": "arcs.execution_result.fan.v1",
+  "type": "object",
+  "required": [
+    "action_version",
+    "result"
+  ],
+  "properties": {
+    "action_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "result": {
+      "type": "object",
+      "required": [
+        "device_id",
+        "enabled",
+        "actuation_count"
+      ],
+      "properties": {
+        "device_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "actuation_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

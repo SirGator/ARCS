@@ -1,0 +1,14 @@
+{
+  "$id": "arcs.request.fan.v1",
+  "type": "object",
+  "required": [
+    "device_id"
+  ],
+  "properties": {
+    "device_id": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "additionalProperties": false
+}

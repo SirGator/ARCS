@@ -1,9 +1,26 @@
-[package]
-name = "arcs"
+[workspace]
+resolver = "3"
+members = [
+    "crates/arcs-core",
+    "crates/arcs-adapter-protocol",
+    "crates/arcs-adapter-sdk",
+    "adapters/simulated-sensor",
+    "adapters/simulated-fan",
+    "adapters/file-data",
+    "apps/demo-host",
+    "apps/adapter-host",
+]
+
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
 
-[dependencies]
+[workspace.dependencies]
+arcs = { package = "arcs-core", path = "crates/arcs-core" }
+arcs-adapter-protocol = { path = "crates/arcs-adapter-protocol" }
+arcs-adapter-sdk = { path = "crates/arcs-adapter-sdk" }
+arcs-simulated-sensor = { path = "adapters/simulated-sensor" }
+arcs-simulated-fan = { path = "adapters/simulated-fan" }
 rusqlite = { version = "0.40.1", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

@@ -1,5 +1,9 @@
 # ARCS Konfiguration
 #
+# Historisches Beispiel für den früheren C++/Worker-Aufbau.
+# Der aktuelle Rust-Core lädt diese Datei nicht. Die ausführbare stdio-Demo
+# und ihre JSON-Konfiguration sind in ADAPTER_PROTOCOL.md beschrieben.
+#
 # ARCS Core (C++) spricht mit dem interpretation_worker über `interpret_api_url`.
 # Der interpretation_worker wiederum delegiert an den text-to-json-parser.
 #

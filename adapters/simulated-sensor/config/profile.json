@@ -1,0 +1,14 @@
+{
+  "adapter_id": "demo.sensor",
+  "device_id": "temperature-01",
+  "capability_id": "temperature.observe",
+  "schema_id": "arcs.measurement.temperature.v1",
+  "field": "temperature_raw",
+  "scale": 0.1,
+  "offset": 0.0,
+  "unit": "Cel",
+  "samples": [
+    {"id": "temperature-01:sample-1", "raw": {"temperature_raw": 250}},
+    {"id": "temperature-01:sample-2", "raw": {"temperature_raw": 260}}
+  ]
+}

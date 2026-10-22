@@ -1,0 +1,6 @@
+{
+  "adapter_id": "example.files",
+  "resources": [
+    {"id": "sample-v1", "media_type": "text/plain", "path": "../fixtures/sample.txt"}
+  ]
+}

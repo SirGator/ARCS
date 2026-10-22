@@ -1,0 +1,15 @@
+{
+  "config_version": 1,
+  "database": "../../../var/data-host.sqlite",
+  "node_id": "data-host",
+  "schemas": ["../../../crates/arcs-adapter-protocol/schemas/data-reference.schema.json"],
+  "adapters": [
+    {
+      "program": "../../../target/debug/arcs-file-data",
+      "profile": "../../../adapters/file-data/config/profile.json",
+      "args": [{"path": "../../../var/data-adapter.sqlite"}],
+      "grant_file": "grants/data.json",
+      "timeout_ms": 5000
+    }
+  ]
+}

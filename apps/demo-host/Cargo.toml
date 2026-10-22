@@ -1,0 +1,19 @@
+[package]
+name = "arcs-demo-host"
+version.workspace = true
+edition.workspace = true
+default-run = "arcs"
+
+[[bin]]
+name = "arcs"
+path = "src/main.rs"
+doc = false
+
+[dependencies]
+arcs.workspace = true
+arcs-simulated-sensor.workspace = true
+arcs-simulated-fan.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+rusqlite.workspace = true

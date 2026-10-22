@@ -1,0 +1,16 @@
+{
+  "config_version": 1,
+  "database": "../../../var/sensor.sqlite",
+  "node_id": "sensor-host",
+  "schemas": [
+    "../../../adapters/simulated-sensor/schemas/temperature.schema.json"
+  ],
+  "adapters": [
+    {
+      "program": "../../../target/debug/arcs-simulated-sensor",
+      "profile": "../../../adapters/simulated-sensor/config/profile.json",
+      "grant_file": "grants/sensor.json",
+      "timeout_ms": 5000
+    }
+  ]
+}

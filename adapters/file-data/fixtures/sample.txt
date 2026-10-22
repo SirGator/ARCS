@@ -1,0 +1,1 @@
+ARCS transports arbitrary data through an opaque reference and bounded chunks.

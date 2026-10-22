@@ -1,0 +1,8 @@
+[package]
+name = "arcs-adapter-sdk"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+arcs-adapter-protocol.workspace = true
+serde_json.workspace = true

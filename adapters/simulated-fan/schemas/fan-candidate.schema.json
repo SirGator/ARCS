@@ -1,0 +1,18 @@
+{
+  "$id": "arcs.fan_candidate.v1",
+  "type": "object",
+  "required": [
+    "device_id",
+    "enabled"
+  ],
+  "properties": {
+    "device_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "enabled": {
+      "type": "boolean"
+    }
+  },
+  "additionalProperties": false
+}

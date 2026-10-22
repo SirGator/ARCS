@@ -1,0 +1,19 @@
+{
+  "$id": "arcs.input.host_request.v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": [
+    "adapter_id",
+    "request"
+  ],
+  "properties": {
+    "adapter_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "request": {
+      "type": "object"
+    }
+  },
+  "additionalProperties": false
+}

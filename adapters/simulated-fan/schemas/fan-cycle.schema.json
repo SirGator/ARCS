@@ -1,0 +1,17 @@
+{
+  "$id": "arcs.input.fan_cycle.v1",
+  "type": "object",
+  "required": [
+    "profile",
+    "approve"
+  ],
+  "properties": {
+    "profile": {
+      "type": "object"
+    },
+    "approve": {
+      "type": "boolean"
+    }
+  },
+  "additionalProperties": false
+}
