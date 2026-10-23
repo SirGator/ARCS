@@ -1,0 +1,25 @@
+{
+  "config_version": 1,
+  "database": "../../../var/transform-host.sqlite",
+  "node_id": "transform-host",
+  "schemas": [
+    "../../../adapters/normalize-number/schemas/raw-number.schema.json",
+    "../../../adapters/normalize-number/schemas/normalized-number.schema.json"
+  ],
+  "adapters": [
+    {
+      "program": "../../../target/debug/arcs-normalize-number",
+      "grant_file": "grants/normalize.json",
+      "transforms": [
+        {
+          "id": "normalize-1",
+          "capability_id": "number.normalize",
+          "input_schema_id": "arcs.number.raw.v1",
+          "output_schema_id": "arcs.number.normalized.v1",
+          "subject": "measurement-1",
+          "payload": {"value":310.0,"scale":0.1,"offset":0.0,"unit":"Cel"}
+        }
+      ]
+    }
+  ]
+}

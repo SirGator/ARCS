@@ -4,8 +4,8 @@ Die gemeinsame Implementierung liegt im eigenständigen Paket
 [`crates/arcs-adapter-protocol`](crates/arcs-adapter-protocol). Sie enthält
 Nachrichten, IDs, Manifestprüfung und Framing und hat keine Core-Abhängigkeit.
 Das [`arcs-adapter-sdk`](crates/arcs-adapter-sdk/README.md) ergänzt für
-Rust-Adapter eine gemeinsame Session mit typisierten Observe-, Request- und
-Act-Callbacks. Sensor und Lüfter verwenden diese Implementierung. Das
+Rust-Adapter eine gemeinsame Session mit typisierten Observe-, Request-,
+Transform-, Output- und Act-Callbacks. Sensor und Lüfter verwenden diese Implementierung. Das
 Protokoll bleibt auch ohne das SDK und in anderen Sprachen implementierbar.
 Die konkreten Adapter liegen unter `adapters/`, ihre Beispiel-Hosts unter
 `apps/demo-host`. Grants, Registry und die Dienste für kontrollierte
@@ -19,9 +19,9 @@ Demo-Hosts bleiben Beispiele für die gezielte fachliche Orchestrierung.
 
 Dieser erste Transport verbindet einen vom Betreiber gestarteten Adapterprozess
 mit den vorhandenen Core-Diensten. Implementiert sind Registrierung,
-bestätigte Observations, Requests, Actions und der begrenzte Abruf referenzierter
-Daten über die Rust-Dienste. Reasoning und Output behalten ihre bisherigen Schnittstellen;
-ihre Übertragung über dieses Protokoll folgt in weiteren Schritten.
+bestätigte Observations, Requests, Transforms, Outputs, Actions und der begrenzte
+Abruf referenzierter Daten über die Rust-Dienste. Input und Reasoning behalten
+ihre bisherigen Rust-Schnittstellen; ihre Wire-Verträge folgen in weiteren Schritten.
 
 ## Prozessgrenze und Berechtigungen
 
@@ -69,6 +69,8 @@ Retries. Der Host entscheidet über Reconnect und erneute Verarbeitung.
 | `poll` | `idle` | Zurzeit keine Messung; Verbindung bleibt offen |
 | `ack` mit `message_id` | `acknowledged` mit derselben `message_id` | Erfolgreichen Store-Commit bestätigen |
 | `request` mit `invocation` | `request_result` mit `response` | Gezielte Datenanforderung über `RequestService` |
+| `transform` mit `invocation` | `transform_result` mit `response` | Deterministische Ableitung über `TransformService` |
+| `output` mit `invocation` | `output_result` mit `response` | Geprüften und freigegebenen Ausgabeauftrag liefern |
 | `execute` mit `invocation` | `execution_result` mit `response` | Freigegebenen Action-Auftrag über `ExecutionService` ausführen |
 | `read_data` mit `request` | `data_chunk` mit `chunk` | Referenzierte Daten unter den Limits des `DataService` lesen |
 | `shutdown` | `bye` | Verbindung geordnet schließen |
@@ -176,6 +178,98 @@ Recovery-Regeln. Es gibt weiterhin keine automatischen Verbindungs-Retries.
 Neue Nachrichten erweitern stdio v1 additiv; ein Adapter bietet nur die
 Fähigkeiten an, die er auch tatsächlich implementiert.
 
+## Deterministische Transforms
+
+`TransformAdapter` verarbeitet eine bereits gespeicherte Artefaktversion.
+Die Capability hat den Typ `Transform` und benennt ihre akzeptierten und
+erzeugten Schema-IDs. Der Aufruf ist eine Datenverarbeitung ohne externe
+Wirkungen. Probabilistische Modelle verwenden den separaten Reasoning-Port.
+
+```json
+{"protocol_version":1,"request_id":"stdio-2","message":{"type":"transform","invocation":{"invocation_id":"transform:example","capability":{"adapter_id":"example.normalize","capability_id":"number.normalize"},"input_version_id":"input-1-v1","input_schema_id":"arcs.number.raw.v1","input_payload":{"value":310.0,"scale":0.1,"offset":0.0,"unit":"Cel"},"output_schema_id":"arcs.number.normalized.v1","max_output_bytes":4096}}}
+```
+
+```json
+{"protocol_version":1,"request_id":"stdio-2","message":{"type":"transform_result","response":{"invocation_id":"transform:example","external_reference":"normalized:transform:example","payload":{"value":31.0,"unit":"Cel"}}}}
+```
+
+Der Service prüft vor jedem Aufruf und Replay den installierten Endpoint,
+die aktuelle Freigabe, die gespeicherte Eingabe und beide Schema-Verträge.
+`max_payload_bytes` begrenzt Eingabe und Ausgabe; das Source-Referenzlimit
+des Grants gilt für die Rückgabe. Das SDK prüft zusätzlich Routing,
+Korrelation und Ausgabelimit. Der Core validiert das komplette Ergebnis
+erneut. Der Adapter liefert keine IDs, Trust-Werte, Provenienz oder Freigaben.
+Ein reiner Transform-Grant benötigt keinen Ingress-Herkunftskanal. Der Core
+setzt die Quelle auf `external`, bei einer Systemkomponente auf `internal`;
+der ursprüngliche Datengeber bleibt über Parent und Trust nachvollziehbar.
+
+Die Ergebnisversion erhält die Eingabe als Parent und eine `derived_from`-
+Relation. Trust ist höchstens so hoch wie Eingabe und Grant. Modellherkunft
+bleibt auch bei einer System-Transformation als Modellherkunft mit niedrigem
+Trust erhalten. Transform-Ergebnisse können keine `action`, `approval`,
+`verification_report`, `invocation`, `execution_result`, `outcome`,
+`reasoning_request`, `reasoning_result` oder `output_request`-Artefakte erzeugen. Kandidaten
+bleiben Vorschläge und durchlaufen die separate Verifikation und Freigabe.
+Transform-Resultate werden als Ereignisse gespeichert und aktualisieren
+keinen World-State-Slot von selbst.
+
+Die dauerhafte Aufrufidentität enthält Capability, Eingabeversion,
+Ausgabeschema und Adapterversion. Eine vollständige serialisierte Identität
+wird zusätzlich geprüft, bevor ein Ergebnis wiederverwendet wird. Der
+Adapter muss dieselbe Eingabe unter derselben ID deterministisch beantworten.
+Bei verlorener Antwort darf nach Reconnect mit derselben ID erneut gerechnet
+werden. Ein permanenter Fehler ist terminal; temporäre Transportfehler können
+über die vorhandenen Recovery-Regeln erneut versucht werden. Es gibt keine
+automatischen Retries.
+
+Ergebnis, Relation und erfolgreicher Invocation-State committen atomar.
+Transform verwendet das neue interne Schema `arcs.invocation.v2`; das
+bestehende `arcs.invocation.v1` bleibt unverändert und wird für die bisherigen
+Aufruftypen weiterverwendet. Der gemeinsame Lifecycle liest beide Versionen.
+Damit wird kein bereits gebundener V1-Vertrag verändert.
+
+Das Beispiel unter [normalize-number](adapters/normalize-number/README.md)
+demonstriert denselben Anschluss mit unterschiedlichen Zahlendaten und Einheiten.
+
+## Kontrollierte Ausgabe
+
+`OutputService::prepare` erstellt einen dauerhaften `arcs.output_request.v1`
+mit Ziel-Capability, vollständigem Manifest, Inhaltversion und Ergebnisschema.
+Erst eine auf diesen Auftrag bezogene, bestandene Verification und ein
+Approval von Human oder System erlauben `deliver`. Der Core prüft die
+jeweiligen Autoritätsklassen, internen Herkunftsbelege und die Relationen
+`derived_from`, `verifies`, `approves` und `based_on`. Freigaben anderer
+Aufträge oder nur des ursprünglichen Inhalts reichen nicht aus.
+
+Der Output-Adapter erhält `OutputInvocation` mit `invocation_id`,
+`capability`, `request_version_id`, `approval_version_id`,
+`artifact_version_id`, `artifact_schema_id`, optionalem `subject`,
+dem eigentlichen `payload`, `result_schema_id` und `max_result_bytes`.
+Die Antwort ist ein `output_result` mit `OutputResponse`: korrelierte
+`invocation_id`, `external_reference` und `result_payload`.
+
+Die Capability muss `Output` mit `idempotent: true`, passenden
+`accepts`-/`emits`-Verträgen und benötigten Permissions deklarieren. Der
+Betreiber muss diese explizit freischalten und `producer_class: executor`
+zuweisen. Der Input und das Resultat unterliegen dem Payloadlimit, die
+Bestätigung dem externen Referenzlimit. Der Core validiert alle Rückgaben;
+Steuerartefakte können auch nicht als Output-Resultat eingeschleust werden.
+
+Ausgabe und Action haben getrennte Nachrichten und Ports. Ein Output-Auftrag
+umgeht keine Act-Freigabe. Das SDK prüft die Struktur und Korrelation;
+die vollständige Approval-Prüfung bleibt beim Core. Der Adapter garantiert
+die dauerhafte Idempotenz seiner konkreten Senke.
+
+Der gemeinsame Invocation-Lifecycle verwendet für Output das bereits
+vorhandene `kind: output` im unveränderten `arcs.invocation.v1`. Beleg,
+Resultat-Relationen und erfolgreicher Zustand committen im Core atomar.
+Aktuelle Grants und die Auftragsbindung werden auch beim Replay geprüft.
+Nach unterbrochener Übertragung muss dieselbe Invocation-ID wiederverwendet
+werden. Der Host führt keine automatischen Wiederholungen oder Reconnects aus.
+
+Ein vollständiger lokaler Nachweis einschließlich Datei-/Journal-Recovery
+steht unter [file-output](adapters/file-output/README.md).
+
 ## Referenzierte Daten
 
 Eine Observation oder Request-Antwort kann statt großer eingebetteter Daten
@@ -208,7 +302,7 @@ ausdrückliche Grenzen:
 Fehlende oder auf `null` gesetzte `data_limits` sperren den Datenabruf.
 Die bisherigen Grants bleiben dadurch unverändert nutzbar. Das Objektlimit
 muss 1 bis 67.108.864 Bytes, das Blocklimit 1 bis 8192 Bytes betragen.
-Die Capability muss aktiviert und vom Typ Observe oder Request sein;
+Die Capability muss aktiviert und vom Typ Observe, Request oder Transform sein;
 Metadaten zu beobachten erteilt noch keine Berechtigung, Inhalte abzurufen.
 
 Ein einzelner Dialogschritt lautet beispielsweise:

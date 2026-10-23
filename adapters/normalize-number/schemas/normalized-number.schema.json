@@ -1,0 +1,10 @@
+{
+  "$id": "arcs.number.normalized.v1",
+  "type": "object",
+  "required": ["value", "unit"],
+  "properties": {
+    "value": {"type":"number"},
+    "unit": {"type":"string","minLength":1}
+  },
+  "additionalProperties": false
+}

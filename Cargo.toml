@@ -7,6 +7,8 @@ members = [
     "adapters/simulated-sensor",
     "adapters/simulated-fan",
     "adapters/file-data",
+    "adapters/normalize-number",
+    "adapters/file-output",
     "apps/demo-host",
     "apps/adapter-host",
 ]

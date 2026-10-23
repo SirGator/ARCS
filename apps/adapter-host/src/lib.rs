@@ -5,4 +5,6 @@ mod error;
 mod runtime;
 
 pub use error::HostError;
-pub use runtime::{AdapterReport, EstimateReport, Host, HostReport, RequestReport};
+pub use runtime::{
+    AdapterReport, EstimateReport, Host, HostReport, RequestReport, TransformReport,
+};

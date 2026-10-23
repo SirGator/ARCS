@@ -10,7 +10,8 @@ use std::io::{BufRead, Write};
 
 use arcs_adapter_protocol::{
     ActInvocation, ActResponse, AdapterManifest, CapabilityContract, DataChunk, DataRead,
-    ManifestError, ObservationMessage, RequestInvocation, RequestResponse,
+    ManifestError, ObservationMessage, OutputInvocation, OutputResponse, RequestInvocation,
+    RequestResponse, TransformInvocation, TransformResponse,
     stdio::{
         AdapterMessage, Envelope, HostMessage, WIRE_VERSION, WireError, read_frame, write_frame,
     },
@@ -84,6 +85,21 @@ pub trait Adapter {
     }
 
     fn request(&mut self, _invocation: RequestInvocation) -> Result<RequestResponse, AdapterError> {
+        Err(AdapterError::unsupported())
+    }
+
+    /// Liefert einen vom Host geprüften und freigegebenen Ausgabeauftrag.
+    /// Identische Invocation-IDs benötigen dauerhafte Idempotenz im Treiber.
+    fn output(&mut self, _invocation: OutputInvocation) -> Result<OutputResponse, AdapterError> {
+        Err(AdapterError::unsupported())
+    }
+
+    /// Reine Verarbeitung: dieselbe Eingabe unter derselben ID muss dasselbe
+    /// Ergebnis liefern. Der Adapter validiert zusätzlich seine fachlichen Daten.
+    fn transform(
+        &mut self,
+        _invocation: TransformInvocation,
+    ) -> Result<TransformResponse, AdapterError> {
         Err(AdapterError::unsupported())
     }
 
@@ -185,12 +201,74 @@ fn dispatch(
     message: HostMessage,
 ) -> Result<AdapterMessage, AdapterError> {
     match message {
+        HostMessage::Output { invocation } => {
+            let contract = manifest
+                .capability(&invocation.capability.capability_id)
+                .map(|cap| &cap.contract);
+            if invocation.capability.adapter_id != manifest.adapter_id
+                || invocation.invocation_id.trim().is_empty()
+                || invocation.request_version_id.0.trim().is_empty()
+                || invocation.approval_version_id.0.trim().is_empty()
+                || invocation.artifact_version_id.0.trim().is_empty()
+                || !matches!(contract,Some(CapabilityContract::Output { accepts, emits, idempotent:true })
+                    if accepts.contains(&invocation.artifact_schema_id) && emits.contains(&invocation.result_schema_id))
+            {
+                return Err(AdapterError::rejected("output contract mismatch"));
+            }
+            let id = invocation.invocation_id.clone();
+            let maximum = invocation.max_result_bytes;
+            let response = adapter.output(invocation)?;
+            if response.invocation_id != id
+                || response.external_reference.trim().is_empty()
+                || serde_json::to_vec(&response.result_payload)
+                    .map_err(|_| invalid_response("invalid output receipt"))?
+                    .len()
+                    > maximum
+            {
+                return Err(invalid_response(
+                    "output correlation, reference or result limit mismatch",
+                ));
+            }
+            Ok(AdapterMessage::OutputResult { response })
+        }
+        HostMessage::Transform { invocation } => {
+            let contract = manifest
+                .capability(&invocation.capability.capability_id)
+                .map(|cap| &cap.contract);
+            if invocation.capability.adapter_id != manifest.adapter_id
+                || invocation.invocation_id.trim().is_empty()
+                || invocation.input_version_id.0.trim().is_empty()
+                || !matches!(contract, Some(CapabilityContract::Transform { accepts, emits })
+                    if accepts.contains(&invocation.input_schema_id) && emits.contains(&invocation.output_schema_id))
+            {
+                return Err(AdapterError::rejected("transform contract mismatch"));
+            }
+            let id = invocation.invocation_id.clone();
+            let limit = invocation.max_output_bytes;
+            let response = adapter.transform(invocation)?;
+            if response.invocation_id != id
+                || response.external_reference.trim().is_empty()
+                || serde_json::to_vec(&response.payload)
+                    .map_err(|_| invalid_response("invalid transform payload"))?
+                    .len()
+                    > limit
+            {
+                return Err(invalid_response(
+                    "transform correlation, reference or payload limit mismatch",
+                ));
+            }
+            Ok(AdapterMessage::TransformResult { response })
+        }
         HostMessage::ReadData { request } => {
             if !request.is_valid()
                 || request.capability.adapter_id != manifest.adapter_id
                 || !manifest
                     .capability(&request.capability.capability_id)
-                    .is_some_and(|cap| cap.contract.is_observation() || cap.contract.is_request())
+                    .is_some_and(|cap| {
+                        cap.contract.is_observation()
+                            || cap.contract.is_request()
+                            || cap.contract.is_transform()
+                    })
             {
                 return Err(AdapterError::rejected(
                     "data reference or capability mismatch",

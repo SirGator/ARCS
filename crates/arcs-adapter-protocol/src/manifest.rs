@@ -139,6 +139,10 @@ impl CapabilityContract {
         matches!(self, Self::Request { .. })
     }
 
+    pub fn is_transform(&self) -> bool {
+        matches!(self, Self::Transform { .. })
+    }
+
     pub fn is_output(&self) -> bool {
         matches!(self, Self::Output { .. })
     }

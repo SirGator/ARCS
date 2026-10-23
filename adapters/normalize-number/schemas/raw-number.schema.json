@@ -1,0 +1,12 @@
+{
+  "$id": "arcs.number.raw.v1",
+  "type": "object",
+  "required": ["value", "scale", "offset", "unit"],
+  "properties": {
+    "value": {"type":"number"},
+    "scale": {"type":"number"},
+    "offset": {"type":"number"},
+    "unit": {"type":"string","minLength":1}
+  },
+  "additionalProperties": false
+}

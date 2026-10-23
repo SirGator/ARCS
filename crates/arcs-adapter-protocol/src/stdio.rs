@@ -1,4 +1,4 @@
-//! JSON-Lines-Vertrag für externe Observations, Requests und Actions.
+//! JSON-Lines-Vertrag für Observations, Requests, Transforms, Actions und Datenabruf.
 
 use std::io::{BufRead, Read, Write};
 
@@ -6,7 +6,8 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use crate::{
     ActInvocation, ActResponse, AdapterManifest, DataChunk, DataRead, ObservationMessage,
-    RequestInvocation, RequestResponse,
+    OutputInvocation, OutputResponse, RequestInvocation, RequestResponse, TransformInvocation,
+    TransformResponse,
 };
 
 pub const WIRE_VERSION: u32 = 1;
@@ -28,6 +29,8 @@ pub enum HostMessage {
     Poll,
     Ack { message_id: String },
     Request { invocation: RequestInvocation },
+    Transform { invocation: TransformInvocation },
+    Output { invocation: OutputInvocation },
     Execute { invocation: ActInvocation },
     ReadData { request: DataRead },
     Shutdown,
@@ -49,6 +52,12 @@ pub enum AdapterMessage {
     },
     RequestResult {
         response: RequestResponse,
+    },
+    TransformResult {
+        response: TransformResponse,
+    },
+    OutputResult {
+        response: OutputResponse,
     },
     ExecutionResult {
         response: ActResponse,

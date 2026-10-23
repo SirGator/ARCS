@@ -60,7 +60,10 @@ impl<'a> DataService<'a> {
         if registered.manifest() != adapter.manifest() {
             return Err(DataError::EndpointMismatch);
         }
-        if !descriptor.contract.is_observation() && !descriptor.contract.is_request() {
+        if !descriptor.contract.is_observation()
+            && !descriptor.contract.is_request()
+            && !descriptor.contract.is_transform()
+        {
             return Err(DataError::UnsupportedCapability);
         }
         let grant = registered.grant();

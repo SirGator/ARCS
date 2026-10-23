@@ -25,6 +25,10 @@ pub fn adapter_binary(name: &str) -> PathBuf {
                 "arcs-simulated-fan",
                 "-p",
                 "arcs-file-data",
+                "-p",
+                "arcs-normalize-number",
+                "-p",
+                "arcs-file-output",
                 "--target-dir",
             ])
             .arg(target_directory);

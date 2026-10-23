@@ -243,3 +243,32 @@ fn registry_rejects_data_limits_without_permission_and_outside_wire_bounds() {
         ));
     }
 }
+
+#[test]
+fn transform_capabilities_can_provide_referenced_output_data_under_the_same_grants() {
+    let (_, mut endpoint, mut grant) = fixture(Some(limits()));
+    endpoint.manifest.capabilities[0].contract = CapabilityContract::Transform {
+        accepts: vec![SchemaId(DATA_REFERENCE_SCHEMA.into())],
+        emits: vec![SchemaId(DATA_REFERENCE_SCHEMA.into())],
+    };
+    grant.ingress_source_kind = None;
+    let mut schemas = SchemaRegistry::with_bundled_schemas().unwrap();
+    schemas.register_json(DATA_REFERENCE_SCHEMA_JSON).unwrap();
+    let mut registry = AdapterRegistry::new();
+    registry
+        .register(
+            endpoint.manifest.clone(),
+            grant,
+            &schemas,
+            &SqliteArtifactStore::in_memory().unwrap(),
+        )
+        .unwrap();
+    let mut bytes = Vec::new();
+    assert_eq!(
+        DataService::new(&registry)
+            .copy(&endpoint, &capability(), &reference(), &mut bytes)
+            .unwrap(),
+        reference().size_bytes
+    );
+    assert_eq!(bytes.len(), reference().size_bytes as usize);
+}

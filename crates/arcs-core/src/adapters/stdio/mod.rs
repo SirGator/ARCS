@@ -1,6 +1,6 @@
 //! Vom Betreiber gestarteter Child-Prozess, gebunden an genau einen Grant.
 //! stdio ist hier eine lokale Prozessgrenze; Netzwerk-Authentifizierung und
-//! die Wire-Verträge für Reasoning und Output sind spätere Schritte.
+//! die Wire-Verträge für Input und Reasoning sind spätere Schritte.
 
 pub mod protocol;
 
@@ -17,8 +17,10 @@ use crate::adapters::{
     AdapterRegistry, AdapterRegistryError,
 };
 use crate::core::SchemaRegistry;
+use crate::output::{OutputAdapter, OutputInvocation, OutputResponse};
 use crate::request::{RequestAdapter, RequestInvocation, RequestResponse};
 use crate::store::SqliteArtifactStore;
+use crate::transform::{TransformAdapter, TransformInvocation, TransformResponse};
 use crate::world::observation::{ObservationError, ObservationService, RecordedObservation};
 
 use protocol::{
@@ -218,6 +220,62 @@ impl DataAdapter for StdioAdapter {
         {
             AdapterMessage::DataChunk { chunk } if chunk.matches(request) => Ok(chunk),
             _ => Err(self.protocol_error("invalid data chunk type, identity, offset or length")),
+        }
+    }
+}
+
+impl OutputAdapter for StdioAdapter {
+    fn manifest(&self) -> &AdapterManifest {
+        &self.manifest
+    }
+    fn deliver(&self, invocation: &OutputInvocation) -> Result<OutputResponse, AdapterCallError> {
+        if invocation.capability.adapter_id != self.manifest.adapter_id {
+            return Err(AdapterCallError::Protocol(
+                "output endpoint identity mismatch".into(),
+            ));
+        }
+        match self
+            .exchange(HostMessage::Output {
+                invocation: invocation.clone(),
+            })
+            .map_err(call_error)?
+        {
+            AdapterMessage::OutputResult { response }
+                if response.invocation_id == invocation.invocation_id =>
+            {
+                Ok(response)
+            }
+            _ => Err(self.protocol_error("invalid output response type or invocation ID")),
+        }
+    }
+}
+
+impl TransformAdapter for StdioAdapter {
+    fn manifest(&self) -> &AdapterManifest {
+        &self.manifest
+    }
+
+    fn transform(
+        &self,
+        invocation: &TransformInvocation,
+    ) -> Result<TransformResponse, AdapterCallError> {
+        if invocation.capability.adapter_id != self.manifest.adapter_id {
+            return Err(AdapterCallError::Protocol(
+                "transform endpoint identity mismatch".into(),
+            ));
+        }
+        match self
+            .exchange(HostMessage::Transform {
+                invocation: invocation.clone(),
+            })
+            .map_err(call_error)?
+        {
+            AdapterMessage::TransformResult { response }
+                if response.invocation_id == invocation.invocation_id =>
+            {
+                Ok(response)
+            }
+            _ => Err(self.protocol_error("invalid transform result type or invocation ID")),
         }
     }
 }

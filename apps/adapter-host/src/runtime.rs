@@ -15,6 +15,7 @@ use arcs::execution::ExecutionService;
 use arcs::input::{InputMessage, InputService};
 use arcs::request::RequestService;
 use arcs::store::{ArtifactRelations, SqliteArtifactStore, relation_kinds};
+use arcs::transform::TransformService;
 use arcs::world::observation::{ObservationLog, ObservationService};
 use arcs::world::{WorldReducer, WorldState};
 use serde::Serialize;
@@ -22,12 +23,22 @@ use serde_json::{Value, json};
 
 use crate::HostError;
 use crate::config::{
-    DEFINITION_SCHEMA, HOST_ID, PollingConfig, PreparedAdapter, PreparedConfig, RequestConfig,
+    DEFINITION_SCHEMA, HOST_ID, PollingConfig, PreparedAdapter, PreparedConfig,
+    TRANSFORM_DEFINITION_SCHEMA,
 };
 
 #[derive(Debug, Clone, Serialize)]
 pub struct RequestReport {
     pub id: String,
+    pub version_id: VersionId,
+    pub schema_id: SchemaId,
+    pub payload: Value,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TransformReport {
+    pub id: String,
+    pub input_version_id: VersionId,
     pub version_id: VersionId,
     pub schema_id: SchemaId,
     pub payload: Value,
@@ -42,6 +53,7 @@ pub struct AdapterReport {
     pub observations_replayed: u64,
     pub poll_limit_hits: u64,
     pub requests: Vec<RequestReport>,
+    pub transforms: Vec<TransformReport>,
 }
 
 #[derive(Debug, Serialize)]
@@ -103,6 +115,22 @@ fn register_host(
             required_permissions: vec![],
         });
     }
+    capabilities.push(CapabilityDescriptor {
+        id: CapabilityId("transform.definition".into()),
+        contract: CapabilityContract::Input {
+            emits: vec![SchemaId(TRANSFORM_DEFINITION_SCHEMA.into())],
+        },
+        required_permissions: vec![],
+    });
+    for transform in adapters.iter().flat_map(|adapter| &adapter.transforms) {
+        capabilities.push(CapabilityDescriptor {
+            id: CapabilityId(format!("transform.input.{}", transform.id)),
+            contract: CapabilityContract::Input {
+                emits: vec![transform.input_schema_id.clone()],
+            },
+            required_permissions: vec![],
+        });
+    }
     let grant = AdapterGrant {
         adapter_id: AdapterId(HOST_ID.into()),
         producer_class: ProducerClass::System,
@@ -130,7 +158,7 @@ fn register_host(
         .map_err(HostError::Registration)
 }
 
-fn validate_requests(
+fn validate_operations(
     registry: &AdapterRegistry,
     config: &PreparedAdapter,
 ) -> Result<(), HostError> {
@@ -153,10 +181,74 @@ fn validate_requests(
             )));
         }
     }
+    for transform in &config.transforms {
+        let (_, descriptor) = registry
+            .authorized_capability(&config.grant.adapter_id, &transform.capability_id)
+            .map_err(HostError::Registration)?;
+        let CapabilityContract::Transform { accepts, emits } = &descriptor.contract else {
+            return Err(invalid(format!(
+                "{} is not a Transform capability for {}",
+                transform.capability_id.0, transform.id
+            )));
+        };
+        if !accepts.contains(&transform.input_schema_id)
+            || !emits.contains(&transform.output_schema_id)
+        {
+            return Err(invalid(format!(
+                "schema contract mismatch for transform {}",
+                transform.id
+            )));
+        }
+    }
     Ok(())
 }
 
 impl Host {
+    pub fn prepare_output(
+        &mut self,
+        capability: &CapabilityRef,
+        input: &VersionId,
+        result_schema: &SchemaId,
+    ) -> Result<Artifact, HostError> {
+        arcs::output::OutputService::new(
+            &self.registry,
+            &self.schemas,
+            &self.store,
+            &mut self.ids,
+            &SystemClock,
+        )
+        .prepare(capability, input, result_schema)
+        .map_err(|source| HostError::Output {
+            adapter: capability.adapter_id.clone(),
+            source,
+        })
+    }
+
+    pub fn deliver_output(
+        &mut self,
+        adapter_id: &AdapterId,
+        request: &VersionId,
+        approval: &VersionId,
+    ) -> Result<Artifact, HostError> {
+        let adapter = self
+            .adapters
+            .iter()
+            .find(|adapter| adapter.config.grant.adapter_id == *adapter_id)
+            .ok_or_else(|| invalid(format!("unknown adapter {}", adapter_id.0)))?;
+        arcs::output::OutputService::new(
+            &self.registry,
+            &self.schemas,
+            &self.store,
+            &mut self.ids,
+            &SystemClock,
+        )
+        .deliver(&adapter.endpoint, request, approval)
+        .map_err(|source| HostError::Output {
+            adapter: adapter_id.clone(),
+            source,
+        })
+    }
+
     /// Kopiert referenzierte Daten unter den aktuellen Grants. Schreibt keine
     /// neuen World-Observations und erteilt keine zusätzlichen Berechtigungen.
     pub fn copy_data(
@@ -221,7 +313,7 @@ impl Host {
                 adapter: adapter_id.clone(),
                 source,
             })?;
-            validate_requests(&registry, &prepared)?;
+            validate_operations(&registry, &prepared)?;
             let report = AdapterReport {
                 adapter_id,
                 enabled_capabilities: prepared.grant.enabled_capabilities.clone(),
@@ -230,6 +322,7 @@ impl Host {
                 observations_replayed: 0,
                 poll_limit_hits: 0,
                 requests: vec![],
+                transforms: vec![],
             };
             adapters.push(RunningAdapter {
                 config: prepared,
@@ -263,7 +356,7 @@ impl Host {
 
     fn input(
         &mut self,
-        request: &RequestConfig,
+        input_id: &str,
         capability: &str,
         subject: &str,
         payload: Value,
@@ -280,12 +373,12 @@ impl Host {
             InputMessage {
                 capability_id: CapabilityId(capability.into()),
                 external_subject: Some(subject.into()),
-                external_reference: format!("configured-request:{}", request.id),
+                external_reference: format!("configured-request:{input_id}"),
                 payload,
             },
         )
         .map_err(|source| HostError::Input {
-            request: request.id.clone(),
+            request: input_id.into(),
             source,
         })
     }
@@ -309,13 +402,13 @@ impl Host {
             .ok_or_else(|| invalid(format!("unknown request ID {request_id}")))?;
         let adapter_id = self.adapters[index].config.grant.adapter_id.clone();
         let definition = self.input(
-            &request,
+            &request.id,
             "request.definition",
             &request.id,
             json!({"adapter_id": adapter_id, "request": request}),
         )?;
         let input = self.input(
-            &request,
+            &request.id,
             &format!("request.input.{}", request.id),
             &request.subject,
             request.payload.clone(),
@@ -362,6 +455,101 @@ impl Host {
         report.retain(|previous| previous.id != request_id);
         report.push(RequestReport {
             id: request.id,
+            version_id: result.version_id.clone(),
+            schema_id: result.schema_id.clone(),
+            payload: result.payload.clone(),
+        });
+        Ok(result)
+    }
+
+    /// Verarbeitet ein bereits gespeichertes Artefakt über eine freigegebene
+    /// Transform-Capability. Fachliche Adapterpakete werden nicht eingebunden.
+    pub fn transform(
+        &mut self,
+        capability: &CapabilityRef,
+        input: &VersionId,
+        output_schema: &SchemaId,
+    ) -> Result<Artifact, HostError> {
+        let adapter = self
+            .adapters
+            .iter()
+            .find(|adapter| adapter.config.grant.adapter_id == capability.adapter_id)
+            .ok_or_else(|| invalid(format!("unknown adapter {}", capability.adapter_id.0)))?;
+        TransformService::new(
+            &self.registry,
+            &self.schemas,
+            &self.store,
+            &mut self.ids,
+            &SystemClock,
+        )
+        .execute(&adapter.endpoint, capability, input, output_schema)
+        .map_err(|source| HostError::Transform {
+            adapter: capability.adapter_id.clone(),
+            source,
+        })
+    }
+
+    /// Eine konfigurierte ID bezeichnet eine dauerhafte Definition. Geänderte
+    /// Parameter benötigen eine neue ID, wie bei konfigurierten Requests.
+    pub fn transform_configured(&mut self, id: &str) -> Result<Artifact, HostError> {
+        let (index, transform) = self
+            .adapters
+            .iter()
+            .enumerate()
+            .find_map(|(index, adapter)| {
+                adapter
+                    .config
+                    .transforms
+                    .iter()
+                    .find(|transform| transform.id == id)
+                    .cloned()
+                    .map(|transform| (index, transform))
+            })
+            .ok_or_else(|| invalid(format!("unknown transform ID {id}")))?;
+        let adapter_id = self.adapters[index].config.grant.adapter_id.clone();
+        let definition = self.input(
+            &format!("transform-definition:{id}"),
+            "transform.definition",
+            id,
+            json!({"adapter_id": adapter_id, "transform": transform}),
+        )?;
+        let input = self.input(
+            &format!("transform-input:{id}"),
+            &format!("transform.input.{id}"),
+            &transform.subject,
+            transform.payload.clone(),
+        )?;
+        let relations = ArtifactRelations::new(&self.store);
+        if !relations
+            .outgoing(&input.version_id)
+            .map_err(HostError::Store)?
+            .iter()
+            .any(|relation| {
+                relation.to == definition.version_id
+                    && relation.kind == relation_kinds::supported_by()
+            })
+        {
+            relations
+                .connect(
+                    input.version_id.clone(),
+                    definition.version_id,
+                    relation_kinds::supported_by(),
+                )
+                .map_err(HostError::Store)?;
+        }
+        let result = self.transform(
+            &CapabilityRef {
+                adapter_id,
+                capability_id: transform.capability_id,
+            },
+            &input.version_id,
+            &transform.output_schema_id,
+        )?;
+        let report = &mut self.adapters[index].report.transforms;
+        report.retain(|previous| previous.id != id);
+        report.push(TransformReport {
+            id: id.into(),
+            input_version_id: input.version_id,
             version_id: result.version_id.clone(),
             schema_id: result.schema_id.clone(),
             payload: result.payload.clone(),
@@ -495,7 +683,7 @@ impl Host {
         })
     }
 
-    /// Führt konfigurierte Abfragen einmal und danach die Polling-Runden aus.
+    /// Führt konfigurierte Abfragen und Transforms einmal und danach die Polling-Runden aus.
     /// Alle Prozesse werden vor Rückgabe beendet, auch bei Fehlern via Drop.
     pub fn run(mut self) -> Result<HostReport, HostError> {
         let requests: Vec<_> = self
@@ -506,6 +694,15 @@ impl Host {
             .collect();
         for id in requests {
             self.request(&id)?;
+        }
+        let transforms: Vec<_> = self
+            .adapters
+            .iter()
+            .flat_map(|adapter| &adapter.config.transforms)
+            .map(|transform| transform.id.clone())
+            .collect();
+        for id in transforms {
+            self.transform_configured(&id)?;
         }
         for round in 0..self.polling.rounds {
             self.poll_round()?;

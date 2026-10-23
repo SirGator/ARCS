@@ -12,10 +12,12 @@ erste große Anwendungsziel.
 | Gemeinsame IDs, Manifeste, Capability-Verträge und Nachrichten | `crates/arcs-adapter-protocol` |
 | Grants, Schema-Prüfung und kontrollierte Ausführung | `crates/arcs-core` |
 | Konfigurierbarer Host für mehrere externe Adapter | `apps/adapter-host` |
-| Gemeinsame Adapter-Session mit Observe-, Request- und Act-Callbacks | `crates/arcs-adapter-sdk` |
+| Gemeinsame Adapter-Session mit Observe-, Request-, Transform-, Output- und Act-Callbacks | `crates/arcs-adapter-sdk` |
+| Deterministische Verarbeitung mit Provenienz, Trust-Grenze und Replay | `TransformService` und `adapters/normalize-number` |
 | Referenzierte Binärdaten und begrenzter Abruf unter separatem Grant | Protokoll, SDK, `DataService` und `Host::copy_data` |
 | Allgemeine Datenquelle mit persistenten Snapshots und Metadaten-ACK | `adapters/file-data` |
-| Zwei verschiedene Nutzer des SDK | Sensor und Lüfter unter `adapters/` |
+| Kontrollierte Ausgabe mit zielgebundener Freigabe und Empfangsbeleg | `OutputService` und `adapters/file-output` |
+| Verschiedene Nutzer desselben SDK | Sensor, Lüfter, Dateiquelle, Zahlen-Normalisierer und Dateiausgabe unter `adapters/` |
 
 Das SDK übernimmt die wiederkehrende Protokollarbeit. Ein Treiber ergänzt
 sein Manifest und die fachlichen Operationen. Derselbe Adapter kann mehrere
@@ -31,10 +33,14 @@ erzeugt keine Autorität und prüft keine Suchstrategie.
 1. Die gemeinsame Basis mit den bestehenden Sensor- und Lüfterfällen
    nachweisen: Observe mit ACK und Replay, Request und freigegebene Act-Aufträge,
    korrelierte Fehler sowie abgewiesene falsche Capabilities.
-2. Weitere allgemeine Rollen nach Bedarf durchgängig ergänzen. Input,
-   Transform, Reason und Output sind im Manifestvertrag vorhanden;
-   ihre Unterstützung im stdio-Transport muss gesondert umgesetzt werden.
-   Der erste SDK-Ausbau unterstützt Observe, Request und Act.
+2. Transform ist inzwischen durchgängig implementiert: persistierte Eingabe,
+   externer Aufruf, geprüfte Ausgabe, Provenienz und dauerhaftes Replay.
+   Der erste Nachweis normalisiert Zahlen mit unterschiedlichen Parametern
+   und Einheiten. Output ist ebenfalls durchgängig umgesetzt: gebundener
+   Ausgabeauftrag, separate Prüfung und Freigabe, externer Treiber und
+   dauerhafter Beleg. Die Dateiausgabe weist Idempotenz und Recovery nach.
+   Input und Reason sind im Manifestvertrag vorhanden; ihre Unterstützung
+   im stdio-Transport muss gesondert umgesetzt werden.
 3. Referenzierte Binärdaten sind als allgemeiner Vertrag implementiert.
    Der blockweise Abruf berücksichtigt Frame-Limits und gesonderte
    Datenlimits des Grants. Die Dateiquelle und das Exportbeispiel weisen
@@ -63,3 +69,5 @@ nutzbar und unabhängig nachgewiesen sein.
 Details zur Implementierung stehen in der
 [SDK-Dokumentation](../crates/arcs-adapter-sdk/README.md), der langfristige
 Anwendungsnachweis im [Plan für die Drohnensuche](DRONE_SEARCH.md).
+Der [Transform-Nachweis](../adapters/normalize-number/README.md) beschreibt
+die neue allgemeine Verarbeitungsgrenze und ihre aktuellen Einschränkungen.

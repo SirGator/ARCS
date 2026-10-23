@@ -2,8 +2,9 @@ use std::io::Cursor;
 
 use arcs_adapter_protocol::{
     ActInvocation, ActResponse, AdapterId, AdapterManifest, CapabilityContract,
-    CapabilityDescriptor, CapabilityId, CapabilityRef, ObservationMessage, RequestInvocation,
-    RequestResponse, SchemaId, SubjectId, VersionId,
+    CapabilityDescriptor, CapabilityId, CapabilityRef, ObservationMessage, OutputInvocation,
+    OutputResponse, RequestInvocation, RequestResponse, SchemaId, SubjectId, TransformInvocation,
+    TransformResponse, VersionId,
     stdio::{
         AdapterMessage, Envelope, HostMessage, WIRE_VERSION, WireError, read_frame, write_frame,
     },
@@ -21,6 +22,23 @@ fn manifest() -> AdapterManifest {
         adapter_id: AdapterId("test.device".into()),
         adapter_version: "1.0.0".into(),
         capabilities: vec![
+            CapabilityDescriptor {
+                id: CapabilityId("deliver".into()),
+                contract: CapabilityContract::Output {
+                    accepts: vec![schema("state")],
+                    emits: vec![schema("result")],
+                    idempotent: true,
+                },
+                required_permissions: vec!["output.write".into()],
+            },
+            CapabilityDescriptor {
+                id: CapabilityId("normalize".into()),
+                contract: CapabilityContract::Transform {
+                    accepts: vec![schema("query")],
+                    emits: vec![schema("state")],
+                },
+                required_permissions: vec![],
+            },
             CapabilityDescriptor {
                 id: CapabilityId("observe".into()),
                 contract: CapabilityContract::Observe {
@@ -55,6 +73,8 @@ struct Device {
     acks: usize,
     requests: usize,
     executions: usize,
+    transforms: usize,
+    outputs: usize,
     data_reads: usize,
     acknowledged: bool,
     wrong_response: bool,
@@ -62,6 +82,33 @@ struct Device {
 }
 
 impl Adapter for Device {
+    fn output(&mut self, invocation: OutputInvocation) -> Result<OutputResponse, AdapterError> {
+        self.outputs += 1;
+        Ok(OutputResponse {
+            invocation_id: if self.wrong_response {
+                "wrong".into()
+            } else {
+                invocation.invocation_id
+            },
+            external_reference: "output:1".into(),
+            result_payload: json!({"delivered":true}),
+        })
+    }
+    fn transform(
+        &mut self,
+        invocation: TransformInvocation,
+    ) -> Result<TransformResponse, AdapterError> {
+        self.transforms += 1;
+        Ok(TransformResponse {
+            invocation_id: if self.wrong_response {
+                "wrong".into()
+            } else {
+                invocation.invocation_id
+            },
+            external_reference: "normalized:1".into(),
+            payload: json!({"value":1}),
+        })
+    }
     fn read_data(
         &mut self,
         request: arcs_adapter_protocol::DataRead,
@@ -548,4 +595,178 @@ fn invalid_data_requests_do_not_reach_the_driver() {
         assert_error(message, "invalid_request");
     }
     assert_eq!(device.data_reads, 0);
+}
+
+fn transform() -> TransformInvocation {
+    TransformInvocation {
+        invocation_id: "transform-1".into(),
+        capability: CapabilityRef::new("test.device", "normalize"),
+        input_version_id: VersionId("input-v1".into()),
+        input_schema_id: schema("query"),
+        input_payload: json!({}),
+        output_schema_id: schema("state"),
+        max_output_bytes: 1024,
+    }
+}
+
+#[test]
+fn sdk_dispatches_transform_and_validates_result_correlation_and_limits() {
+    let mut device = Device::default();
+    let messages = session(
+        &mut device,
+        vec![
+            HostMessage::Hello,
+            HostMessage::Transform {
+                invocation: transform(),
+            },
+            HostMessage::Shutdown,
+        ],
+    );
+    assert!(
+        matches!(&messages[1],AdapterMessage::TransformResult {response} if response.invocation_id=="transform-1")
+    );
+    device.wrong_response = true;
+    let messages = session(
+        &mut device,
+        vec![
+            HostMessage::Hello,
+            HostMessage::Transform {
+                invocation: transform(),
+            },
+            HostMessage::Shutdown,
+        ],
+    );
+    assert_error(&messages[1], "invalid_response");
+    device.wrong_response = false;
+    let mut invocation = transform();
+    invocation.max_output_bytes = 1;
+    let messages = session(
+        &mut device,
+        vec![
+            HostMessage::Hello,
+            HostMessage::Transform { invocation },
+            HostMessage::Shutdown,
+        ],
+    );
+    assert_error(&messages[1], "invalid_response");
+    assert_eq!(device.transforms, 3);
+}
+
+#[test]
+fn sdk_rejects_transform_role_schema_and_identity_mismatches_before_callback() {
+    let mut messages = vec![
+        HostMessage::Transform {
+            invocation: transform(),
+        },
+        HostMessage::Hello,
+    ];
+    for change in 0..6 {
+        let mut invocation = transform();
+        match change {
+            0 => invocation.capability.adapter_id.0 = "other".into(),
+            1 => invocation.capability.capability_id.0 = "set".into(),
+            2 => invocation.input_schema_id = schema("other"),
+            3 => invocation.output_schema_id = schema("other"),
+            4 => invocation.invocation_id.clear(),
+            _ => invocation.input_version_id.0.clear(),
+        }
+        messages.push(HostMessage::Transform { invocation });
+    }
+    messages.push(HostMessage::Shutdown);
+    let mut device = Device::default();
+    let messages = session(&mut device, messages);
+    assert_error(&messages[0], "invalid_state");
+    for message in &messages[2..8] {
+        assert_error(message, "invalid_request");
+    }
+    assert_eq!(device.transforms, 0);
+}
+
+fn output() -> OutputInvocation {
+    OutputInvocation {
+        invocation_id: "output-1".into(),
+        capability: CapabilityRef::new("test.device", "deliver"),
+        request_version_id: VersionId("output-request-v1".into()),
+        approval_version_id: VersionId("approval-v1".into()),
+        artifact_version_id: VersionId("report-v1".into()),
+        artifact_schema_id: schema("state"),
+        subject: None,
+        payload: json!({"value":1}),
+        result_schema_id: schema("result"),
+        max_result_bytes: 1024,
+    }
+}
+
+#[test]
+fn output_dispatch_checks_response_correlation_and_limits() {
+    let mut device = Device::default();
+    let messages = session(
+        &mut device,
+        vec![
+            HostMessage::Hello,
+            HostMessage::Output {
+                invocation: output(),
+            },
+            HostMessage::Shutdown,
+        ],
+    );
+    assert!(
+        matches!(&messages[1],AdapterMessage::OutputResult {response} if response.invocation_id=="output-1")
+    );
+    device.wrong_response = true;
+    let messages = session(
+        &mut device,
+        vec![
+            HostMessage::Hello,
+            HostMessage::Output {
+                invocation: output(),
+            },
+            HostMessage::Shutdown,
+        ],
+    );
+    assert_error(&messages[1], "invalid_response");
+    device.wrong_response = false;
+    let mut invocation = output();
+    invocation.max_result_bytes = 1;
+    let messages = session(
+        &mut device,
+        vec![
+            HostMessage::Hello,
+            HostMessage::Output { invocation },
+            HostMessage::Shutdown,
+        ],
+    );
+    assert_error(&messages[1], "invalid_response");
+    assert_eq!(device.outputs, 3);
+}
+
+#[test]
+fn malformed_output_requests_do_not_reach_the_sink_callback() {
+    let mut messages = vec![
+        HostMessage::Output {
+            invocation: output(),
+        },
+        HostMessage::Hello,
+    ];
+    for change in 0..7 {
+        let mut invocation = output();
+        match change {
+            0 => invocation.capability.adapter_id.0 = "other".into(),
+            1 => invocation.capability.capability_id.0 = "set".into(),
+            2 => invocation.artifact_schema_id = schema("wrong"),
+            3 => invocation.result_schema_id = schema("wrong"),
+            4 => invocation.request_version_id.0.clear(),
+            5 => invocation.approval_version_id.0.clear(),
+            _ => invocation.artifact_version_id.0.clear(),
+        }
+        messages.push(HostMessage::Output { invocation });
+    }
+    messages.push(HostMessage::Shutdown);
+    let mut device = Device::default();
+    let messages = session(&mut device, messages);
+    assert_error(&messages[0], "invalid_state");
+    for message in &messages[2..9] {
+        assert_error(message, "invalid_request");
+    }
+    assert_eq!(device.outputs, 0);
 }

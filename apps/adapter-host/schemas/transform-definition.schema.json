@@ -1,0 +1,10 @@
+{
+  "$id": "arcs.input.host_transform.v1",
+  "type": "object",
+  "required": ["adapter_id", "transform"],
+  "properties": {
+    "adapter_id": {"type":"string","minLength":1},
+    "transform": {"type":"object"}
+  },
+  "additionalProperties": false
+}

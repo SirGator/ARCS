@@ -1,0 +1,12 @@
+{
+  "config_version":1,
+  "database":"../../../var/output-host.sqlite",
+  "node_id":"output-host",
+  "schemas":["../../../adapters/file-output/schemas/report.schema.json","../../../adapters/file-output/schemas/receipt.schema.json"],
+  "adapters":[{
+    "program":"../../../target/debug/arcs-file-output",
+    "profile":"../../../adapters/file-output/config/profile.json",
+    "args":[{"path":"../../../var/output-journal.sqlite"}],
+    "grant_file":"grants/output.json"
+  }]
+}

@@ -47,6 +47,12 @@ World-State-Replay sowie die kontrollierte Ausführung freigegebener Actions.
 Für größere Inhalte gibt es außerdem allgemeine Datenreferenzen und einen
 begrenzten, gesondert freigegebenen Abruf. Die Dateiquelle weist diesen Weg
 mit persistenten Snapshots nach; sie erzeugt und analysiert keine Kamerabilder.
+Ein allgemeiner Transform-Port verarbeitet inzwischen persistierte Eingaben
+über externe Adapter und speichert abgeleitete Ergebnisse mit Provenienz.
+Das Zahlen-Beispiel weist diese Grenze ohne Drohnen- oder Kamerawissen nach.
+Ein allgemeiner Output-Port kann freigegebene Ergebnisse inzwischen an eine
+Ausgabesenke liefern. Die Dateiausgabe demonstriert das mit gebundenem Auftrag,
+separater Verification und Approval sowie einem dauerhaften Zustellungsbeleg.
 
 Noch nicht vorhanden sind eine Raum- und Drohnensimulation, eine Kamera,
 Bildwahrnehmung, ein Suchauftrag und eine fortlaufende Suchsteuerung.

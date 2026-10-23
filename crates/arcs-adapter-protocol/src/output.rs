@@ -9,11 +9,14 @@ pub struct OutputInvocation {
     pub invocation_id: String,
     /// Exakt die vom Core autorisierte Ausgabefähigkeit dieses Auftrags.
     pub capability: CapabilityRef,
+    pub request_version_id: VersionId,
+    pub approval_version_id: VersionId,
     pub artifact_version_id: VersionId,
     pub artifact_schema_id: SchemaId,
     pub subject: Option<SubjectId>,
     pub payload: Value,
     pub result_schema_id: SchemaId,
+    pub max_result_bytes: usize,
 }
 
 /// Korrelierte Empfangsbestätigung des Output-Adapters.

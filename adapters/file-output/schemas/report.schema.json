@@ -1,0 +1,1 @@
+{"$id":"arcs.report.v1","type":"object","required":["title","body"],"properties":{"title":{"type":"string","minLength":1},"body":{"type":"string"}},"additionalProperties":false}

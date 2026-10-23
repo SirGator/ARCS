@@ -11,6 +11,7 @@ pub mod output;
 pub mod reasoning;
 pub mod request;
 pub mod stdio;
+pub mod transform;
 
 pub use act::*;
 pub use data::*;
@@ -21,3 +22,4 @@ pub use observation::*;
 pub use output::*;
 pub use reasoning::*;
 pub use request::*;
+pub use transform::*;

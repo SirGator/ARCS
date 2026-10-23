@@ -1,0 +1,13 @@
+{
+  "$id":"arcs.output_request.v1",
+  "type":"object",
+  "required":["artifact_version_id","artifact_schema_id","capability","result_schema_id","manifest"],
+  "properties":{
+    "artifact_version_id":{"type":"string","minLength":1},
+    "artifact_schema_id":{"type":"string","minLength":1},
+    "capability":{"type":"object"},
+    "result_schema_id":{"type":"string","minLength":1},
+    "manifest":{"type":"object"}
+  },
+  "additionalProperties":false
+}

@@ -14,6 +14,8 @@ und überschreibt die benötigten Methoden:
 | `poll` | Eine ausstehende Observation anbieten; ohne Daten `None` liefern |
 | `acknowledge` | Eine bekannte Observation nach dem Host-Commit wiederholbar bestätigen |
 | `request` | Eine gezielte Datenabfrage beantworten |
+| `transform` | Einen geprüften Payload deterministisch in einen Ergebnis-Payload übersetzen |
+| `output` | Einen bereits autorisierten Ausgabeauftrag dauerhaft idempotent zustellen |
 | `execute` | Einen autorisierten Auftrag fachlich prüfen und idempotent ausführen |
 | `read_data` | Unveränderliche referenzierte Daten als begrenzten Block liefern |
 
@@ -65,8 +67,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-`poll` liefert standardmäßig keine Daten. Nicht implementierte Request-,
-Action-, Datenabruf- und ACK-Methoden liefern `unsupported_operation`. Ein Adapter soll
+`poll` liefert standardmäßig keine Daten. Nicht implementierte Request-, Transform-,
+Output-, Action-, Datenabruf- und ACK-Methoden liefern `unsupported_operation`. Ein Adapter soll
 nur tatsächlich unterstützte Capabilities anbieten. Logs gehören nach stderr.
 
 `AdapterError::rejected` kennzeichnet einen abgewiesenen Auftrag,
@@ -85,15 +87,33 @@ gemacht. Dafür gelten die Recovery-Verträge des jeweiligen Treibers.
 
 Anwendungsbeispiele liegen in `adapters/simulated-sensor/src/main.rs` und
 `adapters/simulated-fan/src/main.rs`. Beide verwenden dieselbe `serve`-Funktion.
-Weitere Rollen wie Reasoning, Transform und Output sind im Manifestvertrag
+Weitere Rollen wie Input und Reasoning sind im Manifestvertrag
 beschreibbar, haben aber noch keine Nachrichten und Callbacks in diesem
 stdio-SDK.
 
 Für referenzierte Binärdaten prüft das SDK zusätzlich Referenzform,
 Capability-Typ, Blockgröße, Offset und Antwortlänge. `read_data` wird für
-Observe- und Request-Capabilities unterstützt. Die Quelle muss die exakten
+Observe-, Request- und Transform-Capabilities unterstützt. Die Quelle muss die exakten
 Metadaten einer bekannten Referenz prüfen und ihre Bytes unverändert
 aufbewahren. Grants und Datenlimits prüft der Host; das SDK vergibt keine
 eigenen Leserechte. Ein Beispiel mit persistenten Snapshots liegt in
 `adapters/file-data`. Die vollständigen Nachrichten stehen im
 [Adapterprotokoll](../../ADAPTER_PROTOCOL.md#referenzierte-daten).
+
+Für einen Transform implementiert der Adapter `transform(TransformInvocation)`.
+Das SDK prüft Adapter-ID, Capability-Typ, Eingabe-/Ausgabeschema-IDs und
+Antwortkorrelation. Der Adapter validiert seine fachlichen Eingaben und
+arbeitet ohne externe Effekte. Alle Parameter müssen in der Eingabe oder
+einer eindeutig versionierten Implementierung festgelegt sein. Die gleiche
+Invocation muss auch nach Neustarts dasselbe Ergebnis liefern können.
+Grants, Trust, Herkunft und die Ergebnis-Persistenz setzt der Host/Core.
+Ein vollständiges Beispiel liegt unter `adapters/normalize-number`.
+
+Für eine Ausgabe implementiert der Adapter `output(OutputInvocation)` und
+liefert `OutputResponse`. Das SDK prüft den Output-Capability-Typ,
+Schema-IDs, Pflichtreferenzen, Korrelation und Resultatlimit. Verification,
+Approval und Grants prüft der Core vor der Zustellung. Ein Treiber muss
+verlorene Antworten und Prozessneustarts anhand der Invocation-ID erkennen
+und darf dieselbe Zustellung nicht erneut wirken lassen. Die Dateiausgabe
+unter `adapters/file-output` zeigt ein persistentes Journal samt atomarer
+Dateiveröffentlichung und Wiederherstellung zwischen beiden Schritten.

@@ -159,6 +159,92 @@ begrenzt. Die Capability muss freigegeben sein und tatsächlich den Typ
 `Request` mit passenden Eingabe- und Ausgabeschemas anbieten. Eine `Act`-
 Capability kann durch einen Eintrag unter `requests` nicht ausgeführt werden.
 
+## Konfigurierte Transforms
+
+`config/transform.json` startet den allgemeinen Zahlen-Normalisierer. Der
+Host lädt dessen Schemas und Grant, persistiert Definition und Eingabe und
+verwendet anschließend `TransformService`:
+
+```bash
+cargo build --locked --workspace --bins
+cargo run --locked -p arcs-host -- --config apps/adapter-host/config/transform.json
+```
+
+Ein Adapter kann eine Liste `transforms` erhalten:
+
+```json
+{
+  "transforms": [{
+    "id":"normalize-1",
+    "capability_id":"number.normalize",
+    "input_schema_id":"arcs.number.raw.v1",
+    "output_schema_id":"arcs.number.normalized.v1",
+    "subject":"measurement-1",
+    "payload":{"value":310.0,"scale":0.1,"offset":0.0,"unit":"Cel"}
+  }]
+}
+```
+
+Die ID bezeichnet eine dauerhafte Definition. Geänderte Parameter oder
+Ziele unter derselben ID sind ein Identitätskonflikt; ein neuer Auftrag
+benötigt eine neue ID. Request- und Transform-IDs sind innerhalb der Datei
+gemeinsam eindeutig und verwenden 1 bis 64 ASCII-Buchstaben, Ziffern,
+Punkte, Unterstriche oder Bindestriche. Das Subject benötigt 1 bis 256
+steuerzeichenfreie UTF-8-Bytes, der konfigurierte Payload ist auf 60 KiB
+begrenzt. Zusätzlich gelten die engeren Grant-Limits.
+
+Nur eine tatsächlich deklarierte Transform-Capability mit passenden
+Schema-IDs darf verwendet werden. Requests und Actions lassen sich nicht
+als Transform ausführen. Die CLI führt erst konfigurierte Requests, danach
+Transforms und anschließend die Polling-Runden aus. Der Bericht enthält
+konfigurierte Ergebnisse unter `adapters[].transforms` mit Eingabe- und
+Ergebnisversion. Eine Ableitung aktualisiert den World-State nicht automatisch.
+
+`Host::transform(&CapabilityRef, &VersionId, &SchemaId)` verarbeitet dagegen
+ein bereits persistiertes Artefakt. Anwendungen können damit zum Beispiel
+nach einer Polling-Runde Beobachtungen anderer Adapter verarbeiten. Es gibt
+keine automatische Verkettung anhand von Schemanamen und kein implizites
+Nachladen referenzierter Binärdaten. `transform_configured(id)` ergänzt
+Definition, Input und CLI-Bericht für einen konfigurierten Auftrag.
+
+Die Details zu Trust, Replay und Kontrollgrenzen stehen im
+[Transform-Beispiel](../../adapters/normalize-number/README.md).
+
+## Kontrollierte Ausgabe
+
+`config/output.json` verbindet die allgemeine Dateiausgabe. Der normale
+CLI-Lauf veröffentlicht noch keinen Bericht. Eine Anwendung erstellt mit
+`prepare_output(&CapabilityRef, &VersionId, &SchemaId)` einen gebundenen
+Ausgabeauftrag, prüft diesen und erteilt ein gesondertes Approval.
+`deliver_output(&AdapterId, &request_version, &approval_version)` liefert ihn
+erst nach erneuter Core-Prüfung aus. Ein Grant allein löst keine Ausgabe aus.
+
+Ein vollständiges Beispiel mit ausdrücklich benannter lokaler System-Policy:
+
+```bash
+cargo build --locked --workspace --bins
+cargo run --locked -p arcs-host --example output-report -- \
+  apps/adapter-host/config/output.json \
+  report-1 apps/adapter-host/config/report.json
+```
+
+Die Policy `demo.output.local-file-policy` erlaubt ausschließlich den
+konkreten Report für `example.file-output/report.write`. Die Policy liegt
+im Beispielprogramm, der allgemeine Host erteilt keine impliziten Freigaben.
+Die Ausgabe enthält Auftrags-, Approval- und Belegversion. Der Report liegt
+als JSON unter `var/reports/`; identische Wiederholungen erzeugen keine
+zusätzliche Zieldatei. Geänderte Berichtsdaten brauchen eine neue Delivery-ID.
+
+Die Freigabe betrifft den Ausgabeauftrag samt Inhaltversion, Ziel-Capability
+und Manifest. Ein Approval nur des ursprünglichen Inhalts oder eines anderen
+Ziels genügt nicht. Die aktuelle Berechtigung wird auch vor einem Replay
+geprüft. Output ist ein eigener Port und keine alternative Act-Ausführung.
+Die Anwendung kann dessen Belege anschließend selbst weiterverarbeiten;
+der World-State ändert sich durch die Zustellung nicht automatisch.
+
+Profile, Journal und Recovery beschreibt die
+[Dateiausgabe-Dokumentation](../../adapters/file-output/README.md).
+
 ## Referenzierte Binärdaten
 
 `config/data.json` startet die allgemeine Dateiquelle. Sie veröffentlicht
@@ -179,7 +265,7 @@ auch nach einem früheren ACK und einem Neustart ausführen.
 
 Anwendungen verwenden `Host::copy_data(&CapabilityRef, &DataReference,
 &mut impl Write)`. Der Host prüft die aktuelle Registry, eine aktivierte
-Observe- oder Request-Capability, `data.read` sowie `data_limits` im Grant.
+Observe-, Request- oder Transform-Capability, `data.read` sowie `data_limits` im Grant.
 Ohne gesetzte Datenlimits ist der Inhalt gesperrt, auch wenn seine Referenz
 beobachtet werden darf. Ungültige Limits und die fehlende Permission werden
 bereits beim Laden der Konfiguration abgewiesen.
@@ -230,7 +316,8 @@ auch im Fehlerfall beendet; es gibt keine versteckten Retries oder Fallbacks.
 
 ## Einbindung in eine Anwendung
 
-Die Bibliothek `arcs_host` stellt `Host::open`, `request`, `poll_round`,
+Die Bibliothek `arcs_host` stellt `Host::open`, `request`, `transform`,
+`transform_configured`, `prepare_output`, `deliver_output`, `copy_data`, `poll_round`,
 `report`, `shutdown` und `execute_approved` bereit. Eine Anwendung kann mit
 den Core-Diensten ihre eigenen Vorschläge, Verification und Approvals
 erzeugen. `execute_approved` akzeptiert ausschließlich die Version einer

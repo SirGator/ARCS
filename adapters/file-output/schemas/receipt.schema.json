@@ -1,0 +1,1 @@
+{"$id":"arcs.delivery_receipt.file.v1","type":"object","required":["artifact_version","file_name","bytes_written","status"],"properties":{"artifact_version":{"type":"string","minLength":1},"file_name":{"type":"string","minLength":1},"bytes_written":{"type":"integer","minimum":1},"status":{"type":"string","enum":["delivered"]}},"additionalProperties":false}

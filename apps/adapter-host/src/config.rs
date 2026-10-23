@@ -11,6 +11,7 @@ use crate::HostError;
 
 pub(crate) const HOST_ID: &str = "arcs.host";
 pub(crate) const DEFINITION_SCHEMA: &str = "arcs.input.host_request.v1";
+pub(crate) const TRANSFORM_DEFINITION_SCHEMA: &str = "arcs.input.host_transform.v1";
 
 fn default_node() -> String {
     "adapter-host".into()
@@ -52,6 +53,8 @@ pub struct AdapterConfig {
     pub timeout_ms: u64,
     #[serde(default)]
     pub requests: Vec<RequestConfig>,
+    #[serde(default)]
+    pub transforms: Vec<TransformConfig>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -99,6 +102,17 @@ pub struct RequestConfig {
     pub payload: Value,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TransformConfig {
+    pub id: String,
+    pub capability_id: CapabilityId,
+    pub input_schema_id: SchemaId,
+    pub output_schema_id: SchemaId,
+    pub subject: String,
+    pub payload: Value,
+}
+
 pub(crate) struct PreparedConfig {
     pub database: PathBuf,
     pub node_id: String,
@@ -114,6 +128,7 @@ pub(crate) struct PreparedAdapter {
     pub grant: AdapterGrant,
     pub timeout_ms: u64,
     pub requests: Vec<RequestConfig>,
+    pub transforms: Vec<TransformConfig>,
 }
 
 fn invalid(message: impl Into<String>) -> HostError {
@@ -195,6 +210,12 @@ impl PreparedConfig {
             .register_json(include_str!("../schemas/request-definition.schema.json"))
             .map_err(|source| HostError::Schema {
                 path: "<host-request>".into(),
+                source,
+            })?;
+        schemas
+            .register_json(include_str!("../schemas/transform-definition.schema.json"))
+            .map_err(|source| HostError::Schema {
+                path: "<host-transform>".into(),
                 source,
             })?;
         for path in config.schemas {
@@ -313,6 +334,55 @@ impl PreparedConfig {
                     )));
                 }
             }
+            for transform in &adapter.transforms {
+                if !identifier(&transform.id, 64) || !request_ids.insert(transform.id.clone()) {
+                    return Err(invalid(
+                        "request and transform IDs must be globally unique and use 1..64 ASCII letters, digits, '.', '_' or '-'",
+                    ));
+                }
+                if transform.subject.trim().is_empty()
+                    || transform.subject.len() > 256
+                    || transform.subject.chars().any(char::is_control)
+                {
+                    return Err(invalid(format!(
+                        "invalid subject for transform {}",
+                        transform.id
+                    )));
+                }
+                if !capabilities.contains(&transform.capability_id) {
+                    return Err(invalid(format!(
+                        "transform {} capability is not enabled",
+                        transform.id
+                    )));
+                }
+                if schemas.get(&transform.output_schema_id).is_none() {
+                    return Err(invalid(format!(
+                        "unknown output schema for transform {}",
+                        transform.id
+                    )));
+                }
+                schemas
+                    .validate(&transform.input_schema_id, &transform.payload)
+                    .map_err(|violations| {
+                        invalid(format!(
+                            "transform {} payload: {violations:?}",
+                            transform.id
+                        ))
+                    })?;
+                if serde_json::to_vec(&transform.payload)
+                    .map_err(|source| HostError::Json {
+                        path: path.clone(),
+                        source,
+                    })?
+                    .len()
+                    > 60 * 1024
+                {
+                    return Err(invalid(format!(
+                        "transform {} input exceeds 60 KiB",
+                        transform.id
+                    )));
+                }
+            }
             adapters.push(PreparedAdapter {
                 program,
                 args,
@@ -320,6 +390,7 @@ impl PreparedConfig {
                 grant,
                 timeout_ms: adapter.timeout_ms,
                 requests: adapter.requests,
+                transforms: adapter.transforms,
             });
         }
         Ok(Self {

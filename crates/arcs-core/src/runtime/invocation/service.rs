@@ -10,6 +10,7 @@ use crate::store::{SqliteArtifactStore, StoreError};
 use super::InvocationStatus;
 
 const INVOCATION_SCHEMA_ID: &str = "arcs.invocation.v1";
+const TRANSFORM_INVOCATION_SCHEMA_ID: &str = "arcs.invocation.v2";
 const RETRYABLE_ERROR_PREFIX: &str = "retryable:";
 const PERMANENT_ERROR_PREFIX: &str = "permanent:";
 
@@ -18,6 +19,7 @@ const PERMANENT_ERROR_PREFIX: &str = "permanent:";
 #[serde(rename_all = "snake_case")]
 pub enum InvocationKind {
     Request,
+    Transform,
     Reasoning,
     Execution,
     Output,
@@ -95,11 +97,16 @@ impl<'a> InvocationService<'a> {
 
     pub fn lookup(&self, invocation_id: &str) -> Result<Option<InvocationState>, InvocationError> {
         let subject = SubjectId(invocation_subject(invocation_id));
-        let schema = SchemaId(INVOCATION_SCHEMA_ID.into());
-        self.store
-            .current(&subject, &schema)?
-            .map(parse_state)
-            .transpose()
+        let legacy = self
+            .store
+            .current(&subject, &SchemaId(INVOCATION_SCHEMA_ID.into()))?;
+        let extended = self
+            .store
+            .current(&subject, &SchemaId(TRANSFORM_INVOCATION_SCHEMA_ID.into()))?;
+        if legacy.is_some() && extended.is_some() {
+            return Err(InvocationError::IdentityConflict(invocation_id.into()));
+        }
+        legacy.or(extended).map(parse_state).transpose()
     }
 
     /// Prüft, ob ein persistierter State exakt zu einem aktuellen Aufruf gehört.
@@ -271,6 +278,7 @@ pub fn deterministic_invocation_id(kind: InvocationKind, parts: &[&str]) -> Stri
     let hash = deterministic_hash(parts);
     let prefix = match kind {
         InvocationKind::Request => "request",
+        InvocationKind::Transform => "transform",
         InvocationKind::Reasoning => "reasoning",
         InvocationKind::Execution => "execution",
         InvocationKind::Output => "output",
@@ -338,7 +346,14 @@ fn state_artifact(
     schemas: &SchemaRegistry,
 ) -> Result<Artifact, InvocationError> {
     let schema = schemas
-        .get(&SchemaId(INVOCATION_SCHEMA_ID.into()))
+        .get(&SchemaId(
+            if state.kind == InvocationKind::Transform {
+                TRANSFORM_INVOCATION_SCHEMA_ID
+            } else {
+                INVOCATION_SCHEMA_ID
+            }
+            .into(),
+        ))
         .ok_or_else(|| {
             InvocationError::InvalidState("invocation schema is not registered".into())
         })?;
@@ -483,6 +498,7 @@ fn ensure_transition(
 fn kind_name(kind: InvocationKind) -> &'static str {
     match kind {
         InvocationKind::Request => "request",
+        InvocationKind::Transform => "transform",
         InvocationKind::Reasoning => "reasoning",
         InvocationKind::Execution => "execution",
         InvocationKind::Output => "output",

@@ -26,9 +26,9 @@ ARCS/
 ├── crates/
 │   ├── arcs-core/                   Allgemeine Logik, Store und Kontrolle
 │   │   ├── src/                     World, Reasoning, Decision, Action, Runtime …
-│   │   └── schemas/v1/              Allgemeine Artefakt-Schemas
+│   │   └── schemas/                 Versionierte allgemeine Artefakt-Schemas
 │   ├── arcs-adapter-protocol/       IDs, Manifeste, Nachrichten und JSON-Framing
-│   └── arcs-adapter-sdk/            Gemeinsame externe Observe-/Request-/Act-Session
+│   └── arcs-adapter-sdk/            Gemeinsame externe Adapter-Session
 ├── adapters/
 │   ├── simulated-sensor/           Eigenes Cargo-Paket und ausführbarer Adapter
 │   │   ├── src/
@@ -38,9 +38,11 @@ ARCS/
 │   │   ├── src/
 │   │   ├── config/profile.json
 │   │   └── schemas/
-│   └── file-data/                  Allgemeine Dateiquelle mit persistenten Snapshots
-│       ├── src/
-│       └── config/profile.json
+│   ├── file-data/                  Allgemeine Dateiquelle mit persistenten Snapshots
+│   │   ├── src/
+│   │   └── config/profile.json
+│   ├── normalize-number/           Deterministischer Transform mit eigenen Schemas
+│   └── file-output/                Idempotente Ausgabe mit Journal und JSON-Berichten
 ├── apps/
 │   ├── adapter-host/               Allgemeiner Host mit JSON-Konfiguration
 │   │   ├── src/                    CLI und Bibliothek ohne Geräteabhängigkeit
@@ -85,6 +87,19 @@ Metadaten-Referenzen und liefert Inhalte blockweise. Der Host benötigt dafür
 eine gesonderte Datenfreigabe. Das funktioniert mit Bildern ebenso wie mit
 anderen Binärdaten; eine Kamera oder Bildauswertung ist noch nicht enthalten.
 Start und Export stehen in der [Dateiquellen-Dokumentation](adapters/file-data/README.md).
+
+`adapters/normalize-number` demonstriert den allgemeinen Transform-Port:
+Eine persistierte Eingabe wird extern verarbeitet, das Ergebnis validiert
+und mit seiner Herkunft gespeichert. Parameter und Rechenregel bleiben
+außerhalb des Core. Die [Transform-Dokumentation](adapters/normalize-number/README.md)
+beschreibt Start, Grants und Replay.
+
+`adapters/file-output` ergänzt eine kontrollierte Ausgabesenke. Der allgemeine
+Core bindet Inhalt und Ziel an einen Ausgabeauftrag, prüft Verification und
+Approval und persistiert den Empfangsbeleg. Der Adapter übernimmt die konkrete
+Dateiveröffentlichung und Wiederherstellung nach verlorenen Antworten.
+Die [Dateiausgabe-Dokumentation](adapters/file-output/README.md) enthält einen
+vollständigen Nachweis mit ausdrücklich benannter lokaler Beispielpolicy.
 
 Die Komponenten lassen sich innerhalb des Workspace getrennt bauen:
 
@@ -155,7 +170,9 @@ Observation → Belief Update → Goal → Memory/Skill Retrieval
 | --- | --- |
 | Versionierte Artefakte, Schemas, Provenance und Trust | Implementiert |
 | Adapter-Manifeste und getrennte Betreiber-Grants | Implementiert |
-| Gemeinsames Adapter-SDK für Observe, Request und Act | Implementiert, von Sensor und Lüfter verwendet |
+| Gemeinsames Adapter-SDK für Observe, Request, Transform, Output und Act | Implementiert, mehrere unabhängige Adapter |
+| Transform mit geprüften Ein-/Ausgaben, Provenienz und persistentem Replay | Implementiert, allgemeiner Zahlen-Normalisierer als Beispiel |
+| Output mit gebundenem Auftrag, Verification, Approval und Beleg | Implementiert, Dateiausgabe mit Journal und Recovery |
 | Referenzierte Binärdaten mit begrenztem Abruf und separaten Grants | Implementiert, allgemeine Dateiquelle als Prozessnachweis |
 | Allgemeiner Host mit JSON-Konfiguration und mehreren Adapterprozessen | Implementiert, einschließlich konfigurierter Datenabfragen |
 | Externer stdio-Adapter mit Geräteprofil, ACK und persistentem Replay | Erster Observation-Slice implementiert |

@@ -1,0 +1,11 @@
+{
+  "adapter_id": "example.normalize",
+  "producer_class": "adapter",
+  "enabled_capabilities": ["number.normalize"],
+  "granted_permissions": ["data.transform"],
+  "assigned_trust": "medium",
+  "ingress_source_kind": null,
+  "max_payload_bytes": 4096,
+  "max_external_reference_bytes": 256,
+  "reasoning_limits": null
+}

@@ -12,6 +12,10 @@ use arcs::world::ReduceError;
 
 #[derive(Debug)]
 pub enum HostError {
+    Output {
+        adapter: AdapterId,
+        source: arcs::output::OutputError,
+    },
     Io {
         path: PathBuf,
         source: std::io::Error,
@@ -45,11 +49,18 @@ pub enum HostError {
     },
     Reduction(ReduceError),
     Data(arcs::adapters::data::DataError),
+    Transform {
+        adapter: AdapterId,
+        source: arcs::transform::TransformError,
+    },
 }
 
 impl fmt::Display for HostError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Output { adapter, source } => {
+                write!(f, "adapter {} output: {source:?}", adapter.0)
+            }
             Self::Io { path, source } => write!(f, "{}: {source}", path.display()),
             Self::Json { path, source } => {
                 write!(f, "invalid JSON in {}: {source}", path.display())
@@ -68,6 +79,9 @@ impl fmt::Display for HostError {
             }
             Self::Reduction(source) => write!(f, "world-state: {source:?}"),
             Self::Data(source) => write!(f, "{source}"),
+            Self::Transform { adapter, source } => {
+                write!(f, "adapter {} transform: {source:?}", adapter.0)
+            }
         }
     }
 }

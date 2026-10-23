@@ -51,10 +51,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "arcs-file-output"
+version = "0.1.0"
+dependencies = [
+ "arcs-adapter-protocol",
+ "arcs-adapter-sdk",
+ "rusqlite",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "arcs-host"
 version = "0.1.0"
 dependencies = [
  "arcs-core",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "arcs-normalize-number"
+version = "0.1.0"
+dependencies = [
+ "arcs-adapter-protocol",
+ "arcs-adapter-sdk",
  "serde",
  "serde_json",
 ]
