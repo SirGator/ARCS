@@ -174,12 +174,27 @@ impl AdapterRegistry {
         }
 
         match (has_reasoning, grant.reasoning_limits.as_ref()) {
-            (true, None) => return Err(AdapterRegistryError::MissingReasoningLimits),
+            (true, None) if grant.reasoning_limits_v2.is_none() => {
+                return Err(AdapterRegistryError::MissingReasoningLimits);
+            }
             (false, Some(_)) => return Err(AdapterRegistryError::UnexpectedReasoningLimits),
             (true, Some(limits)) if !limits.all_positive() => {
                 return Err(AdapterRegistryError::InvalidReasoningLimits);
             }
             _ => {}
+        }
+
+        if let Some(limits) = &grant.reasoning_limits_v2 {
+            if !has_reasoning {
+                return Err(AdapterRegistryError::UnexpectedReasoningLimits);
+            }
+            if !limits.valid()
+                || grant.producer_class == ProducerClass::Executor
+                || (grant.producer_class != ProducerClass::Model
+                    && limits.methods.iter().any(|method| method.uses_model()))
+            {
+                return Err(AdapterRegistryError::InvalidReasoningLimits);
+            }
         }
 
         let mut permissions = HashSet::new();
@@ -306,6 +321,7 @@ mod tests {
             max_payload_bytes: 1024,
             max_external_reference_bytes: 256,
             data_limits: None,
+            reasoning_limits_v2: None,
             reasoning_limits: None,
         };
 
@@ -330,6 +346,7 @@ mod tests {
             max_payload_bytes: 1024,
             max_external_reference_bytes: 256,
             data_limits: None,
+            reasoning_limits_v2: None,
             reasoning_limits: None,
         };
 

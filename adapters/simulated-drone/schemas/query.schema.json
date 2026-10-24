@@ -1,0 +1,14 @@
+{
+  "$id": "arcs.request.drone_pose.v1",
+  "type": "object",
+  "required": [
+    "drone_id"
+  ],
+  "properties": {
+    "drone_id": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "additionalProperties": false
+}

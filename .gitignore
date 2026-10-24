@@ -38,6 +38,7 @@ phases/
 /docs/*
 !/docs/DRONE_SEARCH.md
 !/docs/GENERAL_ADAPTERS.md
+!/docs/REASONING.md
 /target/
 **/target/
 /target

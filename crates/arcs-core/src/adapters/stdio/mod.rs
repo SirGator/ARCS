@@ -1,6 +1,6 @@
 //! Vom Betreiber gestarteter Child-Prozess, gebunden an genau einen Grant.
-//! stdio ist hier eine lokale Prozessgrenze; Netzwerk-Authentifizierung und
-//! die Wire-Verträge für Input und Reasoning sind spätere Schritte.
+//! stdio ist eine lokale Prozessgrenze für alle sieben Rollen, einschließlich
+//! Input-ACKs und Reasoning V2; Netzwerk-Authentifizierung ist nicht enthalten.
 
 pub mod protocol;
 
@@ -45,6 +45,7 @@ pub enum StdioError {
     RegistrationChanged,
     SessionPoisoned,
     Observation(ObservationError),
+    Input(crate::input::InputError),
 }
 
 type Response = Result<Envelope<AdapterMessage>, WireError>;
@@ -66,6 +67,37 @@ struct Session {
 }
 
 impl StdioAdapter {
+    pub fn poll_input(
+        &mut self,
+        inputs: &mut crate::input::InputService<'_>,
+    ) -> Result<Option<crate::core::Artifact>, StdioError> {
+        match self.exchange(HostMessage::PollInput)? {
+            AdapterMessage::Idle => Ok(None),
+            AdapterMessage::Input { message_id, input } => {
+                let artifact = inputs
+                    .ingest_once(&self.manifest.adapter_id, &message_id, input)
+                    .map_err(|error| {
+                        self.stop();
+                        StdioError::Input(error)
+                    })?;
+                match self.exchange(HostMessage::AckInput {
+                    message_id: message_id.clone(),
+                })? {
+                    AdapterMessage::InputAcknowledged { message_id: ack } if ack == message_id => {
+                        Ok(Some(artifact))
+                    }
+                    _ => {
+                        self.stop();
+                        Err(StdioError::UnexpectedMessage)
+                    }
+                }
+            }
+            _ => {
+                self.stop();
+                Err(StdioError::UnexpectedMessage)
+            }
+        }
+    }
     pub fn connect(
         command: &mut Command,
         timeout: Duration,
@@ -198,6 +230,40 @@ impl StdioAdapter {
     fn protocol_error(&self, detail: &str) -> AdapterCallError {
         self.stop();
         AdapterCallError::Protocol(detail.into())
+    }
+}
+
+impl crate::reasoning::general::GeneralReasoningAdapter for StdioAdapter {
+    fn manifest(&self) -> &AdapterManifest {
+        &self.manifest
+    }
+    fn propose_v2(
+        &self,
+        invocation: &crate::reasoning::ReasoningInvocationV2,
+    ) -> Result<crate::reasoning::ReasoningResponseV2, AdapterCallError> {
+        if invocation.capability.adapter_id != self.manifest.adapter_id {
+            return Err(self.protocol_error("reasoning endpoint mismatch"));
+        }
+        let mut session = self
+            .session
+            .lock()
+            .map_err(|_| AdapterCallError::Unavailable("session poisoned".into()))?;
+        let previous = session.timeout;
+        session.timeout = previous.min(Duration::from_millis(invocation.budget.max_runtime_ms));
+        let response = session.exchange(HostMessage::ReasonV2 {
+            invocation: invocation.clone(),
+        });
+        session.timeout = previous;
+        drop(session);
+        match response.map_err(call_error)? {
+            AdapterMessage::ReasoningResultV2 { response }
+                if response.invocation_id == invocation.invocation_id
+                    && response.request_id == invocation.request_id =>
+            {
+                Ok(response)
+            }
+            _ => Err(self.protocol_error("invalid reasoning response correlation")),
+        }
     }
 }
 

@@ -104,6 +104,7 @@ fn register_source(
                 ingress_source_kind: Some(SourceKind::Sensor),
                 max_payload_bytes: 4096,
                 max_external_reference_bytes: 256,
+                reasoning_limits_v2: None,
                 reasoning_limits: None,
                 data_limits: None,
             },

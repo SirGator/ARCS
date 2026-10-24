@@ -10,6 +10,11 @@ members = [
     "adapters/normalize-number",
     "adapters/file-output",
     "adapters/json-report",
+    "adapters/json-input",
+    "adapters/example-reasoner",
+    "simulation/room",
+    "adapters/simulated-drone",
+    "apps/drone-demo",
     "apps/demo-host",
     "apps/adapter-host",
 ]
@@ -24,6 +29,9 @@ arcs-adapter-protocol = { path = "crates/arcs-adapter-protocol" }
 arcs-adapter-sdk = { path = "crates/arcs-adapter-sdk" }
 arcs-simulated-sensor = { path = "adapters/simulated-sensor" }
 arcs-simulated-fan = { path = "adapters/simulated-fan" }
+arcs-room-sim = { path = "simulation/room" }
+arcs-simulated-drone = { path = "adapters/simulated-drone" }
+arcs-host = { path = "apps/adapter-host" }
 rusqlite = { version = "0.40.1", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

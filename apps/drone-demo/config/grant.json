@@ -1,0 +1,11 @@
+{
+  "adapter_id":"demo.drone",
+  "producer_class":"executor",
+  "enabled_capabilities":["pose.observe","pose.read","drone.move"],
+  "granted_permissions":["drone.read","drone.move"],
+  "assigned_trust":"medium",
+  "ingress_source_kind":"sensor",
+  "max_payload_bytes":4096,
+  "max_external_reference_bytes":256,
+  "reasoning_limits":null
+}

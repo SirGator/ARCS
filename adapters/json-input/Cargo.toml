@@ -1,0 +1,10 @@
+[package]
+name = "arcs-json-input"
+version.workspace = true
+edition.workspace = true
+[dependencies]
+arcs-adapter-protocol.workspace = true
+arcs-adapter-sdk.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+rusqlite.workspace = true

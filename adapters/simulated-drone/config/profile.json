@@ -1,0 +1,10 @@
+{
+  "adapter_id":"demo.drone",
+  "drone_id":"drone-1",
+  "room": {
+    "width_m":6.0,"depth_m":4.0,"flight_height_m":1.0,"clearance_m":0.2,
+    "max_step_m":1.0,"max_turn_deg":90.0,
+    "obstacles":[{"min_x_m":3.0,"min_y_m":1.5,"max_x_m":3.5,"max_y_m":2.5}]
+  },
+  "initial_pose":{"x_m":1.0,"y_m":1.0,"yaw_deg":0.0}
+}

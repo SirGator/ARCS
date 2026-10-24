@@ -80,6 +80,8 @@ pub struct PollingConfig {
     pub interval_ms: u64,
     #[serde(default = "default_batch")]
     pub max_observations_per_adapter: u32,
+    #[serde(default = "default_batch")]
+    pub max_inputs_per_adapter: u32,
 }
 
 impl Default for PollingConfig {
@@ -88,6 +90,7 @@ impl Default for PollingConfig {
             rounds: 1,
             interval_ms: 0,
             max_observations_per_adapter: 1000,
+            max_inputs_per_adapter: 1000,
         }
     }
 }
@@ -195,6 +198,7 @@ impl PreparedConfig {
         }
         if config.polling.rounds == 0
             || config.polling.max_observations_per_adapter == 0
+            || config.polling.max_inputs_per_adapter == 0
             || config.polling.interval_ms > 60_000
         {
             return Err(invalid(

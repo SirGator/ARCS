@@ -1,0 +1,23 @@
+{
+  "$id": "arcs.task.nearest.v1",
+  "type": "object",
+  "required": [
+    "values",
+    "target"
+  ],
+  "properties": {
+    "values": {
+      "type": "array",
+      "items": {
+        "type": "number"
+      }
+    },
+    "target": {
+      "type": "number"
+    },
+    "private_note": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false
+}

@@ -542,7 +542,7 @@ pub(super) fn ensure_candidate_schema(
     Ok(())
 }
 
-fn validate_allowed_capabilities(
+pub(super) fn validate_allowed_capabilities(
     registry: &AdapterRegistry,
     capabilities: &[CapabilityRef],
 ) -> Result<Vec<CapabilityRef>, ReasoningError> {
@@ -558,7 +558,7 @@ fn validate_allowed_capabilities(
     Ok(validated)
 }
 
-fn validate_candidate_capabilities(
+pub(super) fn validate_candidate_capabilities(
     capabilities: &[CapabilityRef],
     allowed: &HashSet<CapabilityRef>,
 ) -> Result<Vec<CapabilityRef>, ReasoningError> {
@@ -576,7 +576,7 @@ fn validate_candidate_capabilities(
     Ok(validated)
 }
 
-fn validate_candidate_references(
+pub(super) fn validate_candidate_references(
     versions: &[VersionId],
     context: &HashSet<VersionId>,
 ) -> Result<Vec<VersionId>, ReasoningError> {
@@ -594,7 +594,10 @@ fn validate_candidate_references(
     Ok(validated)
 }
 
-fn select_payload_fields(artifact: &Artifact, fields: &[String]) -> Result<Value, ReasoningError> {
+pub(super) fn select_payload_fields(
+    artifact: &Artifact,
+    fields: &[String],
+) -> Result<Value, ReasoningError> {
     let payload = artifact
         .payload
         .as_object()

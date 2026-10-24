@@ -54,6 +54,8 @@ pub struct AdapterReport {
     pub poll_limit_hits: u64,
     pub requests: Vec<RequestReport>,
     pub transforms: Vec<TransformReport>,
+    pub inputs: Vec<Artifact>,
+    pub input_limit_hits: u64,
 }
 
 #[derive(Debug, Serialize)]
@@ -141,6 +143,7 @@ fn register_host(
         max_payload_bytes: 65_536,
         max_external_reference_bytes: 2048,
         data_limits: None,
+        reasoning_limits_v2: None,
         reasoning_limits: None,
     };
     registry
@@ -204,6 +207,64 @@ fn validate_operations(
 }
 
 impl Host {
+    pub fn reason(
+        &mut self,
+        request: arcs::reasoning::ReasoningRequestV2,
+    ) -> Result<arcs::reasoning::general::ReasoningResult, HostError> {
+        let adapter = self
+            .adapters
+            .iter()
+            .find(|adapter| adapter.config.grant.adapter_id == request.capability.adapter_id)
+            .ok_or_else(|| invalid("unknown reasoning adapter"))?;
+        arcs::reasoning::general::GeneralReasoningService {
+            registry: &self.registry,
+            schemas: &self.schemas,
+            store: &self.store,
+            ids: &mut self.ids,
+            clock: &SystemClock,
+        }
+        .reason(&adapter.endpoint, request)
+        .map_err(HostError::Reasoning)
+    }
+
+    pub fn poll_inputs(&mut self) -> Result<Vec<Artifact>, HostError> {
+        let mut received = Vec::new();
+        for adapter in &mut self.adapters {
+            if !adapter.endpoint.manifest().capabilities.iter().any(|cap| {
+                cap.contract.is_input()
+                    && adapter.config.grant.enabled_capabilities.contains(&cap.id)
+            }) {
+                continue;
+            }
+            let mut idle = false;
+            let mut inputs = InputService::new(
+                &self.registry,
+                &self.schemas,
+                &self.store,
+                &mut self.ids,
+                &SystemClock,
+            );
+            for _ in 0..self.polling.max_inputs_per_adapter {
+                let Some(input) = adapter.endpoint.poll_input(&mut inputs).map_err(|source| {
+                    HostError::Adapter {
+                        adapter: adapter.config.grant.adapter_id.clone(),
+                        source,
+                    }
+                })?
+                else {
+                    idle = true;
+                    break;
+                };
+                adapter.report.inputs.push(input.clone());
+                received.push(input);
+            }
+            if !idle {
+                adapter.report.input_limit_hits += 1;
+            }
+        }
+        Ok(received)
+    }
+
     pub fn prepare_output(
         &mut self,
         capability: &CapabilityRef,
@@ -323,6 +384,8 @@ impl Host {
                 poll_limit_hits: 0,
                 requests: vec![],
                 transforms: vec![],
+                inputs: vec![],
+                input_limit_hits: 0,
             };
             adapters.push(RunningAdapter {
                 config: prepared,
@@ -431,26 +494,22 @@ impl Host {
                 )
                 .map_err(HostError::Store)?;
         }
-        let result = RequestService::new(
-            &self.registry,
-            &self.schemas,
-            &self.store,
-            &mut self.ids,
-            &SystemClock,
-        )
-        .execute(
-            &self.adapters[index].endpoint,
-            &CapabilityRef {
-                adapter_id,
-                capability_id: request.capability_id.clone(),
-            },
-            &input.version_id,
-            &request.response_schema_id,
-        )
-        .map_err(|source| HostError::Request {
-            request: request.id.clone(),
-            source,
-        })?;
+        let result = self
+            .request_version(
+                &CapabilityRef {
+                    adapter_id,
+                    capability_id: request.capability_id.clone(),
+                },
+                &input.version_id,
+                &request.response_schema_id,
+            )
+            .map_err(|error| match error {
+                HostError::Request { source, .. } => HostError::Request {
+                    request: request.id.clone(),
+                    source,
+                },
+                other => other,
+            })?;
         let report = &mut self.adapters[index].report.requests;
         report.retain(|previous| previous.id != request_id);
         report.push(RequestReport {
@@ -460,6 +519,33 @@ impl Host {
             payload: result.payload.clone(),
         });
         Ok(result)
+    }
+
+    /// Führt eine gezielte Abfrage mit einer bereits persistierten Eingabe aus.
+    /// Eine neue Messung benötigt eine neue Eingabeversion; Replay bleibt stabil.
+    pub fn request_version(
+        &mut self,
+        capability: &CapabilityRef,
+        input: &VersionId,
+        response_schema: &SchemaId,
+    ) -> Result<Artifact, HostError> {
+        let adapter = self
+            .adapters
+            .iter()
+            .find(|adapter| adapter.config.grant.adapter_id == capability.adapter_id)
+            .ok_or_else(|| invalid(format!("unknown adapter {}", capability.adapter_id.0)))?;
+        RequestService::new(
+            &self.registry,
+            &self.schemas,
+            &self.store,
+            &mut self.ids,
+            &SystemClock,
+        )
+        .execute(&adapter.endpoint, capability, input, response_schema)
+        .map_err(|source| HostError::Request {
+            request: input.0.clone(),
+            source,
+        })
     }
 
     /// Verarbeitet ein bereits gespeichertes Artefakt über eine freigegebene
@@ -705,6 +791,7 @@ impl Host {
             self.transform_configured(&id)?;
         }
         for round in 0..self.polling.rounds {
+            self.poll_inputs()?;
             self.poll_round()?;
             if round + 1 < self.polling.rounds && self.polling.interval_ms > 0 {
                 std::thread::sleep(Duration::from_millis(self.polling.interval_ms));

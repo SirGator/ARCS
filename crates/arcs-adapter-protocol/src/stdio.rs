@@ -1,13 +1,13 @@
-//! JSON-Lines-Vertrag für Observations, Requests, Transforms, Actions und Datenabruf.
+//! JSON-Lines-Vertrag für alle sieben Adapterrollen und referenzierten Datenabruf.
 
 use std::io::{BufRead, Read, Write};
 
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use crate::{
-    ActInvocation, ActResponse, AdapterManifest, DataChunk, DataRead, ObservationMessage,
-    OutputInvocation, OutputResponse, RequestInvocation, RequestResponse, TransformInvocation,
-    TransformResponse,
+    ActInvocation, ActResponse, AdapterManifest, DataChunk, DataRead, InputMessage,
+    ObservationMessage, OutputInvocation, OutputResponse, RequestInvocation, RequestResponse,
+    TransformInvocation, TransformResponse,
 };
 
 pub const WIRE_VERSION: u32 = 1;
@@ -27,13 +27,32 @@ pub struct Envelope<T> {
 pub enum HostMessage {
     Hello,
     Poll,
-    Ack { message_id: String },
-    Request { invocation: RequestInvocation },
-    Transform { invocation: TransformInvocation },
-    Output { invocation: OutputInvocation },
-    Execute { invocation: ActInvocation },
-    ReadData { request: DataRead },
+    PollInput,
+    AckInput {
+        message_id: String,
+    },
+    Ack {
+        message_id: String,
+    },
+    Request {
+        invocation: RequestInvocation,
+    },
+    Transform {
+        invocation: TransformInvocation,
+    },
+    Output {
+        invocation: OutputInvocation,
+    },
+    Execute {
+        invocation: ActInvocation,
+    },
+    ReadData {
+        request: DataRead,
+    },
     Shutdown,
+    ReasonV2 {
+        invocation: crate::ReasoningInvocationV2,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -45,6 +64,13 @@ pub enum AdapterMessage {
     Observation {
         message_id: String,
         observation: ObservationMessage,
+    },
+    Input {
+        message_id: String,
+        input: InputMessage,
+    },
+    InputAcknowledged {
+        message_id: String,
     },
     Idle,
     Acknowledged {
@@ -71,6 +97,9 @@ pub enum AdapterMessage {
         retryable: bool,
     },
     Bye,
+    ReasoningResultV2 {
+        response: crate::ReasoningResponseV2,
+    },
 }
 
 #[derive(Debug)]

@@ -1,0 +1,40 @@
+{
+  "$id": "arcs.drone_move_candidate.v1",
+  "type": "object",
+  "required": [
+    "drone_id",
+    "expected_revision",
+    "movement"
+  ],
+  "properties": {
+    "drone_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "expected_revision": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "movement": {
+      "type": "object",
+      "required": [
+        "dx_m",
+        "dy_m",
+        "dyaw_deg"
+      ],
+      "properties": {
+        "dx_m": {
+          "type": "number"
+        },
+        "dy_m": {
+          "type": "number"
+        },
+        "dyaw_deg": {
+          "type": "number"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

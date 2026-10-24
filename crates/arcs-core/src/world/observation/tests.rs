@@ -96,6 +96,7 @@ fn grant(
         max_payload_bytes,
         max_external_reference_bytes: 64,
         data_limits: None,
+        reasoning_limits_v2: None,
         reasoning_limits: None,
     }
 }
@@ -286,6 +287,7 @@ fn act_capability_cannot_push_observation() {
         max_payload_bytes: 4096,
         max_external_reference_bytes: 64,
         data_limits: None,
+        reasoning_limits_v2: None,
         reasoning_limits: None,
     };
     let registry = registry(&schemas, manifest, grant);

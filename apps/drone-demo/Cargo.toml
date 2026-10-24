@@ -1,0 +1,14 @@
+[package]
+name = "arcs-drone-demo"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+arcs.workspace = true
+arcs-host.workspace = true
+arcs-simulated-drone.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+rusqlite.workspace = true

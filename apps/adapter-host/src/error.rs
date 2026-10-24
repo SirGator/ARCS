@@ -12,6 +12,7 @@ use arcs::world::ReduceError;
 
 #[derive(Debug)]
 pub enum HostError {
+    Reasoning(arcs::reasoning::ReasoningError),
     Output {
         adapter: AdapterId,
         source: arcs::output::OutputError,
@@ -58,6 +59,7 @@ pub enum HostError {
 impl fmt::Display for HostError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Reasoning(source) => write!(f, "reasoning: {source:?}"),
             Self::Output { adapter, source } => {
                 write!(f, "adapter {} output: {source:?}", adapter.0)
             }

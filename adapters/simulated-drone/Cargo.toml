@@ -1,0 +1,12 @@
+[package]
+name = "arcs-simulated-drone"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+arcs-room-sim.workspace = true
+arcs-adapter-protocol.workspace = true
+arcs-adapter-sdk.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+rusqlite.workspace = true

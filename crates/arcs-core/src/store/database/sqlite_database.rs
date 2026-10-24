@@ -229,6 +229,47 @@ impl SqliteArtifactStore {
         })
     }
 
+    /// Historischer Input und Empfangsbeleg ohne Änderung des Current-State.
+    pub(crate) fn append_event_once(
+        &self,
+        artifact: &Artifact,
+        registry: &SchemaRegistry,
+        receipt: Idempotency<'_>,
+    ) -> Result<Artifact, StoreError> {
+        validate_artifact(artifact, registry).map_err(StoreError::Validation)?;
+        let transaction = self.connection.unchecked_transaction()?;
+        let previous: Option<(String,String)> = transaction.query_row(
+            "SELECT r.input_json,v.artifact_json FROM ingress_receipts r JOIN artifact_versions v ON v.version_id=r.version_id WHERE r.receipt_key=?1",
+            [receipt.key], |row| Ok((row.get(0)?,row.get(1)?)),
+        ).optional()?;
+        if let Some((input, json)) = previous {
+            if input != receipt.input {
+                return Err(StoreError::IdempotencyConflict);
+            }
+            return Ok(serde_json::from_str(&json)?);
+        }
+        let existing: Option<String> = transaction
+            .query_row(
+                "SELECT artifact_json FROM artifact_versions WHERE version_id=?1",
+                [&artifact.version_id.0],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if let Some(json) = existing {
+            if serde_json::from_str::<Artifact>(&json)? != *artifact {
+                return Err(StoreError::IdempotencyConflict);
+            }
+        } else {
+            append_validated(&transaction, artifact)?;
+        }
+        transaction.execute(
+            "INSERT INTO ingress_receipts VALUES (?1,?2,?3)",
+            params![receipt.key, receipt.input, artifact.version_id.0],
+        )?;
+        transaction.commit()?;
+        Ok(artifact.clone())
+    }
+
     /// Validiert und speichert genau eine unveränderliche Artefaktversion.
     pub(crate) fn append(
         &self,

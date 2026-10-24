@@ -8,7 +8,7 @@ use crate::core::{
     Actor, ActorType, Artifact, ArtifactFactory, ArtifactFactoryInput, ArtifactIdGenerator, Clock,
     Provenance, SchemaRegistry, Source, SourceClass, SubjectId, Trust, TrustLevel,
 };
-use crate::store::SqliteArtifactStore;
+use crate::store::{Idempotency, SqliteArtifactStore};
 
 use super::{InputError, InputMessage};
 
@@ -44,6 +44,27 @@ impl<'a> InputService<'a> {
         adapter_id: &AdapterId,
         message: InputMessage,
     ) -> Result<Artifact, InputError> {
+        self.ingest_inner(adapter_id, message, None)
+    }
+
+    pub fn ingest_once(
+        &mut self,
+        adapter_id: &AdapterId,
+        message_id: &str,
+        message: InputMessage,
+    ) -> Result<Artifact, InputError> {
+        if message_id.trim().is_empty() || message_id.len() > 128 {
+            return Err(InputError::InvalidMessageId);
+        }
+        self.ingest_inner(adapter_id, message, Some(message_id))
+    }
+
+    fn ingest_inner(
+        &mut self,
+        adapter_id: &AdapterId,
+        message: InputMessage,
+        message_id: Option<&str>,
+    ) -> Result<Artifact, InputError> {
         if message.external_reference.trim().is_empty() {
             return Err(InputError::InvalidExternalReference);
         }
@@ -65,6 +86,10 @@ impl<'a> InputService<'a> {
             });
         }
         let schema_id = emits[0].clone();
+        let fingerprint = serde_json::to_string(&(&schema_id, &message))?;
+        let receipt_key = message_id
+            .map(|id| serde_json::to_string(&("input.message", &adapter_id.0, id)))
+            .transpose()?;
 
         let grant = registered.grant();
         let producer_class = grant.producer_class;
@@ -116,6 +141,16 @@ impl<'a> InputService<'a> {
                 && existing.source.reference == message.external_reference
                 && existing.payload == message.payload;
             if same_input {
+                if let Some(key) = receipt_key.as_deref() {
+                    return Ok(self.store.append_event_once(
+                        &existing,
+                        self.schemas,
+                        Idempotency {
+                            key,
+                            input: &fingerprint,
+                        },
+                    )?);
+                }
                 return Ok(existing);
             }
             return Err(InputError::IdentityConflict(stream_key));
@@ -151,6 +186,16 @@ impl<'a> InputService<'a> {
             }),
         })?;
 
+        if let Some(key) = receipt_key.as_deref() {
+            return Ok(self.store.append_event_once(
+                &artifact,
+                self.schemas,
+                Idempotency {
+                    key,
+                    input: &fingerprint,
+                },
+            )?);
+        }
         self.store.append(&artifact, self.schemas)?;
         Ok(artifact)
     }

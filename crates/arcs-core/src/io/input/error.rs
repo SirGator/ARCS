@@ -6,6 +6,7 @@ use crate::store::StoreError;
 pub enum InputError {
     Authorization(AdapterRegistryError),
     InvalidExternalReference,
+    InvalidMessageId,
     CapabilityIsNotInput(CapabilityRef),
     InvalidInputSchemaCount {
         capability: CapabilityRef,

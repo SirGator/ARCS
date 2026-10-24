@@ -4,8 +4,8 @@ Die gemeinsame Implementierung liegt im eigenständigen Paket
 [`crates/arcs-adapter-protocol`](crates/arcs-adapter-protocol). Sie enthält
 Nachrichten, IDs, Manifestprüfung und Framing und hat keine Core-Abhängigkeit.
 Das [`arcs-adapter-sdk`](crates/arcs-adapter-sdk/README.md) ergänzt für
-Rust-Adapter eine gemeinsame Session mit typisierten Observe-, Request-,
-Transform-, Output- und Act-Callbacks. Sensor und Lüfter verwenden diese Implementierung. Das
+Rust-Adapter eine gemeinsame Session mit typisierten Input-, Observe-, Request-,
+Transform-, Reason-, Output- und Act-Callbacks. Sensor und Lüfter verwenden diese Implementierung. Das
 Protokoll bleibt auch ohne das SDK und in anderen Sprachen implementierbar.
 Die konkreten Adapter liegen unter `adapters/`, ihre Beispiel-Hosts unter
 `apps/demo-host`. Grants, Registry und die Dienste für kontrollierte
@@ -19,9 +19,9 @@ Demo-Hosts bleiben Beispiele für die gezielte fachliche Orchestrierung.
 
 Dieser erste Transport verbindet einen vom Betreiber gestarteten Adapterprozess
 mit den vorhandenen Core-Diensten. Implementiert sind Registrierung,
-bestätigte Observations, Requests, Transforms, Outputs, Actions und der begrenzte
-Abruf referenzierter Daten über die Rust-Dienste. Input und Reasoning behalten
-ihre bisherigen Rust-Schnittstellen; ihre Wire-Verträge folgen in weiteren Schritten.
+bestätigte Inputs und Observations, Requests, Transforms, allgemeines Reasoning V2,
+Outputs, Actions und der begrenzte Abruf referenzierter Daten über die Rust-Dienste.
+Die bisherigen internen Input- und Reasoning-V1-Schnittstellen bleiben erhalten.
 
 ## Prozessgrenze und Berechtigungen
 
@@ -65,6 +65,10 @@ Retries. Der Host entscheidet über Reconnect und erneute Verarbeitung.
 | Host → Adapter | Adapter → Host | Bedeutung |
 | --- | --- | --- |
 | `hello` | `manifest` mit `manifest` | Fähigkeiten anbieten und Core-seitig prüfen |
+| `poll_input` | `input` mit `message_id` und `input` | Nächste Aufgabe oder nächstes Ereignis anbieten |
+| `poll_input` | `idle` | Zurzeit kein Input |
+| `ack_input` mit `message_id` | `input_acknowledged` mit derselben `message_id` | Dauerhaften Input-Commit bestätigen |
+| `reason_v2` mit `invocation` | `reasoning_result_v2` mit `response` | Begrenzten allgemeinen Reasoning-Auftrag beantworten |
 | `poll` | `observation` mit `message_id` und `observation` | Nächste Messung anbieten |
 | `poll` | `idle` | Zurzeit keine Messung; Verbindung bleibt offen |
 | `ack` mit `message_id` | `acknowledged` mit derselben `message_id` | Erfolgreichen Store-Commit bestätigen |
@@ -89,6 +93,32 @@ Eine vollständige Observation-Antwort sieht beispielsweise so aus:
 
 Der Adapter liefert keine internen Artifact-IDs, Autoritätsklassen oder
 Trust-Werte. Diese setzt der Core aus seinen eigenen Regeln und dem Grant.
+
+## Input und allgemeines Reasoning V2
+
+Input besitzt einen eigenen Poll-/ACK-Dialog. Der Core validiert den Input und
+speichert Ereignis und Empfangsbeleg atomar, bevor er `ack_input` sendet.
+Identische Wiederholungen verwenden dasselbe Artefakt; geänderte Inhalte unter
+derselben Nachrichten-ID werden abgewiesen. Inputs verändern weder den
+Current-State noch das World Model automatisch.
+
+`reason_v2` verwendet die DTOs `ReasoningInvocationV2` und `ReasoningResponseV2`.
+Der Vertrag benennt Verfahren, ausgewählten Kontext, Ziel-Schema und Budgets.
+Solver und Regeln benötigen kein Modell, keinen Prompt und keine Tokenangaben.
+Der Betreiber erlaubt Verfahren und Ressourcen über `reasoning_limits_v2` im
+Grant; modellbasierte Verfahren benötigen zusätzlich die Producer-Klasse `Model`.
+V1-DTOs und bestehende Grants bleiben lesbar. Die neuen Nachrichten sind additive
+Varianten des stdio-v1-Envelopes und werden nur für passende Capabilities genutzt.
+
+Antworten enthalten den Status `solved`, `no_solution` oder `budget_exhausted`,
+Kandidaten und einen Verfahrenstrace. Der Core prüft Korrelation, Schema,
+Kontextreferenzen, erlaubte Fähigkeiten und Budgets. Kandidaten erteilen keine
+Handlungsbefugnis. Modellherkunft bleibt auch durch weitere Verarbeitung
+`Model` mit niedrigem Trust. Der stdio-Host begrenzt die Wartezeit zusätzlich auf
+das kleinere Limit aus Verbindung und Reasoning-Auftrag.
+
+Startbefehle, Replay und Grenzen des synchronen Hosts beschreibt das
+[Input-/Reasoning-Beispiel](apps/adapter-host/examples/reason-task.md).
 
 ## Wiederholung, Commit und Replay
 

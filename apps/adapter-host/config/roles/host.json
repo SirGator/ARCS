@@ -1,0 +1,41 @@
+{
+  "config_version": 1,
+  "database": "../../../../var/roles-core.sqlite",
+  "node_id": "roles-host",
+  "schemas": [
+    "../../../../adapters/example-reasoner/schemas/task.schema.json",
+    "../../../../adapters/example-reasoner/schemas/candidate.schema.json"
+  ],
+  "adapters": [
+    {
+      "program": "../../../../target/debug/arcs-json-input",
+      "profile": "input-profile.json",
+      "args": [
+        {
+          "path": "../../../../var/roles-input.sqlite"
+        }
+      ],
+      "grant_file": "input-grant.json"
+    },
+    {
+      "program": "../../../../target/debug/arcs-example-reasoner",
+      "profile": "solver-profile.json",
+      "args": [
+        {
+          "path": "../../../../var/roles-solver.sqlite"
+        }
+      ],
+      "grant_file": "solver-grant.json"
+    },
+    {
+      "program": "../../../../target/debug/arcs-example-reasoner",
+      "profile": "model-profile.json",
+      "args": [
+        {
+          "path": "../../../../var/roles-model.sqlite"
+        }
+      ],
+      "grant_file": "model-grant.json"
+    }
+  ]
+}

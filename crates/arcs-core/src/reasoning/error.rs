@@ -8,6 +8,7 @@ use crate::store::StoreError;
 /// Fehler ausschließlich innerhalb des kuratierten Reasoning-Slices.
 #[derive(Debug)]
 pub enum ReasoningError {
+    InvalidResponse(String),
     Authorization(AdapterRegistryError),
     Store(StoreError),
     Serialization(serde_json::Error),

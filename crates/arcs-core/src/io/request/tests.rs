@@ -117,6 +117,7 @@ fn grant() -> AdapterGrant {
         max_payload_bytes: 1024,
         max_external_reference_bytes: 256,
         data_limits: None,
+        reasoning_limits_v2: None,
         reasoning_limits: None,
     }
 }

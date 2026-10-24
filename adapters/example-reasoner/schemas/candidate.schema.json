@@ -1,0 +1,18 @@
+{
+  "$id": "arcs.solution_candidate.nearest.v1",
+  "type": "object",
+  "required": [
+    "value",
+    "distance"
+  ],
+  "properties": {
+    "value": {
+      "type": "number"
+    },
+    "distance": {
+      "type": "number",
+      "minimum": 0
+    }
+  },
+  "additionalProperties": false
+}

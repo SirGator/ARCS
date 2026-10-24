@@ -11,6 +11,9 @@ und überschreibt die benötigten Methoden:
 | Methode | Verantwortung des Treibers |
 | --- | --- |
 | `manifest` | Stabile Identität, Capabilities, Schemas und benötigte Permissions beschreiben |
+| `poll_input` | Eine unbestätigte Aufgabe oder ein Ereignis anbieten |
+| `acknowledge_input` | Einen Input nach dem Host-Commit wiederholbar bestätigen |
+| `reason_v2` | Einen begrenzten Reasoning-Auftrag mit Kandidaten und Verfahrenstrace beantworten |
 | `poll` | Eine ausstehende Observation anbieten; ohne Daten `None` liefern |
 | `acknowledge` | Eine bekannte Observation nach dem Host-Commit wiederholbar bestätigen |
 | `request` | Eine gezielte Datenabfrage beantworten |
@@ -67,8 +70,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-`poll` liefert standardmäßig keine Daten. Nicht implementierte Request-, Transform-,
-Output-, Action-, Datenabruf- und ACK-Methoden liefern `unsupported_operation`. Ein Adapter soll
+`poll` und `poll_input` liefern standardmäßig keine Daten. Nicht implementierte
+Request-, Transform-, Reasoning-, Output-, Action-, Datenabruf- und ACK-Methoden
+liefern `unsupported_operation`. Ein Adapter soll
 nur tatsächlich unterstützte Capabilities anbieten. Logs gehören nach stderr.
 
 `AdapterError::rejected` kennzeichnet einen abgewiesenen Auftrag,
@@ -87,9 +91,12 @@ gemacht. Dafür gelten die Recovery-Verträge des jeweiligen Treibers.
 
 Anwendungsbeispiele liegen in `adapters/simulated-sensor/src/main.rs` und
 `adapters/simulated-fan/src/main.rs`. Beide verwenden dieselbe `serve`-Funktion.
-Weitere Rollen wie Input und Reasoning sind im Manifestvertrag
-beschreibbar, haben aber noch keine Nachrichten und Callbacks in diesem
-stdio-SDK.
+Alle sieben Rollen besitzen Nachrichten und Callbacks. Ein einzelner Adapter
+kann mehrere Rollen anbieten. Input verwendet eigene Poll-/ACK-Nachrichten;
+Reasoning verwendet den verfahrensneutralen V2-Vertrag für Solver, Regeln,
+LLMs und andere KI-Verfahren. Der bisherige interne V1-Modellport bleibt
+erhalten. Einen Prozess- und Neustartnachweis enthält das
+[Input-/Reasoning-Beispiel](../../apps/adapter-host/examples/reason-task.md).
 
 Für referenzierte Binärdaten prüft das SDK zusätzlich Referenzform,
 Capability-Typ, Blockgröße, Offset und Antwortlänge. `read_data` wird für

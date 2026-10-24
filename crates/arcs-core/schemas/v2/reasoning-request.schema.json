@@ -1,0 +1,1 @@
+{"$id":"arcs.reasoning_request.v2","type":"object","required":["invocation"],"properties":{"invocation":{"type":"object"}},"additionalProperties":false}

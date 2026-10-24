@@ -30,6 +30,8 @@ pub struct AdapterGrant {
     /// Absolute Obergrenzen des Betreibers. Ein Request darf sie nur weiter
     /// einschränken, niemals erhöhen.
     pub reasoning_limits: Option<ReasoningLimits>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_limits_v2: Option<arcs_adapter_protocol::ReasoningLimitsV2>,
     /// Ohne ausdrückliches Limit bleibt der Abruf referenzierter Daten gesperrt.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub data_limits: Option<DataLimits>,

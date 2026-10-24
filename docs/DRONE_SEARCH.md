@@ -62,8 +62,15 @@ deren Topologie und Manifeste an eine Pipeline-ID binden und Fortschritt im
 Store speichern. Ausstehende Beobachtungen werden hinter einem dauerhaften
 Cursor verarbeitet. Freigabepolicies bleiben bei den Anwendungen.
 
-Noch nicht vorhanden sind eine Raum- und Drohnensimulation, eine Kamera,
-Bildwahrnehmung, ein Suchauftrag und eine fortlaufende Suchsteuerung.
+Eine einfache Raum- und Drohnensimulation ist jetzt vorhanden. Sie bewegt
+eine Drohne bei fester Höhe, prüft Wände und Hindernisse entlang der ganzen
+Strecke und speichert Zustand, Bewegungsjournal und Telemetrie-Outbox.
+`apps/drone-demo` weist eine freigegebene Bewegung mit separater Pose-Abfrage,
+persistierter Nachher-Observation und Outcome nach. Ein Neustart wiederholt
+die Bewegung nicht. Der Core wurde dafür nicht geändert.
+
+Noch nicht vorhanden sind eine Kamera, Bildwahrnehmung, ein Suchauftrag und
+eine fortlaufende Suchsteuerung. Die Simulation besitzt noch keine Anzeige.
 Die bestehende Host-CLI führt begrenzte Abfragen und Polling-Runden aus;
 die vollständige Suchschleife fehlt noch. Ihr allgemeiner Ablauf soll
 wiederverwendbar sein; die Anwendung ergänzt die Suchstrategie und Policy.
@@ -78,23 +85,25 @@ wiederverwendbar sein; die Anwendung ergänzt die Suchstrategie und Policy.
 - Eine einfache deterministische Suchstrategie als erster Ausgangspunkt.
 - Ein nachvollziehbarer Fundbericht mit Referenz auf das Kamerabild.
 
-Diese Vereinfachungen sind ein Umsetzungsvorschlag. Simulationsengine,
-Bildformat, Erkennungsverfahren und konkretes Zielobjekt sind noch offen.
+Die Bewegung verwendet inzwischen eine eigene deterministische Rust-
+Simulation bei fester Höhe. Bildformat, Kameramodell, Erkennungsverfahren
+und konkretes Zielobjekt sind noch offen.
 
 ## Geplante Zuständigkeiten
 
-Die folgenden Komponenten sind geplant, noch nicht implementiert:
+Die ersten Bewegungskomponenten sind implementiert; Kamera und Suche folgen:
 
-| Ort | Verantwortung |
+| Ort | Verantwortung und Stand |
 | --- | --- |
-| `simulation/` | Raum, Drohnenzustand, Bewegungen, Kollisionen und Kamerabilder |
-| `adapters/simulated-drone/` | Protokollzugang zur Simulation, Telemetrie, Kameraabfragen und Bewegungsbefehle |
-| `adapters/camera-perception/` | Bildanalyse mit referenziertem Eingangsbild, Fundkandidaten und beobachteten Bildpositionen |
-| `apps/drone-search/` | Suchauftrag, Suchstrategie, Verifikation, Freigabepolicy, Ablauf und Fundbericht |
-| `crates/arcs-core/` | Allgemeine Verträge und Kontrollmechanismen, soweit für den Durchstich erforderlich |
+| `simulation/room/` | Raum, Pose, Bewegung und Kollisionen implementiert; Kamerabilder fehlen |
+| `adapters/simulated-drone/` | Telemetrie, gezielte Pose-Abfrage und idempotente Bewegung implementiert; Kameraabfragen fehlen |
+| `apps/drone-demo/` | Einzelner Bewegungsauftrag, Verification, System-Approval und Wirkungsprüfung implementiert |
+| `adapters/camera-perception/` | Geplant: Bildanalyse mit referenziertem Eingangsbild, Fundkandidaten und beobachteten Bildpositionen |
+| `apps/drone-search/` | Geplant: Suchauftrag, Strategie, fortlaufender Ablauf und Fundbericht |
+| `crates/arcs-core/` | Bestehende allgemeine Verträge und Kontrollmechanismen; für die Bewegung unverändert |
 
-Simulation und Drohnenadapter können anfangs in einem Prozess laufen.
-Ihre Verantwortung bleibt getrennt. Auch die Kamerawahrnehmung kann zunächst
+Simulation und Drohnenadapter laufen derzeit in einem Prozess, mit der
+Bewegungslogik in einer separaten Bibliothek. Auch die Kamerawahrnehmung kann zunächst
 ein einfaches Verfahren verwenden, muss aber die erzeugten Bilddaten auswerten.
 Objektspezifische Regeln und die Simulationsengine gehören nicht in den Core.
 
@@ -153,17 +162,14 @@ ohne falsche Erfolgsmeldung.
 
 ## Nächster Umsetzungsschritt
 
-Die [allgemeinen Adapterfähigkeiten](GENERAL_ADAPTERS.md) sind inzwischen
-auch als durchgehende Observe → Transform → Output-Kette nachgewiesen.
-Die gemeinsame Adapter-Session liegt im geräteunabhängigen
-`arcs-adapter-sdk`. Als nächster Anwendungsnachweis kann eine einfache,
-reproduzierbare Raum- und Drohnensimulation außerhalb des Core entstehen.
-Ein Drohnenadapter nutzt die vorhandenen Observe-/Request-/Act-Verträge;
-eine zusätzliche allgemeine Abstraktion wird nur bei nachgewiesenem Bedarf
-ergänzt.
-
-Bei der späteren Erprobung liefert der Drohnenanschluss Telemetrie und
-Bewegungsfähigkeiten über diese allgemeinen Mechanismen. Der erste
-drohnenspezifische Nachweis lautet dann: ARCS erhält eine Observation,
-führt eine freigegebene Bewegung aus und beobachtet die veränderte Pose.
-Darauf folgen Kamerabild, Bildauswertung und die vollständige Suche.
+Die [allgemeinen Adapterfähigkeiten](GENERAL_ADAPTERS.md) und der
+[erste Drohnen-Bewegungsnachweis](../apps/drone-demo/README.md) sind vorhanden.
+Die allgemeinen Input- und Reasoning-Anschlüsse sind jetzt auch über stdio
+vorhanden. Der neutrale Reasoning-V2-Port unterstützt Solver und Modell-
+verfahren; echte KI-Anbieter und dauerhaft laufende Orchestrierung bleiben
+nächste allgemeine Schritte. Der Stand steht im [Reasoning-Entwurf](REASONING.md).
+Danach folgt eine simulierte Kamera, die aus Raum, Pose und Blickrichtung
+echte Bilddaten erzeugt. Der Adapter soll diese über den bestehenden
+Datenreferenzvertrag liefern. Der Fundnachweis muss anschließend auf diesen
+Bildern beruhen; eine versteckte Zielposition darf die Wahrnehmung nicht
+ersetzen. Bildauswertung und die vollständige Suchschleife folgen danach.

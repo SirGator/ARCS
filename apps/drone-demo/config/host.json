@@ -1,0 +1,18 @@
+{
+  "config_version":1,
+  "database":"../../../var/drone-core.sqlite",
+  "node_id":"drone-demo",
+  "schemas":[
+    "../../../adapters/simulated-drone/schemas/pose.schema.json",
+    "../../../adapters/simulated-drone/schemas/query.schema.json",
+    "../../../adapters/simulated-drone/schemas/move-candidate.schema.json",
+    "../../../adapters/simulated-drone/schemas/result.schema.json",
+    "cycle.schema.json"
+  ],
+  "adapters":[{
+    "program":"../../../target/debug/arcs-simulated-drone",
+    "profile":"../../../adapters/simulated-drone/config/profile.json",
+    "args":[{"path":"../../../var/drone-adapter.sqlite"}],
+    "grant_file":"grant.json"
+  }]
+}

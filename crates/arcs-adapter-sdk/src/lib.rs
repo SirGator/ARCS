@@ -24,6 +24,12 @@ pub struct PendingObservation {
     pub observation: ObservationMessage,
 }
 
+#[derive(Debug, Clone)]
+pub struct PendingInput {
+    pub message_id: String,
+    pub input: arcs_adapter_protocol::InputMessage,
+}
+
 /// Ein fachlicher oder betrieblicher Fehler, der über das Protokoll gemeldet wird.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AdapterError {
@@ -73,6 +79,19 @@ impl std::error::Error for AdapterError {}
 /// Host bedient werden; das SDK authentifiziert keine fremden Aufrufer.
 pub trait Adapter {
     fn manifest(&self) -> AdapterManifest;
+    fn reason_v2(
+        &mut self,
+        _invocation: arcs_adapter_protocol::ReasoningInvocationV2,
+    ) -> Result<arcs_adapter_protocol::ReasoningResponseV2, AdapterError> {
+        Err(AdapterError::unsupported())
+    }
+
+    fn poll_input(&mut self) -> Result<Option<PendingInput>, AdapterError> {
+        Ok(None)
+    }
+    fn acknowledge_input(&mut self, _message_id: &str) -> Result<(), AdapterError> {
+        Err(AdapterError::unsupported())
+    }
 
     /// Liefert dieselbe ausstehende Observation bis zu deren Bestätigung.
     fn poll(&mut self) -> Result<Option<PendingObservation>, AdapterError> {
@@ -201,6 +220,53 @@ fn dispatch(
     message: HostMessage,
 ) -> Result<AdapterMessage, AdapterError> {
     match message {
+        HostMessage::ReasonV2 { invocation } => {
+            if invocation.capability.adapter_id!=manifest.adapter_id || invocation.invocation_id.trim().is_empty()
+                || invocation.request_id.trim().is_empty() || !invocation.budget.supports(invocation.method)
+                || !manifest.capability(&invocation.capability.capability_id).is_some_and(|cap|matches!(&cap.contract,CapabilityContract::Reason {emits} if emits.contains(&invocation.target_schema_id)))
+            {return Err(AdapterError::rejected("reasoning contract mismatch"));}
+            let id = invocation.invocation_id.clone();
+            let request = invocation.request_id.clone();
+            let method = invocation.method;
+            let budget = invocation.budget.clone();
+            let response = adapter.reason_v2(invocation)?;
+            if response.invocation_id != id
+                || response.request_id != request
+                || response.trace.method != method
+                || response.candidates.len() > budget.max_candidates
+                || serde_json::to_vec(&response)
+                    .map_err(|_| invalid_response("invalid reasoning response"))?
+                    .len()
+                    > budget.max_output_bytes
+            {
+                return Err(invalid_response("reasoning correlation or size mismatch"));
+            }
+            Ok(AdapterMessage::ReasoningResultV2 { response })
+        }
+        HostMessage::PollInput => match adapter.poll_input()? {
+            None => Ok(AdapterMessage::Idle),
+            Some(pending) => {
+                if pending.message_id.trim().is_empty()
+                    || pending.message_id.len() > 128
+                    || !manifest
+                        .capability(&pending.input.capability_id)
+                        .is_some_and(|cap| cap.contract.is_input())
+                {
+                    return Err(invalid_response("invalid input identity or capability"));
+                }
+                Ok(AdapterMessage::Input {
+                    message_id: pending.message_id,
+                    input: pending.input,
+                })
+            }
+        },
+        HostMessage::AckInput { message_id } => {
+            if message_id.trim().is_empty() || message_id.len() > 128 {
+                return Err(AdapterError::rejected("invalid input ACK"));
+            }
+            adapter.acknowledge_input(&message_id)?;
+            Ok(AdapterMessage::InputAcknowledged { message_id })
+        }
         HostMessage::Output { invocation } => {
             let contract = manifest
                 .capability(&invocation.capability.capability_id)

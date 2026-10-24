@@ -118,6 +118,28 @@ persistenten Datenbank, nicht zwischen unabhängigen Stores.
 Unbekannte Konfigurationsfelder, doppelte IDs, ungültige Schemas, unpassende
 Request-Payloads und fehlende Dateien werden sichtbar abgewiesen.
 
+## Externe Inputs und Reasoning
+
+`Host::poll_inputs` übernimmt Aufgaben und Ereignisse von aktivierten
+Input-Capabilities. Der Core validiert und persistiert jede Nachricht vor dem
+ACK. Dieselbe Nachrichten-ID mit gleichem Inhalt liefert dasselbe Artefakt;
+geänderter Inhalt wird abgewiesen. Input aktualisiert weder Current-State noch
+World Model automatisch und startet keine Aktion oder Reasoning-Aufgabe.
+
+`Host::reason(ReasoningRequestV2)` ruft einen explizit ausgewählten Reasoner auf.
+Die Anwendung bestimmt Kontextfelder, Verfahren, Ziel-Schema, erlaubte
+Fähigkeiten und Budget innerhalb des Betreiber-Grants `reasoning_limits_v2`.
+Solver, Regeln, LLMs und andere KI-Verfahren verwenden denselben V2-Port.
+Modellbasierte Verfahren benötigen die Producer-Klasse `Model`; ihre Ergebnisse
+bleiben `Model` mit niedrigem Trust. Alle Ergebnisse sind Kandidaten ohne
+automatische Freigabe. Request, Antwort und Kandidaten werden dauerhaft
+journalisiert und bei identischen Wiederholungen wiederverwendet.
+
+Das [ausführbare Beispiel](examples/reason-task.md) verbindet eine JSON-Eingabe,
+einen mathematischen Solver und einen aufgezeichneten Modell-Testadapter. Es
+enthält noch keinen echten Modellanbieter. Polling und Reasoning sind synchron;
+eine dauerhaft laufende, ereignisgesteuerte Orchestrierung folgt separat.
+
 ## Konfigurierte Datenabfragen
 
 Gezielte Request-Abfragen liefern einen JSON-Payload. Für größere
@@ -209,6 +231,14 @@ Definition, Input und CLI-Bericht für einen konfigurierten Auftrag.
 
 Die Details zu Trust, Replay und Kontrollgrenzen stehen im
 [Transform-Beispiel](../../adapters/normalize-number/README.md).
+
+`Host::request_version(&CapabilityRef, &VersionId, &SchemaId)` führt analog
+eine Request-Capability mit einem bereits gespeicherten Query-Artefakt aus.
+Die Anwendung erzeugt dessen Eingabe über den InputService. Eine neue
+Eingabeversion ermöglicht eine neue Messung; dieselbe Version liefert den
+persistierten Snapshot. Auch konfigurierte Requests verwenden diesen Weg.
+Der [Drohnen-Bewegungsnachweis](../drone-demo/README.md) nutzt ihn für
+getrennte Vorher-/Nachher-Abfragen ohne fachliche Sonderfälle im Host.
 
 ## Kontrollierte Ausgabe
 
@@ -322,7 +352,7 @@ Quelle, Persistenz und Einschränkungen beschreibt die
 
 Dieser CLI-Host führt einen **begrenzten Lauf** aus. Er ist kein automatisch
 neu verbindender Hintergrunddienst. Standardmäßig liest er je Adapter bis
-`idle` oder bis zum Budget von 1000 Observations und beendet danach alle
+`idle` oder bis zum jeweiligen Budget von 1000 Inputs und Observations und beendet danach alle
 Prozesse. Zusätzliche Runden und Pausen sind konfigurierbar:
 
 | Feld | Bedeutung | Standard |
@@ -330,16 +360,19 @@ Prozesse. Zusätzliche Runden und Pausen sind konfigurierbar:
 | `timeout_ms` je Adapter | Deadline eines stdio-Dialogschritts, 1 bis 3.600.000 ms | 5000 |
 | `polling.rounds` | Anzahl der Polling-Runden, mindestens 1 | 1 |
 | `polling.interval_ms` | Pause zwischen Runden, 0 bis 60.000 ms | 0 |
+| `polling.max_inputs_per_adapter` | Input-Budget je Adapter und Runde, mindestens 1 | 1000 |
 | `polling.max_observations_per_adapter` | Budget je Adapter und Runde, mindestens 1 | 1000 |
 
-Adapter ohne aktivierte Observe-Capability werden nicht gepollt. Wenn nur
+Input- und Observation-Polling prüfen ihre jeweilige aktivierte Rolle.
+Adapter ohne aktivierte Observe-Capability werden nicht nach Observations gepollt. Wenn nur
 ein Teil ihrer Observe-Capabilities aktiviert ist, dürfen sie auch nur diese
 liefern; nicht freigegebene Daten werden nicht stillschweigend akzeptiert.
 
 Der JSON-Bericht enthält gespeicherte Artefaktzahl, World-Revision, aktuelle
 Estimates mit Evidenz und Trust, Request-Ergebnisse sowie Zähler je Adapter.
 `poll_limit_hits` zeigt, wie oft ein Budget vollständig verbraucht wurde;
-es beweist nicht, dass weitere Daten ausstehen.
+es beweist nicht, dass weitere Daten ausstehen. `inputs` enthält übernommene
+Input-Artefakte und `input_limit_hits` die ausgeschöpften Input-Budgets.
 
 Der World-State wird beim Start aus dem gesamten Observation-Log aufgebaut.
 Identische Wiederholungen werden bestätigt, ohne den Zustand zurückzusetzen.
@@ -350,8 +383,9 @@ auch im Fehlerfall beendet; es gibt keine versteckten Retries oder Fallbacks.
 
 ## Einbindung in eine Anwendung
 
-Die Bibliothek `arcs_host` stellt `Host::open`, `request`, `transform`,
-`transform_configured`, `prepare_output`, `deliver_output`, `copy_data`, `poll_round`,
+Die Bibliothek `arcs_host` stellt `Host::open`, `request`, `request_version`, `transform`,
+`transform_configured`, `reason`, `prepare_output`, `deliver_output`, `copy_data`,
+`poll_inputs`, `poll_round`,
 `report`, `shutdown` und `execute_approved` bereit. Eine Anwendung kann mit
 den Core-Diensten ihre eigenen Vorschläge, Verification und Approvals
 erzeugen. `execute_approved` akzeptiert ausschließlich die Version einer

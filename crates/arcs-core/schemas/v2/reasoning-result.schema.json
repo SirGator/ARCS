@@ -1,0 +1,1 @@
+{"$id":"arcs.reasoning_result.v2","type":"object","required":["response"],"properties":{"response":{"type":"object"}},"additionalProperties":false}

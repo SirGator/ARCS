@@ -29,6 +29,8 @@ ARCS/
 │   │   └── schemas/                 Versionierte allgemeine Artefakt-Schemas
 │   ├── arcs-adapter-protocol/       IDs, Manifeste, Nachrichten und JSON-Framing
 │   └── arcs-adapter-sdk/            Gemeinsame externe Adapter-Session
+├── simulation/
+│   └── room/                       Reine Raumgeometrie und Bewegung bei fester Höhe
 ├── adapters/
 │   ├── simulated-sensor/           Eigenes Cargo-Paket und ausführbarer Adapter
 │   │   ├── src/
@@ -43,8 +45,12 @@ ARCS/
 │   │   └── config/profile.json
 │   ├── normalize-number/           Deterministischer Transform mit eigenen Schemas
 │   ├── json-report/                Schemaunabhängige JSON-Darstellung als Bericht
+│   ├── json-input/                 Externe JSON-Ereignisse mit dauerhafter ACK-Outbox
+│   ├── example-reasoner/           Mathematischer Solver und separater Modell-Testadapter
+│   ├── simulated-drone/            Telemetrie und idempotente Bewegung im Raum
 │   └── file-output/                Idempotente Ausgabe mit Journal und JSON-Berichten
 ├── apps/
+│   ├── drone-demo/                 Freigegebene Bewegung und beobachtete Wirkungsprüfung
 │   ├── adapter-host/               Allgemeiner Host mit JSON-Konfiguration
 │   │   ├── src/                    CLI und Bibliothek ohne Geräteabhängigkeit
 │   │   ├── config/                 Programme, Profile, Schemas, Grants und Abfragen
@@ -113,6 +119,20 @@ und setzt unterbrochene Eingaben über die dauerhaften Core-Aufrufe fort.
 Der Adapter `adapters/json-report` kann auch andere deklarierte JSON-Verträge
 darstellen und enthält kein Sensor- oder Drohnenwissen.
 
+Das [Input-/Reasoning-Beispiel](apps/adapter-host/examples/reason-task.md)
+verbindet eine persistente JSON-Eingabe mit zwei unabhängigen Reasoner-Prozessen:
+einem mathematischen Solver und einem ausdrücklich aufgezeichneten Modelltest.
+Es zeigt Kontextauswahl, unterschiedliche Trust-Herkunft und Wiederaufnahme
+anhand derselben Artefakte. Ein echter Modellanbieter ist noch nicht angebunden.
+
+Der erste [Drohnen-Bewegungsnachweis](apps/drone-demo/README.md) verbindet
+eine separate Raum-Simulation mit einem externen Drohnenadapter und den
+bestehenden allgemeinen Kontrollmechanismen. Er liest die Pose, führt eine
+begrenzt freigegebene Bewegung aus und prüft die neue Position anhand einer
+separaten Abfrage und einer gespeicherten Observation. Zustand, Outbox und
+Bewegungsjournal überstehen Neustarts ohne zweite Bewegung. Eine Kamera und
+die autonome Suche sind noch nicht implementiert.
+
 Die Komponenten lassen sich innerhalb des Workspace getrennt bauen:
 
 ```bash
@@ -133,6 +153,14 @@ Anwendungs- und Bewährungsfall. Allgemeine Zielverfolgung, Beobachtung,
 Planung und kontrollierte Ausführung sollen auch für andere Aufgaben nutzbar
 sein; Gerätewissen und aufgabenspezifische Regeln bleiben austauschbar.
 
+Das gilt ausdrücklich auch für Reasoning: Mehrere mathematische Solver,
+Regelverfahren, LLMs und andere KI-Modelle sollen nebeneinander anschließbar
+sein. Reasoning ist die allgemeine Lösungsrolle; die neue
+V2-Schnittstelle unterstützt diese Verfahren. Ein mathematischer Solver
+und ein Modell-Testadapter weisen sie nach; echte Modellanbieter fehlen noch.
+Den verbindlichen Ausbau beschreibt der
+[Reasoning-Entwurf](docs/REASONING.md).
+
 Das erste große Anwendungsziel ist: **ARCS steuert eine simulierte Drohne
 durch einen simulierten Raum und findet darin ein vorgegebenes Zielobjekt
 mithilfe der Drohnenkamera.**
@@ -142,8 +170,8 @@ eine freigegebene Bewegung ausführen und das Ergebnis erneut beobachten.
 Ein Fund muss auf Kamerabildern beruhen und mit gespeicherter Evidenz
 nachvollziehbar sein. Drohnenadapter und Simulation bleiben außerhalb des
 Core. Aktuell sind die allgemeine Adapteranbindung und die kontrollierte
-Action-Pipeline vorhanden; Drohne, Kamera und Suchsteuerung sind noch nicht
-implementiert.
+Action-Pipeline sowie eine einfache Drohnenbewegung in einer Raumsimulation
+vorhanden. Kamera und Suchsteuerung sind noch nicht implementiert.
 
 Etappen, Zuständigkeiten und Erfolgskriterien stehen im
 [Plan für die Drohnensuche](docs/DRONE_SEARCH.md).
@@ -182,10 +210,11 @@ Observation → Belief Update → Goal → Memory/Skill Retrieval
 | --- | --- |
 | Versionierte Artefakte, Schemas, Provenance und Trust | Implementiert |
 | Adapter-Manifeste und getrennte Betreiber-Grants | Implementiert |
-| Gemeinsames Adapter-SDK für Observe, Request, Transform, Output und Act | Implementiert, mehrere unabhängige Adapter |
+| Gemeinsames Adapter-SDK für Input, Observe, Request, Transform, Reason, Act und Output | Implementiert, einschließlich neutralem Reasoning-V2-Port |
 | Transform mit geprüften Ein-/Ausgaben, Provenienz und persistentem Replay | Implementiert, allgemeiner Zahlen-Normalisierer als Beispiel |
 | Output mit gebundenem Auftrag, Verification, Approval und Beleg | Implementiert, Dateiausgabe mit Journal und Recovery |
 | Mehrstufige Observe → Transform → Output-Pipelines | Allgemeiner Host-Runner mit gebundener Definition, Checkpoints und Cursor; Freigabepolicy in der Anwendung |
+| Raum- und Drohnensimulation | Bewegung bei fester Höhe, Kollisionsprüfung, persistente Telemetrie und freigegebene Action mit Wirkungsprüfung |
 | Referenzierte Binärdaten mit begrenztem Abruf und separaten Grants | Implementiert, allgemeine Dateiquelle als Prozessnachweis |
 | Allgemeiner Host mit JSON-Konfiguration und mehreren Adapterprozessen | Implementiert, einschließlich konfigurierter Datenabfragen |
 | Externer stdio-Adapter mit Geräteprofil, ACK und persistentem Replay | Erster Observation-Slice implementiert |
@@ -194,7 +223,7 @@ Observation → Belief Update → Goal → Memory/Skill Retrieval
 | Observation → Entity → StateEstimate → WorldState | Implementiert |
 | Append-only SQLite-Store und deterministisches Replay | Implementiert |
 | Artifact-Netz als bekannter Fast Path | Implementiert |
-| Kuratiertes Reasoning als Fallback | Implementiert |
+| Kuratiertes Reasoning | V1-Modellfall und allgemeiner V2-Port; externe Solver und Modell-Testadapter, noch kein echter Modellanbieter |
 | Verification → Approval → Action → Execution → Outcome | Implementiert |
 | Explizite Goals und maschinenprüfbare Zielbedingungen | Geplant |
 | Episodisches Memory und wiederverwendbare Skills | Geplant |
