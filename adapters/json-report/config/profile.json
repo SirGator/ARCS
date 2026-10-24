@@ -1,0 +1,7 @@
+{
+  "adapter_id": "example.report",
+  "accepts": [
+    "arcs.measurement.temperature.v1",
+    "arcs.number.normalized.v1"
+  ]
+}

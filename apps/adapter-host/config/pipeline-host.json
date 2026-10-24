@@ -1,0 +1,29 @@
+{
+  "config_version": 1,
+  "database": "../../../var/pipeline-v2-host.sqlite",
+  "node_id": "pipeline-host",
+  "schemas": [
+    "../../../adapters/simulated-sensor/schemas/temperature.schema.json",
+    "../../../adapters/normalize-number/schemas/normalized-number.schema.json",
+    "../../../adapters/file-output/schemas/report.schema.json",
+    "../../../adapters/file-output/schemas/receipt.schema.json"
+  ],
+  "adapters": [
+    {
+      "program": "../../../target/debug/arcs-simulated-sensor",
+      "profile": "../../../adapters/simulated-sensor/config/profile.json",
+      "grant_file": "grants/sensor.json"
+    },
+    {
+      "program": "../../../target/debug/arcs-json-report",
+      "profile": "../../../adapters/json-report/config/profile.json",
+      "grant_file": "grants/report.json"
+    },
+    {
+      "program": "../../../target/debug/arcs-file-output",
+      "profile": "../../../adapters/file-output/config/pipeline.json",
+      "args": [{"path": "../../../var/pipeline-v2-output-journal.sqlite"}],
+      "grant_file": "grants/output.json"
+    }
+  ]
+}

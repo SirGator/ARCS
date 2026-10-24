@@ -53,6 +53,14 @@ Das Zahlen-Beispiel weist diese Grenze ohne Drohnen- oder Kamerawissen nach.
 Ein allgemeiner Output-Port kann freigegebene Ergebnisse inzwischen an eine
 Ausgabesenke liefern. Die Dateiausgabe demonstriert das mit gebundenem Auftrag,
 separater Verification und Approval sowie einem dauerhaften Zustellungsbeleg.
+Eine konfigurierte Beispielanwendung verbindet inzwischen Sensor, allgemeinen
+JSON-Berichtstransform und Dateiausgabe über drei echte Adapterprozesse.
+Sie weist Quellenauswahl, Provenienz, Trust-Grenze, explizite Exportpolicy
+und Wiederaufnahme ohne zusätzliche Zustellungen nach.
+Der allgemeine Host-Runner kann außerdem mehrere Transform-Stufen ausführen,
+deren Topologie und Manifeste an eine Pipeline-ID binden und Fortschritt im
+Store speichern. Ausstehende Beobachtungen werden hinter einem dauerhaften
+Cursor verarbeitet. Freigabepolicies bleiben bei den Anwendungen.
 
 Noch nicht vorhanden sind eine Raum- und Drohnensimulation, eine Kamera,
 Bildwahrnehmung, ein Suchauftrag und eine fortlaufende Suchsteuerung.
@@ -145,11 +153,14 @@ ohne falsche Erfolgsmeldung.
 
 ## Nächster Umsetzungsschritt
 
-Zuerst werden die [allgemeinen Adapterfähigkeiten](GENERAL_ADAPTERS.md)
-ausgebaut und an bestehenden Beispielen nachgewiesen. Die gemeinsame
-Adapter-Session liegt jetzt im geräteunabhängigen `arcs-adapter-sdk`;
-Sensor und Lüfter verwenden sie bereits. Der Drohnensimulator wird erst
-anschließend an diese Grundlage angebunden.
+Die [allgemeinen Adapterfähigkeiten](GENERAL_ADAPTERS.md) sind inzwischen
+auch als durchgehende Observe → Transform → Output-Kette nachgewiesen.
+Die gemeinsame Adapter-Session liegt im geräteunabhängigen
+`arcs-adapter-sdk`. Als nächster Anwendungsnachweis kann eine einfache,
+reproduzierbare Raum- und Drohnensimulation außerhalb des Core entstehen.
+Ein Drohnenadapter nutzt die vorhandenen Observe-/Request-/Act-Verträge;
+eine zusätzliche allgemeine Abstraktion wird nur bei nachgewiesenem Bedarf
+ergänzt.
 
 Bei der späteren Erprobung liefert der Drohnenanschluss Telemetrie und
 Bewegungsfähigkeiten über diese allgemeinen Mechanismen. Der erste

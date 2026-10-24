@@ -10,6 +10,7 @@ use serde_json::Value;
 use crate::HostError;
 
 pub(crate) const HOST_ID: &str = "arcs.host";
+pub(crate) const PIPELINE_ID: &str = "arcs.host.pipeline";
 pub(crate) const DEFINITION_SCHEMA: &str = "arcs.input.host_request.v1";
 pub(crate) const TRANSFORM_DEFINITION_SCHEMA: &str = "arcs.input.host_transform.v1";
 
@@ -218,6 +219,12 @@ impl PreparedConfig {
                 path: "<host-transform>".into(),
                 source,
             })?;
+        schemas
+            .register_json(include_str!("../schemas/pipeline-record.schema.json"))
+            .map_err(|source| HostError::Schema {
+                path: "<host-pipeline>".into(),
+                source,
+            })?;
         for path in config.schemas {
             let path = resolve(base, &path)?;
             let document = std::fs::read_to_string(&path).map_err(|source| HostError::Io {
@@ -263,7 +270,9 @@ impl PreparedConfig {
                 });
             }
             let grant: AdapterGrant = read_json(&resolve(base, &adapter.grant_file)?)?;
-            if grant.adapter_id.0 == HOST_ID || !adapter_ids.insert(grant.adapter_id.clone()) {
+            if [HOST_ID, PIPELINE_ID].contains(&grant.adapter_id.0.as_str())
+                || !adapter_ids.insert(grant.adapter_id.clone())
+            {
                 return Err(invalid(format!(
                     "duplicate or reserved adapter ID {}",
                     grant.adapter_id.0

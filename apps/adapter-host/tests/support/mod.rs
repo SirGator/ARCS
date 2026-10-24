@@ -29,6 +29,8 @@ pub fn adapter_binary(name: &str) -> PathBuf {
                 "arcs-normalize-number",
                 "-p",
                 "arcs-file-output",
+                "-p",
+                "arcs-json-report",
                 "--target-dir",
             ])
             .arg(target_directory);

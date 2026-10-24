@@ -9,6 +9,7 @@ members = [
     "adapters/file-data",
     "adapters/normalize-number",
     "adapters/file-output",
+    "adapters/json-report",
     "apps/demo-host",
     "apps/adapter-host",
 ]

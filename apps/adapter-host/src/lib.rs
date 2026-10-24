@@ -2,6 +2,7 @@
 
 pub mod config;
 mod error;
+pub mod pipeline;
 mod runtime;
 
 pub use error::HostError;

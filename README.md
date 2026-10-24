@@ -42,6 +42,7 @@ ARCS/
 │   │   ├── src/
 │   │   └── config/profile.json
 │   ├── normalize-number/           Deterministischer Transform mit eigenen Schemas
+│   ├── json-report/                Schemaunabhängige JSON-Darstellung als Bericht
 │   └── file-output/                Idempotente Ausgabe mit Journal und JSON-Berichten
 ├── apps/
 │   ├── adapter-host/               Allgemeiner Host mit JSON-Konfiguration
@@ -100,6 +101,17 @@ Approval und persistiert den Empfangsbeleg. Der Adapter übernimmt die konkrete
 Dateiveröffentlichung und Wiederherstellung nach verlorenen Antworten.
 Die [Dateiausgabe-Dokumentation](adapters/file-output/README.md) enthält einen
 vollständigen Nachweis mit ausdrücklich benannter lokaler Beispielpolicy.
+
+Das [Pipeline-Beispiel](apps/adapter-host/examples/observe-report/README.md)
+verbindet drei echte Prozesse: Sensorbeobachtung → JSON-Bericht → freigegebene
+Dateiausgabe. Quelle, Transform, Ziel und Schema-Übergänge stehen in JSON;
+die Exportpolicy bleibt in der Anwendung. Wiederholte Läufe verwenden die
+gespeicherten Checkpoints und verarbeiten nur ausstehende Beobachtungen.
+Der allgemeine Runner `arcs_host::pipeline::run_pipeline` unterstützt mehrere
+explizite Transform-Schritte, prüft alle Schema-Übergänge vor dem Polling
+und setzt unterbrochene Eingaben über die dauerhaften Core-Aufrufe fort.
+Der Adapter `adapters/json-report` kann auch andere deklarierte JSON-Verträge
+darstellen und enthält kein Sensor- oder Drohnenwissen.
 
 Die Komponenten lassen sich innerhalb des Workspace getrennt bauen:
 
@@ -173,6 +185,7 @@ Observation → Belief Update → Goal → Memory/Skill Retrieval
 | Gemeinsames Adapter-SDK für Observe, Request, Transform, Output und Act | Implementiert, mehrere unabhängige Adapter |
 | Transform mit geprüften Ein-/Ausgaben, Provenienz und persistentem Replay | Implementiert, allgemeiner Zahlen-Normalisierer als Beispiel |
 | Output mit gebundenem Auftrag, Verification, Approval und Beleg | Implementiert, Dateiausgabe mit Journal und Recovery |
+| Mehrstufige Observe → Transform → Output-Pipelines | Allgemeiner Host-Runner mit gebundener Definition, Checkpoints und Cursor; Freigabepolicy in der Anwendung |
 | Referenzierte Binärdaten mit begrenztem Abruf und separaten Grants | Implementiert, allgemeine Dateiquelle als Prozessnachweis |
 | Allgemeiner Host mit JSON-Konfiguration und mehreren Adapterprozessen | Implementiert, einschließlich konfigurierter Datenabfragen |
 | Externer stdio-Adapter mit Geräteprofil, ACK und persistentem Replay | Erster Observation-Slice implementiert |

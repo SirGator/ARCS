@@ -108,8 +108,8 @@ die Schemas im Store und prüft beim Handshake die echten Manifeste und Grants.
 Eine Änderung eines bereits gespeicherten Schema-Vertrags unter derselben
 ID führt zu `SchemaDrift`; Schema-Evolution braucht eine neue ID.
 
-Adapter-IDs müssen eindeutig sein. `arcs.host` ist für den internen Input-
-Dienst des Hosts reserviert. `node_id` ist standardmäßig `adapter-host` und
+Adapter-IDs müssen eindeutig sein. `arcs.host` und `arcs.host.pipeline` sind
+für interne Input-Dienste des Hosts reserviert. `node_id` ist standardmäßig `adapter-host` und
 enthält 1 bis 64 ASCII-Buchstaben, Ziffern, Punkte, Unterstriche oder Bindestriche.
 Unabhängige Installationen sollten eigene Node-Namen und zugehörige Adapter-
 Datenbanken verwenden. Die ID-Garantie des Stores gilt innerhalb seiner
@@ -244,6 +244,40 @@ der World-State ändert sich durch die Zustellung nicht automatisch.
 
 Profile, Journal und Recovery beschreibt die
 [Dateiausgabe-Dokumentation](../../adapters/file-output/README.md).
+
+## Durchgehende Adapterkette
+
+Der allgemeine Runner `arcs_host::pipeline::run_pipeline` verbindet eine
+Observe-Quelle, 1 bis 32 konfigurierte Transform-Schritte und eine Output-Senke.
+Das Beispiel `observe-report` verwendet ihn mit einer eigenen Exportpolicy.
+Die drei Prozesse und ihre Grants stehen in
+`config/pipeline-host.json`; Quelle, Schema-Übergänge und Ziele in
+`config/pipeline.json`:
+
+```bash
+cargo build --locked --workspace --bins
+cargo run --locked -p arcs-host --example observe-report -- \
+  apps/adapter-host/config/pipeline-host.json \
+  apps/adapter-host/config/pipeline.json
+```
+
+Die Messungen 25 °C und 26 °C werden gespeichert, durch den allgemeinen
+`json-report`-Adapter dargestellt und nach Verification und System-Approval
+unter `var/pipeline-v2-reports/` veröffentlicht. Ein zweiter Transform entfernt
+Formatierungsleerzeichen aus dem JSON-Bericht. Die benannte lokale Exportpolicy
+liegt im Beispielprogramm. Die normale Host-CLI startet diese Kette nicht.
+Ein dauerhafter Cursor überspringt abgeschlossene Eingaben. Unterbrochene
+Eingaben verwenden die gespeicherten Zwischenversionen und Zustellungsbelege.
+
+Das Beispiel führt eine Polling-Runde aus und verarbeitet ausstehende
+Quellenbeobachtungen innerhalb eines Budgets pro Lauf. Definition und
+Checkpoints werden über den InputService im Core-Store gespeichert. Die
+Pipeline-ID bindet Topologie, Schemas und Adaptermanifeste; Änderungen
+benötigen eine neue ID. Der erforderliche `PipelineApproval`-Callback stammt
+von der Anwendung. Es gibt keinen Hintergrunddienst. Details zur
+Konfiguration (Version 2), Policy, Wiederaufnahme und
+den Prozess-Tests stehen in der
+[Pipeline-Anleitung](examples/observe-report/README.md).
 
 ## Referenzierte Binärdaten
 

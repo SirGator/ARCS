@@ -1,0 +1,11 @@
+{
+  "$id": "arcs.input.host_pipeline.v1",
+  "type": "object",
+  "required": ["kind", "pipeline_id", "data"],
+  "properties": {
+    "kind": {"type":"string","enum":["definition","checkpoint"]},
+    "pipeline_id": {"type":"string","minLength":1},
+    "data": {"type":"object"}
+  },
+  "additionalProperties": false
+}

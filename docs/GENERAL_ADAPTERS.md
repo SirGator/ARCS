@@ -17,7 +17,8 @@ erste große Anwendungsziel.
 | Referenzierte Binärdaten und begrenzter Abruf unter separatem Grant | Protokoll, SDK, `DataService` und `Host::copy_data` |
 | Allgemeine Datenquelle mit persistenten Snapshots und Metadaten-ACK | `adapters/file-data` |
 | Kontrollierte Ausgabe mit zielgebundener Freigabe und Empfangsbeleg | `OutputService` und `adapters/file-output` |
-| Verschiedene Nutzer desselben SDK | Sensor, Lüfter, Dateiquelle, Zahlen-Normalisierer und Dateiausgabe unter `adapters/` |
+| Mehrstufige Observe → Transform → Output-Kette | Allgemeiner `arcs_host::pipeline`-Runner mit Definition, Checkpoints und Cursor; Beispielpolicy außerhalb des Runners |
+| Verschiedene Nutzer desselben SDK | Sensor, Lüfter, Dateiquelle, Zahlen-Normalisierer, JSON-Bericht und Dateiausgabe unter `adapters/` |
 
 Das SDK übernimmt die wiederkehrende Protokollarbeit. Ein Treiber ergänzt
 sein Manifest und die fachlichen Operationen. Derselbe Adapter kann mehrere
@@ -39,6 +40,16 @@ erzeugt keine Autorität und prüft keine Suchstrategie.
    und Einheiten. Output ist ebenfalls durchgängig umgesetzt: gebundener
    Ausgabeauftrag, separate Prüfung und Freigabe, externer Treiber und
    dauerhafter Beleg. Die Dateiausgabe weist Idempotenz und Recovery nach.
+   Eine konfigurierte Beispielanwendung verbindet inzwischen drei echte
+   Prozesse durchgängig: Sensorbeobachtung, allgemeine JSON-Berichtsdarstellung
+   und freigegebene Dateiausgabe. Zwei Eingabeschemas, niedriger Eingangstrust,
+   Quellenauswahl, Neustart und wirksame Ablehnung sind getestet. Die
+   Exportpolicy liegt ausdrücklich in der Anwendung, nicht im Host/Core.
+   Der Runner unterstützt inzwischen mehrere geordnete Transform-Schritte,
+   prüft die gesamte Kette vor dem Polling und bindet deren Manifeste an
+   eine feste Pipeline-ID. Persistierte Checkpoints und ein Cursor ermöglichen
+   Wiederaufnahme und Verarbeitung neuer Beobachtungen. Ein Fehler im zweiten
+   Transform mit späterer Wiederaufnahme ist als Prozess-Test nachgewiesen.
    Input und Reason sind im Manifestvertrag vorhanden; ihre Unterstützung
    im stdio-Transport muss gesondert umgesetzt werden.
 3. Referenzierte Binärdaten sind als allgemeiner Vertrag implementiert.
@@ -71,3 +82,8 @@ Details zur Implementierung stehen in der
 Anwendungsnachweis im [Plan für die Drohnensuche](DRONE_SEARCH.md).
 Der [Transform-Nachweis](../adapters/normalize-number/README.md) beschreibt
 die neue allgemeine Verarbeitungsgrenze und ihre aktuellen Einschränkungen.
+Die [Pipeline-Anleitung](../apps/adapter-host/examples/observe-report/README.md)
+zeigt die vollständige Kette. Der nächste Anwendungsnachweis kann nun
+Telemetrie und eine freigegebene Bewegung im einfachen Drohnensimulator
+über die bestehenden Observe-/Request-/Act-Verträge verbinden. Kamera und
+Wahrnehmung folgen danach; ihre Fachverträge bleiben bei den Komponenten.

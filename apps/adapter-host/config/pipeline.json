@@ -1,0 +1,13 @@
+{
+  "config_version": 2,
+  "pipeline_id": "sensor-report-v2",
+  "source": {"adapter_id": "demo.sensor", "capability_id": "temperature.observe"},
+  "input_schema_id": "arcs.measurement.temperature.v1",
+  "steps": [
+    {"id":"render","capability":{"adapter_id":"example.report","capability_id":"json.report"},"output_schema_id":"arcs.report.v1"},
+    {"id":"compact","capability":{"adapter_id":"example.report","capability_id":"report.compact"},"output_schema_id":"arcs.report.v1"}
+  ],
+  "output": {"adapter_id": "example.file-output", "capability_id": "report.write"},
+  "receipt_schema_id": "arcs.delivery_receipt.file.v1",
+  "max_observations": 100
+}
