@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -euo pipefail
+arcs_project_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+exec python3 "$arcs_project_dir/apps/control-panel/main.py" "$@"

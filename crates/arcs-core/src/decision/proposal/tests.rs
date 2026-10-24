@@ -60,6 +60,7 @@ fn setup() -> (SchemaRegistry, SqliteArtifactStore, AdapterRegistry) {
         max_payload_bytes: 4096,
         max_external_reference_bytes: 512,
         data_limits: None,
+        input_data_limits: None,
         reasoning_limits_v2: None,
         reasoning_limits: None,
     };

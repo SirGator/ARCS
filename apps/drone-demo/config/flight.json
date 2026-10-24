@@ -1,9 +1,0 @@
-{
-  "cycle_id":"move-1",
-  "adapter_id":"demo.drone",
-  "drone_id":"drone-1",
-  "movement":{"dx_m":0.5,"dy_m":0.0,"dyaw_deg":0.0},
-  "approve":true,
-  "max_auto_step_m":0.75,
-  "max_auto_turn_deg":45.0
-}

@@ -25,6 +25,17 @@ pub struct Envelope<T> {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum HostMessage {
+    BeginInputData {
+        invocation_id: String,
+        target: crate::CapabilityRef,
+        inputs: Vec<crate::InputDataDescriptor>,
+    },
+    InputDataChunk {
+        invocation_id: String,
+        name: String,
+        offset: u64,
+        bytes: Vec<u8>,
+    },
     Hello,
     Poll,
     PollInput,
@@ -58,6 +69,14 @@ pub enum HostMessage {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum AdapterMessage {
+    InputDataReady {
+        invocation_id: String,
+    },
+    InputDataStored {
+        invocation_id: String,
+        name: String,
+        next_offset: u64,
+    },
     Manifest {
         manifest: AdapterManifest,
     },

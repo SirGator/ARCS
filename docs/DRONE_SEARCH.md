@@ -2,12 +2,28 @@
 
 ## Festgelegtes Ziel
 
-ARCS soll eine simulierte Drohne durch einen simulierten Raum steuern und
-dabei mit der Drohnenkamera ein vorgegebenes Zielobjekt finden.
+ARCS soll eine simulierte Drohne durch einen anfangs unbekannten simulierten
+Raum ohne vorgegebene Karte steuern und dabei mit der Drohnenkamera ein
+vorgegebenes Zielobjekt finden.
+
+ARCS stellt als Harness verlässliche Sensordaten und nachvollziehbaren Kontext
+bereit; angeschlossene Reasoner übernehmen Analyse, Planung und Vorschläge.
+Die erste Priorität ist eine durchgängige Datengrundlage mit klaren Verträgen,
+zeitlicher Zuordnung, Herkunft und erkennbaren Unsicherheiten.
+
+Der Simulator kennt Raum und Zielposition für Physik und Bilderzeugung.
+ARCS erhält die vorgesehene Sensorik und baut daraus sein Umgebungswissen auf.
+Die vollständige Raumkarte und versteckte Zielkoordinaten dürfen ihm die
+Erkundung und kamerabasierte Erkennung nicht vorwegnehmen. Die Suche dient
+als erster Nachweis des allgemeinen Zusammenspiels von Datenbereitstellung,
+Reasoning, kontrolliertem Handeln und Wirkungsprüfung.
 
 Die bestehende Trennung gilt weiter: Der Core enthält allgemeine
 Artefakt-, World-, Reasoning-, Verification- und Action-Logik. Konkrete
-Geräteadapter und Simulationscode liegen außerhalb des Core.
+Geräteadapter, Kamera, Simulationscode und fachliche Demo liegen im
+eigenständigen Projekt `../drone-sim`, mit eigenem Repository und Cargo-
+Workspace. ARCS-Host und Core stellen den allgemeinen Harness und die
+Anschlussverträge bereit.
 
 ## Verbindliche Architekturvorgabe: Universalität
 
@@ -65,12 +81,13 @@ Cursor verarbeitet. Freigabepolicies bleiben bei den Anwendungen.
 Eine einfache Raum- und Drohnensimulation ist jetzt vorhanden. Sie bewegt
 eine Drohne bei fester Höhe, prüft Wände und Hindernisse entlang der ganzen
 Strecke und speichert Zustand, Bewegungsjournal und Telemetrie-Outbox.
-`apps/drone-demo` weist eine freigegebene Bewegung mit separater Pose-Abfrage,
+`../drone-sim/apps/drone-demo` weist eine freigegebene Bewegung mit separater Pose-Abfrage,
 persistierter Nachher-Observation und Outcome nach. Ein Neustart wiederholt
 die Bewegung nicht. Der Core wurde dafür nicht geändert.
 
-Noch nicht vorhanden sind eine Kamera, Bildwahrnehmung, ein Suchauftrag und
-eine fortlaufende Suchsteuerung. Die Simulation besitzt noch keine Anzeige.
+Die externe Kamera liefert inzwischen zugeordnete Bildsnapshots. Bildwahrnehmung,
+ein Suchauftrag, eine fortlaufende Suchsteuerung und eine interaktive Anzeige
+sind noch nicht vorhanden.
 Die bestehende Host-CLI führt begrenzte Abfragen und Polling-Runden aus;
 die vollständige Suchschleife fehlt noch. Ihr allgemeiner Ablauf soll
 wiederverwendbar sein; die Anwendung ergänzt die Suchstrategie und Policy.
@@ -86,24 +103,26 @@ wiederverwendbar sein; die Anwendung ergänzt die Suchstrategie und Policy.
 - Ein nachvollziehbarer Fundbericht mit Referenz auf das Kamerabild.
 
 Die Bewegung verwendet inzwischen eine eigene deterministische Rust-
-Simulation bei fester Höhe. Bildformat, Kameramodell, Erkennungsverfahren
-und konkretes Zielobjekt sind noch offen.
+Simulation bei fester Höhe. Die optionale Kamera verwendet inzwischen eine
+Pinhole-Projektion und RGB-Bilder im PPM-P6-Format mit farbigen Wandmarkierungen.
+Erkennungsverfahren und die vollständige Suchsteuerung sind noch offen.
 
 ## Geplante Zuständigkeiten
 
-Die ersten Bewegungskomponenten sind implementiert; Kamera und Suche folgen:
+Bewegung und Kamera-Snapshots sind implementiert; Wahrnehmung und Suche folgen:
 
 | Ort | Verantwortung und Stand |
 | --- | --- |
-| `simulation/room/` | Raum, Pose, Bewegung und Kollisionen implementiert; Kamerabilder fehlen |
-| `adapters/simulated-drone/` | Telemetrie, gezielte Pose-Abfrage und idempotente Bewegung implementiert; Kameraabfragen fehlen |
-| `apps/drone-demo/` | Einzelner Bewegungsauftrag, Verification, System-Approval und Wirkungsprüfung implementiert |
-| `adapters/camera-perception/` | Geplant: Bildanalyse mit referenziertem Eingangsbild, Fundkandidaten und beobachteten Bildpositionen |
-| `apps/drone-search/` | Geplant: Suchauftrag, Strategie, fortlaufender Ablauf und Fundbericht |
+| `../drone-sim/simulation/room/` | Raum, Pose, Bewegung, Kollisionen und perspektivische Kamerabilder implementiert |
+| `../drone-sim/adapters/simulated-drone/` | Telemetrie, Pose-Abfrage, idempotente Bewegung und optionale Kamera-Snapshots mit Datenabruf implementiert |
+| `../drone-sim/apps/drone-demo/` | Einzelner Bewegungsauftrag, Verification, System-Approval und Wirkungsprüfung implementiert |
+| `../drone-sim/adapters/camera-perception/` | Geplant: Bildanalyse mit referenziertem Eingangsbild, Fundkandidaten und beobachteten Bildpositionen |
+| `../drone-sim/apps/drone-search/` | Geplant: Suchauftrag, Strategie, fortlaufender Ablauf und Fundbericht |
 | `crates/arcs-core/` | Bestehende allgemeine Verträge und Kontrollmechanismen; für die Bewegung unverändert |
 
 Simulation und Drohnenadapter laufen derzeit in einem Prozess, mit der
-Bewegungslogik in einer separaten Bibliothek. Auch die Kamerawahrnehmung kann zunächst
+Bewegungslogik in einer separaten Bibliothek. Beide gehören zum externen
+Projekt und werden nicht in den ARCS-Host eingebaut. Auch die Kamerawahrnehmung kann zunächst
 ein einfaches Verfahren verwenden, muss aber die erzeugten Bilddaten auswerten.
 Objektspezifische Regeln und die Simulationsengine gehören nicht in den Core.
 
@@ -163,13 +182,25 @@ ohne falsche Erfolgsmeldung.
 ## Nächster Umsetzungsschritt
 
 Die [allgemeinen Adapterfähigkeiten](GENERAL_ADAPTERS.md) und der
-[erste Drohnen-Bewegungsnachweis](../apps/drone-demo/README.md) sind vorhanden.
+[erste Drohnen-Bewegungsnachweis](../../drone-sim/apps/drone-demo/README.md) sind vorhanden.
 Die allgemeinen Input- und Reasoning-Anschlüsse sind jetzt auch über stdio
 vorhanden. Der neutrale Reasoning-V2-Port unterstützt Solver und Modell-
-verfahren; echte KI-Anbieter und dauerhaft laufende Orchestrierung bleiben
-nächste allgemeine Schritte. Der Stand steht im [Reasoning-Entwurf](REASONING.md).
-Danach folgt eine simulierte Kamera, die aus Raum, Pose und Blickrichtung
-echte Bilddaten erzeugt. Der Adapter soll diese über den bestehenden
-Datenreferenzvertrag liefern. Der Fundnachweis muss anschließend auf diesen
-Bildern beruhen; eine versteckte Zielposition darf die Wahrnehmung nicht
-ersetzen. Bildauswertung und die vollständige Suchschleife folgen danach.
+verfahren. Eine allgemeine Aufgaben-Runtime verarbeitet Inputs und Beobachtungen
+nun dauerhaft über konfigurierte Routen mit Wiederaufnahme. Echte KI-Anbieter
+bleiben ein weiterer allgemeiner Schritt. Der Stand steht im [Reasoning-Entwurf](REASONING.md).
+Der [Kamera-Nachweis](../../drone-sim/adapters/simulated-drone/CAMERA.md) erzeugt inzwischen
+perspektivische Bilddaten aus Raum, Pose und Blickrichtung und liefert sie über
+den bestehenden Datenreferenzvertrag. Zeit, Zustand, Kamera und Bild gehören
+zu einem gespeicherten Snapshot; idealisierte Simulation und unbekannte
+Zeitunsicherheit sind sichtbar. Der
+[externe Pixel-Reasoner](../../drone-sim/adapters/image-reasoner/README.md)
+weist jetzt positive und negative Farbbefunde anhand der übertragenen
+Bildbytes nach. Der Suchauftrag geht getrennt an den Reasoner; die Kamera
+bleibt zielunabhängig. Allgemeine Binäreingaben für Reasoning V2 liegen in
+ARCS, Bildauswertung und Fachverträge ausschließlich extern.
+
+Als Nächstes folgt eine begrenzte Suchschleife in der externen Anwendung:
+Nach einem negativen Befund einen Bewegungsvorschlag erzeugen, separat
+prüfen und freigeben, ein neues Bild aufnehmen und erneut auswerten.
+Schrittbudget und kontrollierter Abbruch gehören zu dieser Etappe.
+Die reine Farbsuche ersetzt noch keine semantische Objekterkennung.

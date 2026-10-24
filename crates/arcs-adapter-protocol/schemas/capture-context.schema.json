@@ -1,0 +1,121 @@
+{
+  "$id": "arcs.data.capture_context.v1",
+  "type": "object",
+  "properties": {
+    "capture_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source": {
+      "type": "object",
+      "properties": {
+        "adapter_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "capability_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "adapter_id",
+        "capability_id"
+      ],
+      "additionalProperties": false
+    },
+    "sensor_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "captured_at": {
+      "type": "object",
+      "properties": {
+        "clock_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "unix_time_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "uncertainty_ms": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "clock_id",
+        "unix_time_ms"
+      ],
+      "additionalProperties": false
+    },
+    "state": {
+      "type": "object",
+      "properties": {
+        "stream_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        }
+      },
+      "required": [
+        "stream_id",
+        "revision"
+      ],
+      "additionalProperties": false
+    },
+    "coordinate_frame": {
+      "type": "string",
+      "minLength": 1
+    },
+    "quality": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "valid",
+            "invalid",
+            "unknown"
+          ]
+        },
+        "origin": {
+          "type": "string",
+          "enum": [
+            "measured",
+            "simulated",
+            "derived"
+          ]
+        },
+        "uncertainty": {
+          "type": "string",
+          "enum": [
+            "unknown",
+            "idealized_simulation"
+          ]
+        }
+      },
+      "required": [
+        "status",
+        "origin",
+        "uncertainty"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "capture_id",
+    "source",
+    "sensor_id",
+    "captured_at",
+    "coordinate_frame",
+    "quality"
+  ],
+  "additionalProperties": false
+}

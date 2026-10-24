@@ -125,6 +125,7 @@ fn reasoning_grant() -> AdapterGrant {
         max_payload_bytes: 8192,
         max_external_reference_bytes: 512,
         data_limits: None,
+        input_data_limits: None,
         reasoning_limits_v2: None,
         reasoning_limits: Some(ReasoningLimits {
             max_context_items: 4,
@@ -166,6 +167,7 @@ fn action_grant() -> AdapterGrant {
         max_payload_bytes: 4096,
         max_external_reference_bytes: 512,
         data_limits: None,
+        input_data_limits: None,
         reasoning_limits_v2: None,
         reasoning_limits: None,
     }

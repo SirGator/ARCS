@@ -62,6 +62,7 @@ fn fixture(limits: Option<DataLimits>) -> (AdapterRegistry, Endpoint, AdapterGra
         ingress_source_kind: Some(SourceKind::Sensor),
         max_payload_bytes: 1024,
         max_external_reference_bytes: 256,
+        input_data_limits: None,
         reasoning_limits_v2: None,
         reasoning_limits: None,
         data_limits: limits,

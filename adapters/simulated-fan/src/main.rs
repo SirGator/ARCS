@@ -15,6 +15,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 struct Simulator {
+    adapter_id: arcs_adapter_protocol::AdapterId,
     profile: fan::Profile,
     database: Connection,
 }
@@ -92,7 +93,14 @@ fn remember(
 }
 
 impl Simulator {
-    fn open(profile: fan::Profile, path: &std::path::Path) -> Result<Self, String> {
+    fn open(
+        profile: fan::Profile,
+        path: &std::path::Path,
+        adapter_id: arcs_adapter_protocol::AdapterId,
+    ) -> Result<Self, String> {
+        fan::manifest_with_id(adapter_id.clone())
+            .validate()
+            .map_err(error)?;
         let mut database = Connection::open(path).map_err(error)?;
         database.execute_batch("
             CREATE TABLE IF NOT EXISTS fan_state (
@@ -108,6 +116,31 @@ impl Simulator {
             );
         ").map_err(error)?;
         let transaction = database.transaction().map_err(error)?;
+        transaction.execute_batch("CREATE TABLE IF NOT EXISTS adapter_installation (singleton INTEGER PRIMARY KEY CHECK(singleton=1),adapter_id TEXT NOT NULL);").map_err(error)?;
+        let bound: Option<String> = transaction
+            .query_row(
+                "SELECT adapter_id FROM adapter_installation WHERE singleton=1",
+                [],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(error)?;
+        let legacy: bool = transaction
+            .query_row("SELECT EXISTS(SELECT 1 FROM fan_state)", [], |row| {
+                row.get(0)
+            })
+            .map_err(error)?;
+        if bound.as_ref().is_some_and(|id| id != &adapter_id.0)
+            || (bound.is_none() && legacy && adapter_id.0 != fan::ADAPTER)
+        {
+            return Err("adapter database belongs to another installation".into());
+        }
+        transaction
+            .execute(
+                "INSERT OR IGNORE INTO adapter_installation VALUES(1,?1)",
+                [&adapter_id.0],
+            )
+            .map_err(error)?;
         let inserted = transaction
             .execute(
                 "INSERT OR IGNORE INTO fan_state VALUES (1, ?1, 0, 0)",
@@ -128,7 +161,11 @@ impl Simulator {
             )?;
         }
         transaction.commit().map_err(error)?;
-        Ok(Self { profile, database })
+        Ok(Self {
+            adapter_id,
+            profile,
+            database,
+        })
     }
 
     fn fetch(&mut self, invocation: RequestInvocation) -> Result<AdapterMessage, String> {
@@ -148,7 +185,7 @@ impl Simulator {
                 ),
                 _ => return Err("unknown request capability".into()),
             };
-        if invocation.capability.adapter_id.0 != fan::ADAPTER
+        if invocation.capability.adapter_id != self.adapter_id
             || invocation.request_schema_id.0 != input_schema
             || invocation.response_schema_id.0 != output_schema
             || invocation.request_payload["device_id"].as_str() != Some(device)
@@ -205,7 +242,7 @@ impl Simulator {
             input_schema_id: SchemaId,
             payload: fan::FanCommand,
         }
-        if invocation.capability != CapabilityRef::new(fan::ADAPTER, "fan.set")
+        if invocation.capability != CapabilityRef::new(&self.adapter_id.0, "fan.set")
             || invocation.action_schema_id.0 != "arcs.action.v1"
             || invocation.result_schema_id.0 != fan::RESULT
             || invocation.invocation_id.trim().is_empty()
@@ -290,12 +327,20 @@ impl Simulator {
 
 fn run() -> Result<(), String> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
-    if args.len() != 2 {
-        return Err("usage: arcs-simulated-fan <profile.json> <adapter-state.sqlite>".into());
-    }
+    let adapter_id = match args.as_slice() {
+        [_, _] => fan::ADAPTER.to_owned(),
+        [_, _, flag, id] if flag == "--adapter-id" => {
+            id.to_str().ok_or("adapter ID must be UTF-8")?.to_owned()
+        }
+        _ => return Err(
+            "usage: arcs-simulated-fan <profile.json> <adapter-state.sqlite> [--adapter-id <id>]"
+                .into(),
+        ),
+    };
     let mut simulator = Simulator::open(
         fan::Profile::load(std::path::Path::new(&args[0]))?,
         std::path::Path::new(&args[1]),
+        arcs_adapter_protocol::AdapterId(adapter_id),
     )?;
     let mut input = BufReader::new(io::stdin().lock());
     let mut output = io::stdout().lock();
@@ -304,7 +349,7 @@ fn run() -> Result<(), String> {
 
 impl Adapter for Simulator {
     fn manifest(&self) -> arcs_adapter_protocol::AdapterManifest {
-        fan::manifest()
+        fan::manifest_with_id(self.adapter_id.clone())
     }
 
     fn poll(&mut self) -> Result<Option<PendingObservation>, AdapterError> {
@@ -350,5 +395,80 @@ fn main() {
     if let Err(error) = run() {
         eprintln!("simulated fan: {error}");
         std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod installation_tests {
+    use super::*;
+    use arcs_adapter_protocol::{AdapterId, VersionId};
+    use std::sync::atomic::{AtomicU64, Ordering};
+    struct Directory(std::path::PathBuf);
+    impl Directory {
+        fn new() -> Self {
+            static NEXT: AtomicU64 = AtomicU64::new(1);
+            let path = std::env::temp_dir().join(format!(
+                "fan-installation-{}-{}",
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
+            std::fs::create_dir(&path).unwrap();
+            Self(path)
+        }
+    }
+    impl Drop for Directory {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+    fn profile() -> fan::Profile {
+        serde_json::from_str(fan::DEFAULT_PROFILE).unwrap()
+    }
+    #[test]
+    fn custom_identity_is_durable_and_foreign_requests_never_reach_the_journal() {
+        let directory = Directory::new();
+        let path = directory.0.join("fan.sqlite");
+        let mut simulator =
+            Simulator::open(profile(), &path, AdapterId("fan.left".into())).unwrap();
+        assert_eq!(simulator.manifest().adapter_id.0, "fan.left");
+        let request = RequestInvocation {
+            invocation_id: "same-local-id".into(),
+            capability: CapabilityRef::new("fan.right", "fan.read"),
+            request_version_id: VersionId("request-1".into()),
+            request_schema_id: SchemaId(fan::FAN_REQUEST.into()),
+            subject: arcs_adapter_protocol::SubjectId("fan-01".into()),
+            request_payload: json!({"device_id":"fan-01"}),
+            response_schema_id: SchemaId(fan::FAN_STATE.into()),
+            max_response_bytes: 4096,
+        };
+        assert!(simulator.fetch(request).is_err());
+        assert_eq!(
+            simulator
+                .database
+                .query_row("SELECT COUNT(*) FROM invocations", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        drop(simulator);
+        assert!(Simulator::open(profile(), &path, AdapterId("fan.right".into())).is_err());
+        assert!(Simulator::open(profile(), &path, AdapterId("fan.left".into())).is_ok());
+    }
+    #[test]
+    fn a_legacy_default_installation_cannot_be_reassigned_to_a_custom_id() {
+        let directory = Directory::new();
+        let path = directory.0.join("legacy.sqlite");
+        Connection::open(&path).unwrap().execute_batch("CREATE TABLE fan_state(singleton INTEGER PRIMARY KEY,device_id TEXT NOT NULL,enabled INTEGER NOT NULL,actuation_count INTEGER NOT NULL);INSERT INTO fan_state VALUES(1,'fan-01',1,7);").unwrap();
+        assert!(Simulator::open(profile(), &path, AdapterId("fan.custom".into())).is_err());
+        let simulator = Simulator::open(profile(), &path, AdapterId(fan::ADAPTER.into())).unwrap();
+        assert_eq!(state(&simulator.database).unwrap().actuation_count, 7);
+        assert_eq!(
+            simulator
+                .database
+                .query_row("SELECT adapter_id FROM adapter_installation", [], |row| row
+                    .get::<_, String>(0))
+                .unwrap(),
+            fan::ADAPTER
+        );
     }
 }

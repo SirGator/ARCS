@@ -474,3 +474,76 @@ cargo test --locked --workspace --all-targets
 cargo fmt --all -- --check
 cargo clippy --locked --workspace --all-targets --all-features
 ```
+
+## Mehrere Installationen jeder Rolle
+
+Alle sieben Rollen können gleichzeitig durch mehrere Installationen angeboten
+werden. Das gilt für Geräte ebenso wie für Softwaredienste und unterschiedliche
+Reasoning-Verfahren. Eine Installation darf mehrere Rollen anbieten.
+
+Die `adapter_id` im Manifest identifiziert genau eine Installation; lokale
+Capability-Namen dürfen zwischen Installationen identisch sein. Aufrufe
+benennen stets beide Teile der `CapabilityRef`. Jeder Anschluss erhält einen
+eigenen Betreiber-Grant; Journale zustandsbehafteter Adapter müssen an die
+Installation gebunden sein. Ein Reasoner erlangt durch seine Auswahl keine
+Ausführungsrechte.
+
+`CapabilityContract::role()` stellt die Rolle als `AdapterRole` bereit.
+`AdapterRegistry::catalog()` und `capabilities(role)` zeigen freigeschaltete
+Fähigkeiten. Der allgemeine Host bietet eine externe Sicht mit
+`adapter_catalog()` und `capabilities(role)`; `--list-adapters` gibt diese nach
+dem Handshake ohne Polling aus. Rollen, Schemas und erlaubte V2-Verfahren
+helfen der Anwendung bei der ausdrücklichen Auswahl. Eine Katalogbeschreibung
+ist weder ein Health-Check noch ein Autorisierungstoken.
+
+Der [Prozessnachweis](apps/adapter-host/examples/multiple-adapters.md) deckt
+alle Rollen mehrfach ab. Die Anschlüsse werden aktuell beim Host-Start
+konfiguriert; dynamisches Hotplug und parallele Orchestrierung folgen separat.
+
+## Kontext von Sensoraufnahmen
+
+Das geräteunabhängige `CaptureContext` beschreibt Aufnahme-ID, angebotene
+Quell-Capability, Sensor-ID, Aufnahmezeit und Uhrdomäne, optionalen lokalen
+Zustandsbezug, Koordinatenrahmen und Qualitätsangaben. DTO und Schema liegen im
+Protokollpaket; konkrete Messwerte und Kamerageometrie bleiben bei den Treibern.
+Fehlender Zustandsbezug und fehlende Zeitunsicherheit werden als unbekannt
+behandelt. `nominal_age_ms` vergleicht ausschließlich dieselbe Uhrdomäne und
+behauptet weder Synchronisation noch kalibrierte Genauigkeit.
+
+Der äußere Core-Envelope bleibt für Producer und Trust maßgeblich. Die
+Quellangabe innerhalb eines Payloads muss an diesen Envelope und die konfigurierte
+Capability gebunden werden. Sie erzeugt keine zusätzliche Datenfreigabe.
+Qualitätsangaben wie `simulated` oder `idealized_simulation` beschreiben das
+Messmodell und sind keine Autoritätsklasse.
+
+Der [externe Kamera-Nachweis](../drone-sim/adapters/simulated-drone/CAMERA.md) verwendet diesen Kontext
+mit einem unveränderlichen Bildsnapshot und einer zugeordneten Pose. JSON-Schema
+prüft die Form; der Treiber und die fachliche Anwendung prüfen zusätzlich die
+Beziehungen zwischen Zustand, Bildreferenz, Kalibrierung und Quelle.
+
+## Binäreingaben für Reasoning V2
+
+Die additive stdio-Erweiterung verwendet vor `reason_v2`:
+
+1. `begin_input_data { invocation_id, target, inputs }` →
+   `input_data_ready { invocation_id }`.
+2. Für jedes Objekt `input_data_chunk { invocation_id, name, offset, bytes }` →
+   `input_data_stored { invocation_id, name, next_offset }`.
+3. `reason_v2` enthält dieselben Deskriptoren im optionalen Feld `input_data`.
+   Jeder Deskriptor besteht aus `selection` (Name, Quell-Capability,
+   Quellversion, Referenz-Pointer) und der exakt ausgewählten `reference`.
+
+Blöcke enthalten höchstens 8192 Bytes und bleiben unter der JSON-Lines-
+Framegrenze. SDK-Puffer sind auf einen ausstehenden Auftrag, acht Objekte und
+insgesamt 16 MiB beschränkt. Exakte Offsets, erwartete Gesamtlänge und
+Invocation-/Capability-Bindung sind Pflicht. Erst vollständig übertragene,
+im Kontext referenzierte Daten erreichen `Adapter::reason_with_data`.
+Ein fehlerhafter Dialog verwirft den Puffer; eine erfolgreiche Übergabe
+verbraucht ihn einmal. Der Host prüft ACK-Identitäten und beendet einen Prozess
+nach Fehler oder Timeout. Upload und Reasoning teilen das Runtimebudget.
+
+Die Betreiberrechte sind getrennt: Quelle `data.read`/`data_limits`, Empfänger
+`data.receive`/`input_data_limits`. Die tatsächliche Herkunft stammt aus dem
+Core-Envelope. Der [Reasoning-Vertrag](docs/REASONING.md#explizite-binäreingaben)
+beschreibt Kontextbindung, Replay und Grenzen. Alte Dialoge ohne Binäreingaben
+ändern sich nicht. Transform-Binäreingaben sind noch nicht implementiert.

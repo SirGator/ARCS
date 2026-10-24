@@ -1,0 +1,21 @@
+{
+  "adapter_id": "multi.input.left",
+  "capability_id": "task.submit",
+  "schema_id": "arcs.task.nearest.v1",
+  "events": [
+    {
+      "id": "task-1",
+      "subject": "task-1",
+      "reference": "task:1",
+      "payload": {
+        "values": [
+          1,
+          2,
+          4
+        ],
+        "target": 1.8,
+        "private_note": "not selected for reasoning"
+      }
+    }
+  ]
+}

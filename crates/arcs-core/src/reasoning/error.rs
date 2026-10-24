@@ -8,6 +8,7 @@ use crate::store::StoreError;
 /// Fehler ausschließlich innerhalb des kuratierten Reasoning-Slices.
 #[derive(Debug)]
 pub enum ReasoningError {
+    InputData(crate::adapters::input_data::InputDataError),
     InvalidResponse(String),
     Authorization(AdapterRegistryError),
     Store(StoreError),
@@ -81,5 +82,11 @@ impl From<AdapterCallError> for ReasoningError {
 impl From<InvocationError> for ReasoningError {
     fn from(value: InvocationError) -> Self {
         Self::Invocation(value)
+    }
+}
+
+impl From<crate::adapters::input_data::InputDataError> for ReasoningError {
+    fn from(error: crate::adapters::input_data::InputDataError) -> Self {
+        Self::InputData(error)
     }
 }

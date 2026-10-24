@@ -128,6 +128,20 @@ impl AdapterRegistry {
                 return Err(AdapterRegistryError::MissingDataReadPermission);
             }
         }
+        if let Some(limits) = &grant.input_data_limits
+            && (!limits.is_valid()
+                || !grant
+                    .granted_permissions
+                    .iter()
+                    .any(|permission| permission == "data.receive")
+                || !grant.enabled_capabilities.iter().any(|id| {
+                    manifest
+                        .capability(id)
+                        .is_some_and(|cap| cap.contract.is_reasoning())
+                }))
+        {
+            return Err(AdapterRegistryError::InvalidDataLimits);
+        }
         if grant.max_external_reference_bytes == 0
             || grant.max_external_reference_bytes > MAX_SOURCE_REFERENCE_BYTES
         {
@@ -247,6 +261,74 @@ impl AdapterRegistry {
         self.adapters.get(id)
     }
 
+    pub fn catalog(&self) -> Vec<super::AdapterConnection> {
+        let mut connections = self
+            .adapters
+            .values()
+            .map(|adapter| {
+                let mut capabilities = adapter
+                    .grant
+                    .enabled_capabilities
+                    .iter()
+                    .filter_map(|id| {
+                        let descriptor = adapter.manifest.capability(id)?;
+                        Some(super::AvailableCapability {
+                            capability: CapabilityRef {
+                                adapter_id: adapter.manifest.adapter_id.clone(),
+                                capability_id: id.clone(),
+                            },
+                            role: descriptor.contract.role(),
+                            accepts: descriptor.contract.accepted_schemas().to_vec(),
+                            emits: descriptor.contract.emitted_schemas().to_vec(),
+                            reasoning_methods: if descriptor.contract.is_reasoning() {
+                                adapter
+                                    .grant
+                                    .reasoning_limits_v2
+                                    .as_ref()
+                                    .map(|limits| limits.methods.clone())
+                                    .unwrap_or_default()
+                            } else {
+                                vec![]
+                            },
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                capabilities.sort_by(|a, b| a.capability.cmp(&b.capability));
+                super::AdapterConnection {
+                    adapter_id: adapter.manifest.adapter_id.clone(),
+                    adapter_version: adapter.manifest.adapter_version.clone(),
+                    producer_class: adapter.grant.producer_class,
+                    capabilities,
+                }
+            })
+            .collect::<Vec<_>>();
+        connections.sort_by(|a, b| a.adapter_id.cmp(&b.adapter_id));
+        connections
+    }
+
+    /// Alle freigeschalteten Installationen einer Rolle, deterministisch
+    /// sortiert. Gleiche lokale Capability-Namen verschiedener Adapter sind
+    /// unabhängig. Die Anwendung trifft die konkrete Auswahl.
+    pub fn capabilities(&self, role: crate::adapters::AdapterRole) -> Vec<CapabilityRef> {
+        let mut capabilities = Vec::new();
+        for adapter in self.adapters.values() {
+            for id in &adapter.grant.enabled_capabilities {
+                if adapter
+                    .manifest
+                    .capability(id)
+                    .is_some_and(|cap| cap.contract.role() == role)
+                {
+                    capabilities.push(CapabilityRef {
+                        adapter_id: adapter.manifest.adapter_id.clone(),
+                        capability_id: id.clone(),
+                    });
+                }
+            }
+        }
+        capabilities.sort();
+        capabilities
+    }
+
     /// Löst nur tatsächlich freigeschaltete Fähigkeiten auf.
     pub fn authorized_capability(
         &self,
@@ -321,6 +403,7 @@ mod tests {
             max_payload_bytes: 1024,
             max_external_reference_bytes: 256,
             data_limits: None,
+            input_data_limits: None,
             reasoning_limits_v2: None,
             reasoning_limits: None,
         };
@@ -346,6 +429,7 @@ mod tests {
             max_payload_bytes: 1024,
             max_external_reference_bytes: 256,
             data_limits: None,
+            input_data_limits: None,
             reasoning_limits_v2: None,
             reasoning_limits: None,
         };

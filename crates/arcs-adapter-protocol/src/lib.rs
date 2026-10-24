@@ -2,9 +2,11 @@
 //! Grants und die Autorisierung einer Verbindung gehören dem Host/Core.
 
 pub mod act;
+pub mod capture;
 pub mod data;
 mod identifiers;
 pub mod input;
+pub mod input_data;
 pub mod manifest;
 pub mod observation;
 pub mod output;
@@ -15,9 +17,11 @@ pub mod stdio;
 pub mod transform;
 
 pub use act::*;
+pub use capture::*;
 pub use data::*;
 pub use identifiers::*;
 pub use input::*;
+pub use input_data::*;
 pub use manifest::*;
 pub use observation::*;
 pub use output::*;

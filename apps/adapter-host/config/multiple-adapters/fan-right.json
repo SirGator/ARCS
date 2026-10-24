@@ -1,0 +1,10 @@
+{
+  "temperature_device": "temperature-01",
+  "fan_device": "fan-01",
+  "raw_temperature": 410,
+  "scale": 0.1,
+  "offset": 0.0,
+  "unit": "Cel",
+  "activate_above_celsius": 28.0,
+  "max_auto_approve_celsius": 80.0
+}

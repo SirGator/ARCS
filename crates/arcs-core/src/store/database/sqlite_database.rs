@@ -442,20 +442,42 @@ impl SqliteArtifactStore {
             .transpose()
     }
 
+    /// Letzter vorhandener Commit-Cursor, ohne das historische Log zu laden.
+    pub fn latest_sequence(&self) -> Result<u64, StoreError> {
+        self.connection
+            .query_row(
+                "SELECT COALESCE(MAX(sequence),0) FROM artifact_versions",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .map(|sequence| sequence as u64)
+            .map_err(StoreError::from)
+    }
+
     /// Liest das globale Artifact-Log nach einem exklusiven Commit-Cursor.
     ///
     /// Die Reihenfolge entspricht exakt der SQLite-Commit-Sequenz. Darauf
     /// können abgeleitete Read-Models nach einem Neustart deterministisch
     /// aufgebaut werden, ohne ihre eigene Historie zu persistieren.
     pub fn committed_after(&self, sequence: u64) -> Result<Vec<CommittedArtifact>, StoreError> {
+        self.committed_page_after(sequence, usize::MAX)
+    }
+
+    /// Begrenzte Seite des Logs für dauerhaft laufende Consumer.
+    pub fn committed_page_after(
+        &self,
+        sequence: u64,
+        limit: usize,
+    ) -> Result<Vec<CommittedArtifact>, StoreError> {
         let sequence = sequence.min(i64::MAX as u64) as i64;
+        let limit = limit.min(i64::MAX as usize) as i64;
         let mut statement = self.connection.prepare(
             "SELECT sequence, artifact_json
              FROM artifact_versions
              WHERE sequence > ?1
-             ORDER BY sequence",
+             ORDER BY sequence LIMIT ?2",
         )?;
-        let rows = statement.query_map(params![sequence], |row| {
+        let rows = statement.query_map(params![sequence, limit], |row| {
             Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
         })?;
 

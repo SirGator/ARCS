@@ -1,0 +1,6 @@
+{
+  "adapter_id": "multi.report",
+  "accepts": [
+    "arcs.number.normalized.v1"
+  ]
+}

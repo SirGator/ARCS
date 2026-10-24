@@ -1,0 +1,41 @@
+{
+  "config_version": 1,
+  "runtime_id": "nearest-tasks",
+  "journal": "../../../../var/roles-runtime.sqlite",
+  "interval_ms": 100,
+  "max_events_per_tick": 1000,
+  "max_jobs_per_tick": 10,
+  "max_pending_jobs": 100,
+  "routes": [
+    {
+      "id": "nearest-solver",
+      "source": {
+        "adapter_id": "example.input",
+        "capability_id": "task.submit"
+      },
+      "input_schema_id": "arcs.task.nearest.v1",
+      "payload_fields": [
+        "values",
+        "target"
+      ],
+      "reasoner": {
+        "adapter_id": "example.solver",
+        "capability_id": "solution.propose"
+      },
+      "method": "solver",
+      "objective": "Find the nearest listed value to the target",
+      "target_schema_id": "arcs.solution_candidate.nearest.v1",
+      "allowed_capabilities": [],
+      "constraints": {},
+      "budget": {
+        "max_context_items": 1,
+        "max_context_bytes": 8192,
+        "max_output_bytes": 4096,
+        "max_candidates": 1,
+        "max_runtime_ms": 1000,
+        "max_iterations": 4096,
+        "max_output_tokens": null
+      }
+    }
+  ]
+}

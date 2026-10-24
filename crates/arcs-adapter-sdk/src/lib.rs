@@ -6,6 +6,7 @@
 
 #![doc = include_str!("../README.md")]
 
+mod input_data;
 use std::io::{BufRead, Write};
 
 use arcs_adapter_protocol::{
@@ -86,6 +87,17 @@ pub trait Adapter {
         Err(AdapterError::unsupported())
     }
 
+    fn reason_with_data(
+        &mut self,
+        invocation: arcs_adapter_protocol::ReasoningInvocationV2,
+        inputs: Vec<arcs_adapter_protocol::ReceivedInputData>,
+    ) -> Result<arcs_adapter_protocol::ReasoningResponseV2, AdapterError> {
+        if !inputs.is_empty() {
+            return Err(AdapterError::unsupported());
+        }
+        self.reason_v2(invocation)
+    }
+
     fn poll_input(&mut self) -> Result<Option<PendingInput>, AdapterError> {
         Ok(None)
     }
@@ -159,6 +171,7 @@ pub fn serve(
     let manifest = adapter.manifest();
     manifest.validate().map_err(ServerError::Manifest)?;
     let mut registered = false;
+    let mut input_data = input_data::InputDataBuffer::default();
     loop {
         let envelope: Envelope<HostMessage> = read_frame(reader).map_err(ServerError::Wire)?;
         let shutdown = envelope.protocol_version == WIRE_VERSION
@@ -178,7 +191,7 @@ pub fn serve(
                         manifest: manifest.clone(),
                     })
                 }
-                message if registered => dispatch(adapter, &manifest, message),
+                message if registered => dispatch(adapter, &manifest, message, &mut input_data),
                 _ => Err(AdapterError {
                     code: "invalid_state".into(),
                     message: "hello required before operations".into(),
@@ -186,6 +199,9 @@ pub fn serve(
                 }),
             }
         };
+        if result.is_err() {
+            input_data.clear();
+        }
         let message = result.unwrap_or_else(|error| AdapterMessage::Error {
             code: error.code,
             message: error.message,
@@ -218,8 +234,30 @@ fn dispatch(
     adapter: &mut impl Adapter,
     manifest: &AdapterManifest,
     message: HostMessage,
+    input_data: &mut input_data::InputDataBuffer,
 ) -> Result<AdapterMessage, AdapterError> {
     match message {
+        HostMessage::BeginInputData {
+            invocation_id,
+            target,
+            inputs,
+        } => {
+            input_data.begin(manifest, invocation_id.clone(), target, inputs)?;
+            Ok(AdapterMessage::InputDataReady { invocation_id })
+        }
+        HostMessage::InputDataChunk {
+            invocation_id,
+            name,
+            offset,
+            bytes,
+        } => {
+            let next_offset = input_data.write(&invocation_id, &name, offset, bytes)?;
+            Ok(AdapterMessage::InputDataStored {
+                invocation_id,
+                name,
+                next_offset,
+            })
+        }
         HostMessage::ReasonV2 { invocation } => {
             if invocation.capability.adapter_id!=manifest.adapter_id || invocation.invocation_id.trim().is_empty()
                 || invocation.request_id.trim().is_empty() || !invocation.budget.supports(invocation.method)
@@ -229,7 +267,27 @@ fn dispatch(
             let request = invocation.request_id.clone();
             let method = invocation.method;
             let budget = invocation.budget.clone();
-            let response = adapter.reason_v2(invocation)?;
+            let inputs = input_data.take(
+                &invocation.invocation_id,
+                &invocation.capability,
+                &invocation.input_data,
+            )?;
+            for input in &inputs {
+                if !invocation.context.iter().any(|item| {
+                    item.version_id == input.descriptor.selection.source_version_id
+                        && item
+                            .payload
+                            .pointer(&input.descriptor.selection.reference_pointer)
+                            == serde_json::to_value(&input.descriptor.reference)
+                                .ok()
+                                .as_ref()
+                }) {
+                    return Err(AdapterError::rejected(
+                        "input data reference is outside selected context",
+                    ));
+                }
+            }
+            let response = adapter.reason_with_data(invocation, inputs)?;
             if response.invocation_id != id
                 || response.request_id != request
                 || response.trace.method != method

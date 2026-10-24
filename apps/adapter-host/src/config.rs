@@ -11,6 +11,7 @@ use crate::HostError;
 
 pub(crate) const HOST_ID: &str = "arcs.host";
 pub(crate) const PIPELINE_ID: &str = "arcs.host.pipeline";
+pub(crate) const RUNTIME_ID: &str = "arcs.host.runtime";
 pub(crate) const DEFINITION_SCHEMA: &str = "arcs.input.host_request.v1";
 pub(crate) const TRANSFORM_DEFINITION_SCHEMA: &str = "arcs.input.host_transform.v1";
 
@@ -229,6 +230,12 @@ impl PreparedConfig {
                 path: "<host-pipeline>".into(),
                 source,
             })?;
+        schemas
+            .register_json(include_str!("../schemas/runtime-definition.schema.json"))
+            .map_err(|source| HostError::Schema {
+                path: "<host-runtime>".into(),
+                source,
+            })?;
         for path in config.schemas {
             let path = resolve(base, &path)?;
             let document = std::fs::read_to_string(&path).map_err(|source| HostError::Io {
@@ -274,7 +281,7 @@ impl PreparedConfig {
                 });
             }
             let grant: AdapterGrant = read_json(&resolve(base, &adapter.grant_file)?)?;
-            if [HOST_ID, PIPELINE_ID].contains(&grant.adapter_id.0.as_str())
+            if [HOST_ID, PIPELINE_ID, RUNTIME_ID].contains(&grant.adapter_id.0.as_str())
                 || !adapter_ids.insert(grant.adapter_id.clone())
             {
                 return Err(invalid(format!(
@@ -303,6 +310,17 @@ impl PreparedConfig {
                     "invalid data limits or missing data.read permission for {}",
                     grant.adapter_id.0
                 )));
+            }
+            if let Some(limits) = &grant.input_data_limits
+                && (!limits.is_valid()
+                    || !grant
+                        .granted_permissions
+                        .iter()
+                        .any(|permission| permission == "data.receive"))
+            {
+                return Err(invalid(
+                    "invalid input data limits or missing data.receive permission",
+                ));
             }
             for request in &adapter.requests {
                 if !identifier(&request.id, 64) || !request_ids.insert(request.id.clone()) {

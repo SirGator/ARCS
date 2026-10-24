@@ -109,6 +109,8 @@ pub struct ReasoningInvocationV2 {
     pub method: ReasoningMethod,
     pub objective: String,
     pub context: Vec<ReasoningContextItem>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub input_data: Vec<crate::InputDataDescriptor>,
     pub target_schema_id: SchemaId,
     pub allowed_capabilities: Vec<CapabilityRef>,
     pub constraints: Value,

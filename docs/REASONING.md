@@ -120,7 +120,46 @@ nicht implementiert. Ein solcher Adapter kann jetzt den V2-SDK-Callback
 nutzen, ohne den Core auf seinen Anbieter zuzuschneiden. Die bestehende
 Input-Rolle ist ebenfalls mit eigenem Polling und ACK über stdio verfügbar.
 
-Weitere Schritte sind ein konkreter echter Modelladapter sowie dauerhaft
-laufende, ereignisgesteuerte Orchestrierung. Automatische Reasoner-Auswahl,
-Vergleich oder Kombination mehrerer Ergebnisse und gelerntes Kostenrouting
-bleiben eigene Aufgaben; der aktuelle Host wählt Reasoner ausdrücklich aus.
+Die [Aufgaben-Runtime](../apps/adapter-host/examples/task-runtime.md) ordnet
+Inputs und Beobachtungen jetzt dauerhaft konfigurierten Reasonern zu. Sie
+speichert Aufgaben und Leseposition, setzt nach Neustarts fort und stellt
+Ergebnisse zur fachlichen Prüfung bereit. Die Ausführung bleibt serielles Polling.
+Ein echter Modelladapter, automatische Reasoner-Auswahl, Vergleich oder
+Kombination mehrerer Ergebnisse und gelerntes Kostenrouting bleiben eigene Aufgaben.
+
+## Explizite Binäreingaben
+
+`Host::reason_with_data(request, selections)` ergänzt V2 um optional übertragene
+Dateien, Bilder oder andere Binärdaten. Eine `InputDataSelection` nennt Name,
+Quell-Capability, gespeicherte Quellversion und JSON-Pointer zur `DataReference`.
+Diese Referenz muss im ausdrücklich ausgewählten Kontext enthalten sein und
+exakt mit dem gespeicherten Payload übereinstimmen. Producer und Capability-Tag
+des Core-Envelopes binden sie an die tatsächliche Quelle.
+
+Die Quelle braucht `data.read` und `data_limits`. Der Empfänger braucht separat
+`data.receive` und `input_data_limits` mit `max_total_bytes` und `max_objects`.
+Pro Auftrag gelten höchstens acht Objekte und insgesamt 16 MiB; Betreibergrants
+können engere Grenzen setzen. Der Core liest autorisierte Quellblöcke in einen
+begrenzten Speicher und überträgt sie an genau eine Reasoning-Invocation.
+Binärbytes erscheinen weder im kuratierten JSON-Kontext noch in Audit-Artefakten.
+Der Empfänger darf sie in seinem eigenen Invocation-Journal aufbewahren.
+
+Die Source-Vorbereitung benutzt die bestehenden Timeouts je Datenblock. Upload
+und Berechnung beim stdio-Reasoner teilen danach eine gesamte Frist aus dem
+Reasoning-Runtimebudget; jeder Austausch ist zusätzlich durch den Betreiber-
+Timeout begrenzt. Ein Source-Timeout bleibt wiederholbar. Erfolgreiche Wiederholungen
+prüfen aktuelle Rechte, übertragen und berechnen aber nicht erneut.
+Quellen müssen referenzierte Bytes unveränderlich bereitstellen. Der Core
+erzeugt durch den Transport keine zusätzliche fachliche Gewissheit oder Freigabe.
+
+Der erste unterstützte Empfänger ist **Reasoning V2**. Transform hat noch keinen
+entsprechenden Binäreingabe-Callback. Alte Reasoner ohne Binäreingaben verwenden
+weiterhin denselben Dialog; das optionale Feld `input_data` wird bei leerer Liste
+nicht serialisiert.
+
+Der [externe Pixel-Suchnachweis](../../drone-sim/adapters/image-reasoner/README.md)
+zeigt die Trennung: Die Kamera kennt keinen Suchauftrag, sondern bietet einen
+Bildsnapshot an. Ein anderer Prozess bekommt Bildbytes und einen getrennten
+Suchauftrag. Er erzeugt positive oder negative Bildbefunde mit Referenzen auf
+beide Eingaben. Alle Bildformate, Suchregeln und Simulatorpakete bleiben außerhalb
+des ARCS-Workspace. Ein Befundkandidat löst keine Bewegung aus.

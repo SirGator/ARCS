@@ -241,21 +241,99 @@ impl crate::reasoning::general::GeneralReasoningAdapter for StdioAdapter {
         &self,
         invocation: &crate::reasoning::ReasoningInvocationV2,
     ) -> Result<crate::reasoning::ReasoningResponseV2, AdapterCallError> {
-        if invocation.capability.adapter_id != self.manifest.adapter_id {
-            return Err(self.protocol_error("reasoning endpoint mismatch"));
+        self.propose_with_data(invocation, &[])
+    }
+    fn propose_with_data(
+        &self,
+        invocation: &crate::reasoning::ReasoningInvocationV2,
+        inputs: &[arcs_adapter_protocol::ReceivedInputData],
+    ) -> Result<crate::reasoning::ReasoningResponseV2, AdapterCallError> {
+        if invocation.capability.adapter_id != self.manifest.adapter_id
+            || inputs.len() != invocation.input_data.len()
+            || inputs
+                .iter()
+                .zip(&invocation.input_data)
+                .any(|(input, descriptor)| {
+                    &input.descriptor != descriptor
+                        || input.bytes.len() as u64 != descriptor.reference.size_bytes
+                })
+        {
+            return Err(self.protocol_error("reasoning endpoint or binary inputs mismatch"));
         }
         let mut session = self
             .session
             .lock()
             .map_err(|_| AdapterCallError::Unavailable("session poisoned".into()))?;
         let previous = session.timeout;
-        session.timeout = previous.min(Duration::from_millis(invocation.budget.max_runtime_ms));
-        let response = session.exchange(HostMessage::ReasonV2 {
-            invocation: invocation.clone(),
-        });
+        let started = std::time::Instant::now();
+        let budget = Duration::from_millis(invocation.budget.max_runtime_ms);
+        let exchange =
+            |session: &mut Session, message: HostMessage| -> Result<AdapterMessage, StdioError> {
+                let Some(remaining) = budget
+                    .checked_sub(started.elapsed())
+                    .filter(|duration| !duration.is_zero())
+                else {
+                    return Err(StdioError::Timeout);
+                };
+                session.timeout = previous.min(remaining);
+                session.exchange(message)
+            };
+        let result = (|| {
+            if !inputs.is_empty() {
+                match exchange(
+                    &mut session,
+                    HostMessage::BeginInputData {
+                        invocation_id: invocation.invocation_id.clone(),
+                        target: invocation.capability.clone(),
+                        inputs: invocation.input_data.clone(),
+                    },
+                )? {
+                    AdapterMessage::InputDataReady { invocation_id }
+                        if invocation_id == invocation.invocation_id => {}
+                    _ => return Err(StdioError::UnexpectedMessage),
+                }
+                for input in inputs {
+                    let mut offset = 0u64;
+                    for bytes in input
+                        .bytes
+                        .chunks(arcs_adapter_protocol::MAX_DATA_CHUNK_BYTES as usize)
+                    {
+                        let next_offset = offset + bytes.len() as u64;
+                        match exchange(
+                            &mut session,
+                            HostMessage::InputDataChunk {
+                                invocation_id: invocation.invocation_id.clone(),
+                                name: input.descriptor.selection.name.clone(),
+                                offset,
+                                bytes: bytes.to_vec(),
+                            },
+                        )? {
+                            AdapterMessage::InputDataStored {
+                                invocation_id,
+                                name,
+                                next_offset: ack,
+                            } if invocation_id == invocation.invocation_id
+                                && name == input.descriptor.selection.name
+                                && ack == next_offset => {}
+                            _ => return Err(StdioError::UnexpectedMessage),
+                        }
+                        offset = next_offset;
+                    }
+                }
+            }
+            exchange(
+                &mut session,
+                HostMessage::ReasonV2 {
+                    invocation: invocation.clone(),
+                },
+            )
+        })();
         session.timeout = previous;
+        if result.is_err() {
+            session.stop();
+        }
         drop(session);
-        match response.map_err(call_error)? {
+        match result.map_err(call_error)? {
             AdapterMessage::ReasoningResultV2 { response }
                 if response.invocation_id == invocation.invocation_id
                     && response.request_id == invocation.request_id =>

@@ -108,8 +108,8 @@ die Schemas im Store und prüft beim Handshake die echten Manifeste und Grants.
 Eine Änderung eines bereits gespeicherten Schema-Vertrags unter derselben
 ID führt zu `SchemaDrift`; Schema-Evolution braucht eine neue ID.
 
-Adapter-IDs müssen eindeutig sein. `arcs.host` und `arcs.host.pipeline` sind
-für interne Input-Dienste des Hosts reserviert. `node_id` ist standardmäßig `adapter-host` und
+Adapter-IDs müssen eindeutig sein. `arcs.host`, `arcs.host.pipeline` und
+`arcs.host.runtime` sind für interne Input-Dienste des Hosts reserviert. `node_id` ist standardmäßig `adapter-host` und
 enthält 1 bis 64 ASCII-Buchstaben, Ziffern, Punkte, Unterstriche oder Bindestriche.
 Unabhängige Installationen sollten eigene Node-Namen und zugehörige Adapter-
 Datenbanken verwenden. Die ID-Garantie des Stores gilt innerhalb seiner
@@ -119,6 +119,22 @@ Unbekannte Konfigurationsfelder, doppelte IDs, ungültige Schemas, unpassende
 Request-Payloads und fehlende Dateien werden sichtbar abgewiesen.
 
 ## Externe Inputs und Reasoning
+
+Ein natives [Desktop-Kontrollpanel](../control-panel/README.md) startet diesen
+Host mit `--monitor`. Der Modus liefert fortlaufende JSON-Lines für Katalog,
+Status, Aufgaben zur Prüfung und Artefakt-Zusammenfassungen. Er benötigt einen
+frischen `--stop-file`-Pfad und ist mit einer optionalen Aufgaben-Runtime
+kombinierbar. Die bestehenden Grants und Effektgrenzen gelten unverändert.
+
+Alle sieben Rollen können mehrfach angeschlossen sein. `adapter_catalog()`
+zeigt die externen Installationen, freigeschaltete Rollen, Schemas und
+Reasoning-V2-Verfahren. `capabilities(AdapterRole)` liefert sämtliche passenden
+`CapabilityRef`-Ziele, deterministisch sortiert. Die Anwendung wählt einen
+konkreten Anschluss. Interne Host-Capabilities erscheinen nicht in dieser
+externen Sicht. Mit `--list-adapters` wird derselbe Katalog nach dem Handshake
+ohne Polling ausgegeben. Das
+[Beispiel mit elf Prozessen](examples/multiple-adapters.md) weist jede Rolle
+mehrfach nach, einschließlich getrennt freigegebener Effects und Neustart.
 
 `Host::poll_inputs` übernimmt Aufgaben und Ereignisse von aktivierten
 Input-Capabilities. Der Core validiert und persistiert jede Nachricht vor dem
@@ -137,8 +153,10 @@ journalisiert und bei identischen Wiederholungen wiederverwendet.
 
 Das [ausführbare Beispiel](examples/reason-task.md) verbindet eine JSON-Eingabe,
 einen mathematischen Solver und einen aufgezeichneten Modell-Testadapter. Es
-enthält noch keinen echten Modellanbieter. Polling und Reasoning sind synchron;
-eine dauerhaft laufende, ereignisgesteuerte Orchestrierung folgt separat.
+enthält noch keinen echten Modellanbieter. Die
+[Aufgaben-Runtime](examples/task-runtime.md) ergänzt eine dauerhafte synchrone
+Polling-Schleife mit konfigurierbarer Zuordnung, persistenter Queue und
+Wiederaufnahme. Fertige Kandidaten werden zur fachlichen Prüfung bereitgestellt.
 
 ## Konfigurierte Datenabfragen
 
@@ -304,12 +322,23 @@ Quellenbeobachtungen innerhalb eines Budgets pro Lauf. Definition und
 Checkpoints werden über den InputService im Core-Store gespeichert. Die
 Pipeline-ID bindet Topologie, Schemas und Adaptermanifeste; Änderungen
 benötigen eine neue ID. Der erforderliche `PipelineApproval`-Callback stammt
-von der Anwendung. Es gibt keinen Hintergrunddienst. Details zur
+von der Anwendung. Dieser Pipeline-Aufruf ist weiterhin begrenzt; die separate
+Aufgaben-Runtime verarbeitet Input-/Observe-zu-Reason-Routen. Details zur
 Konfiguration (Version 2), Policy, Wiederaufnahme und
 den Prozess-Tests stehen in der
 [Pipeline-Anleitung](examples/observe-report/README.md).
 
 ## Referenzierte Binärdaten
+
+`Host::reason_with_data(request, selections)` kann ausgewählte Referenzen an
+einen externen V2-Reasoner weitergeben. Quelle und Empfänger benötigen eigene
+Grants. Referenzen müssen aus dem kuratierten Kontext und vom gespeicherten
+Producer stammen. Der [Vertrag](../../docs/REASONING.md#explizite-binäreingaben)
+beschreibt Limits, Transport und Wiederholungen; der
+[externe Pixel-Suchnachweis](../../../drone-sim/adapters/image-reasoner/README.md)
+verwendet ihn mit einer Kamera und einem unabhängigen Regel-Reasoner.
+Die Aufgaben-Runtime routet weiterhin JSON-Kontext; Binäreingaben werden in
+diesem Schritt ausdrücklich über die Host-API ausgewählt.
 
 `config/data.json` startet die allgemeine Dateiquelle. Sie veröffentlicht
 kleine Referenzen des Schemas `arcs.data.reference.v1`. Diese werden wie
@@ -350,8 +379,10 @@ Quelle, Persistenz und Einschränkungen beschreibt die
 
 ## Laufzeit und Ausgabe
 
-Dieser CLI-Host führt einen **begrenzten Lauf** aus. Er ist kein automatisch
-neu verbindender Hintergrunddienst. Standardmäßig liest er je Adapter bis
+Ohne `--runtime` führt der CLI-Host einen **begrenzten Lauf** aus. Mit
+`--runtime <runtime.json>` arbeitet er dauerhaft bis zum Stop-Signal oder einer
+optionalen `--ticks`-Grenze; siehe [Start und Persistenz](examples/task-runtime.md).
+Automatische Neuverbindung ist in beiden Modi nicht enthalten. Standardmäßig liest er je Adapter bis
 `idle` oder bis zum jeweiligen Budget von 1000 Inputs und Observations und beendet danach alle
 Prozesse. Zusätzliche Runden und Pausen sind konfigurierbar:
 

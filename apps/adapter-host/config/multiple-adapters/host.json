@@ -1,0 +1,200 @@
+{
+  "config_version": 1,
+  "database": "../../../../var/multiple-adapters/core.sqlite",
+  "node_id": "multiple-adapters",
+  "schemas": [
+    "../../../../adapters/simulated-sensor/schemas/temperature.schema.json",
+    "../../../../adapters/simulated-fan/schemas/request-temperature.schema.json",
+    "../../../../adapters/simulated-fan/schemas/request-fan.schema.json",
+    "../../../../adapters/simulated-fan/schemas/fan-candidate.schema.json",
+    "../../../../adapters/simulated-fan/schemas/fan-state.schema.json",
+    "../../../../adapters/simulated-fan/schemas/fan-execution-result.schema.json",
+    "../../../../adapters/normalize-number/schemas/raw-number.schema.json",
+    "../../../../adapters/normalize-number/schemas/normalized-number.schema.json",
+    "../../../../adapters/file-output/schemas/report.schema.json",
+    "../../../../adapters/file-output/schemas/receipt.schema.json",
+    "../../../../adapters/example-reasoner/schemas/task.schema.json",
+    "../../../../adapters/example-reasoner/schemas/candidate.schema.json"
+  ],
+  "adapters": [
+    {
+      "program": "../../../../target/debug/arcs-json-input",
+      "profile": "input-left.json",
+      "args": [
+        {
+          "path": "../../../../var/multiple-adapters/input-left.sqlite"
+        }
+      ],
+      "grant_file": "input-left-grant.json"
+    },
+    {
+      "program": "../../../../target/debug/arcs-simulated-fan",
+      "profile": "fan-left.json",
+      "args": [
+        {
+          "path": "../../../../var/multiple-adapters/fan-left.sqlite"
+        },
+        "--adapter-id",
+        "multi.fan.left"
+      ],
+      "grant_file": "fan-left-grant.json",
+      "requests": [
+        {
+          "id": "fan-state-left",
+          "capability_id": "fan.read",
+          "input_schema_id": "arcs.request.fan.v1",
+          "response_schema_id": "arcs.state.fan.v1",
+          "subject": "fan-01",
+          "payload": {
+            "device_id": "fan-01"
+          }
+        },
+        {
+          "id": "temperature-left",
+          "capability_id": "temperature.read",
+          "input_schema_id": "arcs.request.temperature.v1",
+          "response_schema_id": "arcs.measurement.temperature.v1",
+          "subject": "temperature-01",
+          "payload": {
+            "device_id": "temperature-01"
+          }
+        }
+      ]
+    },
+    {
+      "program": "../../../../target/debug/arcs-normalize-number",
+      "args": [
+        "--adapter-id",
+        "multi.normalize.left"
+      ],
+      "grant_file": "normalize-left-grant.json",
+      "transforms": [
+        {
+          "id": "normalize-left",
+          "capability_id": "number.normalize",
+          "input_schema_id": "arcs.number.raw.v1",
+          "output_schema_id": "arcs.number.normalized.v1",
+          "subject": "number-01",
+          "payload": {
+            "value": 310,
+            "scale": 0.1,
+            "offset": 0,
+            "unit": "Cel"
+          }
+        }
+      ]
+    },
+    {
+      "program": "../../../../target/debug/arcs-file-output",
+      "profile": "output-left.json",
+      "args": [
+        {
+          "path": "../../../../var/multiple-adapters/output-left.sqlite"
+        }
+      ],
+      "grant_file": "output-left-grant.json"
+    },
+    {
+      "program": "../../../../target/debug/arcs-json-input",
+      "profile": "input-right.json",
+      "args": [
+        {
+          "path": "../../../../var/multiple-adapters/input-right.sqlite"
+        }
+      ],
+      "grant_file": "input-right-grant.json"
+    },
+    {
+      "program": "../../../../target/debug/arcs-simulated-fan",
+      "profile": "fan-right.json",
+      "args": [
+        {
+          "path": "../../../../var/multiple-adapters/fan-right.sqlite"
+        },
+        "--adapter-id",
+        "multi.fan.right"
+      ],
+      "grant_file": "fan-right-grant.json",
+      "requests": [
+        {
+          "id": "fan-state-right",
+          "capability_id": "fan.read",
+          "input_schema_id": "arcs.request.fan.v1",
+          "response_schema_id": "arcs.state.fan.v1",
+          "subject": "fan-01",
+          "payload": {
+            "device_id": "fan-01"
+          }
+        },
+        {
+          "id": "temperature-right",
+          "capability_id": "temperature.read",
+          "input_schema_id": "arcs.request.temperature.v1",
+          "response_schema_id": "arcs.measurement.temperature.v1",
+          "subject": "temperature-01",
+          "payload": {
+            "device_id": "temperature-01"
+          }
+        }
+      ]
+    },
+    {
+      "program": "../../../../target/debug/arcs-normalize-number",
+      "args": [
+        "--adapter-id",
+        "multi.normalize.right"
+      ],
+      "grant_file": "normalize-right-grant.json",
+      "transforms": [
+        {
+          "id": "normalize-right",
+          "capability_id": "number.normalize",
+          "input_schema_id": "arcs.number.raw.v1",
+          "output_schema_id": "arcs.number.normalized.v1",
+          "subject": "number-01",
+          "payload": {
+            "value": 410,
+            "scale": 0.1,
+            "offset": 0,
+            "unit": "Cel"
+          }
+        }
+      ]
+    },
+    {
+      "program": "../../../../target/debug/arcs-file-output",
+      "profile": "output-right.json",
+      "args": [
+        {
+          "path": "../../../../var/multiple-adapters/output-right.sqlite"
+        }
+      ],
+      "grant_file": "output-right-grant.json"
+    },
+    {
+      "program": "../../../../target/debug/arcs-example-reasoner",
+      "profile": "solver.json",
+      "args": [
+        {
+          "path": "../../../../var/multiple-adapters/solver.sqlite"
+        }
+      ],
+      "grant_file": "solver-grant.json"
+    },
+    {
+      "program": "../../../../target/debug/arcs-example-reasoner",
+      "profile": "model.json",
+      "args": [
+        {
+          "path": "../../../../var/multiple-adapters/model.sqlite"
+        }
+      ],
+      "grant_file": "model-grant.json"
+    },
+    {
+      "program": "../../../../target/debug/arcs-json-report",
+      "profile": "report.json",
+      "grant_file": "report-grant.json"
+    }
+  ]
+}

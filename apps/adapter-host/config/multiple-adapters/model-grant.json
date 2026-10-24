@@ -1,0 +1,29 @@
+{
+  "adapter_id": "multi.reasoner.model",
+  "producer_class": "model",
+  "enabled_capabilities": [
+    "solution.propose"
+  ],
+  "granted_permissions": [
+    "reason.compute"
+  ],
+  "assigned_trust": "medium",
+  "ingress_source_kind": null,
+  "max_payload_bytes": 4096,
+  "max_external_reference_bytes": 256,
+  "reasoning_limits": null,
+  "reasoning_limits_v2": {
+    "methods": [
+      "learned"
+    ],
+    "resources": {
+      "max_context_items": 4,
+      "max_context_bytes": 16384,
+      "max_output_bytes": 4096,
+      "max_candidates": 4,
+      "max_runtime_ms": 1000,
+      "max_iterations": null,
+      "max_output_tokens": null
+    }
+  }
+}

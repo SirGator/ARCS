@@ -1,7 +1,7 @@
 # Allgemeiner JSON-Input-Adapter
 
-`arcs-json-input <profile.json> <journal.sqlite>` veröffentlicht eine feste
-Liste von JSON-Ereignissen über die Input-Rolle des gemeinsamen SDK.
+`arcs-json-input <profile.json> <journal.sqlite>` veröffentlicht zunächst die
+konfigurierte Liste von JSON-Ereignissen über die Input-Rolle des gemeinsamen SDK.
 Ein Profil nennt Adapter-ID, Capability-ID, ein Eingabeschema und Ereignisse
 mit `id`, `subject`, `reference` und `payload`. Ein vollständiges Beispiel
 liegt unter `apps/adapter-host/config/roles/input-profile.json`.
@@ -19,3 +19,19 @@ noch kein laufender Chat-, HTTP- oder Dateiwächterdienst.
 
 Start, Wiederholung und Reasoning stehen in der
 [vollständigen Anleitung](../../apps/adapter-host/examples/reason-task.md).
+
+Neue Ereignisse können während des laufenden Adapterprozesses hinzugefügt werden:
+
+```bash
+./target/debug/arcs-json-input --enqueue \
+  apps/adapter-host/config/roles/input-profile.json \
+  var/roles-input.sqlite \
+  apps/adapter-host/config/roles/input-live-event.json
+```
+
+Die Ereignisdatei enthält `id`, `subject`, `reference` und `payload`. Identische
+Wiederholungen sind idempotent und setzen ein vorhandenes ACK nicht zurück.
+Geänderter Inhalt unter derselben ID wird abgewiesen. Das gebundene Profil
+bleibt unverändert; die Queue wird über eine eigene SQLite-Verbindung erweitert.
+Ein Ablauf mit laufendem Host steht im
+[Runtime-Beispiel](../../apps/adapter-host/examples/task-runtime.md).

@@ -80,6 +80,12 @@ pub const SCHEMAS: &[&str] = &[
 ];
 
 pub fn manifest() -> AdapterManifest {
+    manifest_with_id(AdapterId(ADAPTER.into()))
+}
+
+/// Eine Installation darf dieselben lokalen Fähigkeiten wie andere
+/// Installationen anbieten; ihre Adapter-ID unterscheidet die Ziele.
+pub fn manifest_with_id(adapter_id: AdapterId) -> AdapterManifest {
     let descriptor = |id: &str, contract, permission: &str| CapabilityDescriptor {
         id: CapabilityId(id.into()),
         contract,
@@ -87,7 +93,7 @@ pub fn manifest() -> AdapterManifest {
     };
     AdapterManifest {
         protocol_version: ADAPTER_PROTOCOL_VERSION,
-        adapter_id: AdapterId(ADAPTER.into()),
+        adapter_id,
         adapter_version: "1.0.0".into(),
         capabilities: vec![
             descriptor(

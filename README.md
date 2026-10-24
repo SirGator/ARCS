@@ -5,11 +5,13 @@ Agenten-Framework in Rust. Es soll einen möglichst allgemeinen, fähigen und
 günstigen Agenten ermöglichen, ohne Reasoning direkt mit Handlungsbefugnis zu
 verwechseln.
 
-Der Kernansatz ist einfach: Externe Daten werden zuerst validiert und als
-unveränderliche Artefakte gespeichert. Daraus baut ARCS einen nachvollziehbaren
-Weltzustand auf, versucht bekannte Aufgaben deterministisch zu lösen und nutzt
-teureres Reasoning nur als kontrollierten Fallback. Vorschläge müssen danach
-weiterhin verifiziert, freigegeben und als eigene Actions ausgeführt werden.
+ARCS bildet den allgemeinen Harness: Er nimmt externe Daten entgegen,
+validiert und speichert sie als unveränderliche Artefakte, ordnet ihre
+Zusammenhänge und stellt passenden Kontext für Reasoning bereit. Analysen,
+Planung und Lösungsvorschläge entstehen durch angeschlossene Solver, Modelle
+und andere Reasoning-Verfahren. Bekannte Ergebnisse können wiederverwendet
+werden. Vorschläge werden vor einer Wirkung verifiziert, freigegeben und
+über kontrollierte Actions oder Outputs umgesetzt.
 
 > **Projektstatus:** frühe Entwicklung (`0.1.0`). Der erste vertikale
 > World-Model-Slice und die kontrollierte Proposal-to-Action-Pipeline sind
@@ -29,8 +31,6 @@ ARCS/
 │   │   └── schemas/                 Versionierte allgemeine Artefakt-Schemas
 │   ├── arcs-adapter-protocol/       IDs, Manifeste, Nachrichten und JSON-Framing
 │   └── arcs-adapter-sdk/            Gemeinsame externe Adapter-Session
-├── simulation/
-│   └── room/                       Reine Raumgeometrie und Bewegung bei fester Höhe
 ├── adapters/
 │   ├── simulated-sensor/           Eigenes Cargo-Paket und ausführbarer Adapter
 │   │   ├── src/
@@ -47,11 +47,10 @@ ARCS/
 │   ├── json-report/                Schemaunabhängige JSON-Darstellung als Bericht
 │   ├── json-input/                 Externe JSON-Ereignisse mit dauerhafter ACK-Outbox
 │   ├── example-reasoner/           Mathematischer Solver und separater Modell-Testadapter
-│   ├── simulated-drone/            Telemetrie und idempotente Bewegung im Raum
 │   └── file-output/                Idempotente Ausgabe mit Journal und JSON-Berichten
 ├── apps/
-│   ├── drone-demo/                 Freigegebene Bewegung und beobachtete Wirkungsprüfung
 │   ├── adapter-host/               Allgemeiner Host mit JSON-Konfiguration
+│   ├── control-panel/              Natives Desktop-Kontrollpanel für Start, Status und Adapter
 │   │   ├── src/                    CLI und Bibliothek ohne Geräteabhängigkeit
 │   │   ├── config/                 Programme, Profile, Schemas, Grants und Abfragen
 │   │   └── tests/                  Prozess- und Konfigurationstests
@@ -61,6 +60,13 @@ ARCS/
 │       └── tests/                  Tests mit echten externen Adapterprozessen
 └── config/                         Historische C++/Worker-Beispiele; nicht geladen
 ```
+
+Kamera, Drohne und Raum-Simulation gehören zum getrennten lokalen Nachbarprojekt
+[`../drone-sim`](../drone-sim/README.md), mit eigenem Git-Repository und
+Cargo-Workspace. ARCS baut und testet unabhängig davon. Der allgemeine Host
+schließt dessen ausführbaren Adapter ausschließlich per stdio und
+Betreiberkonfiguration an; auch die fachlichen Schemas liegen beim externen
+Projekt. Im ARCS-Protokoll bleiben nur die geräteunabhängigen Verträge.
 
 Sensor und Lüfter nutzen das gemeinsame Protokoll, das Adapter-SDK und ihre
 eigenen Bibliotheken. Der Lüfter nutzt SQLite für seinen simulierten
@@ -92,7 +98,8 @@ und die Erteilung von Approvals bleiben in der Anwendung.
 Der Adapter speichert unveränderliche Snapshots, veröffentlicht kleine
 Metadaten-Referenzen und liefert Inhalte blockweise. Der Host benötigt dafür
 eine gesonderte Datenfreigabe. Das funktioniert mit Bildern ebenso wie mit
-anderen Binärdaten; eine Kamera oder Bildauswertung ist noch nicht enthalten.
+anderen Binärdaten. Konkrete Kamera und Bildauswertung liegen im externen
+Nachbarprojekt `drone-sim`.
 Start und Export stehen in der [Dateiquellen-Dokumentation](adapters/file-data/README.md).
 
 `adapters/normalize-number` demonstriert den allgemeinen Transform-Port:
@@ -125,13 +132,29 @@ einem mathematischen Solver und einem ausdrücklich aufgezeichneten Modelltest.
 Es zeigt Kontextauswahl, unterschiedliche Trust-Herkunft und Wiederaufnahme
 anhand derselben Artefakte. Ein echter Modellanbieter ist noch nicht angebunden.
 
-Der erste [Drohnen-Bewegungsnachweis](apps/drone-demo/README.md) verbindet
+Die [Aufgaben-Runtime](apps/adapter-host/examples/task-runtime.md) verbindet
+Input oder Observe dauerhaft mit konfigurierten Reasonern. Sie hält eine
+persistente Aufgabenqueue, setzt nach einem Neustart fort und stellt fertige
+Kandidaten zur Prüfung bereit. Neue JSON-Aufgaben lassen sich während des
+laufenden Hosts einreihen. Die fachliche Freigabe bleibt bei der Anwendung.
+
+Der erste [externe Drohnen-Bewegungsnachweis](../drone-sim/apps/drone-demo/README.md) verbindet
 eine separate Raum-Simulation mit einem externen Drohnenadapter und den
 bestehenden allgemeinen Kontrollmechanismen. Er liest die Pose, führt eine
 begrenzt freigegebene Bewegung aus und prüft die neue Position anhand einer
 separaten Abfrage und einer gespeicherten Observation. Zustand, Outbox und
-Bewegungsjournal überstehen Neustarts ohne zweite Bewegung. Eine Kamera und
-die autonome Suche sind noch nicht implementiert.
+Bewegungsjournal überstehen Neustarts ohne zweite Bewegung. Die autonome
+Suche ist noch nicht implementiert.
+
+Der [externe Kamera-Nachweis](../drone-sim/adapters/simulated-drone/CAMERA.md) liefert inzwischen
+perspektivische Bilder mit geometrischer Verdeckung. Aufnahmekontext, Pose,
+Kameraparameter und Zustandsrevision gehören zu einem atomar gespeicherten
+Snapshot; Bildbytes bleiben nach Bewegungen und Neustarts abrufbar. Der
+allgemeine Aufnahmekontext liegt im Protokoll; Kamera, Szene und
+Simulationscode liegen im eigenständigen Projekt außerhalb von ARCS. Ein
+[separater Pixel-Reasoner](../drone-sim/adapters/image-reasoner/README.md)
+erhält Bildbytes und einen getrennten Suchauftrag über den allgemeinen
+Binäreingabe-Vertrag. Die Kamera kennt das Suchziel nicht.
 
 Die Komponenten lassen sich innerhalb des Workspace getrennt bauen:
 
@@ -147,6 +170,19 @@ eine Änderung am Core ist dafür nicht erforderlich.
 
 ## Zielbild
 
+**Langfristiges Ziel ist ein vielseitiges Agentensystem, das unterschiedliche
+Aufgaben mit austauschbarer Wahrnehmung, Reasoning und ausführbaren Fähigkeiten
+bearbeiten kann.** ARCS liefert dafür den Harness zur Datenzusammenführung,
+Kontextbereitstellung, Koordination und kontrollierten Ausführung.
+
+**Die verlässliche Datengrundlage hat zunächst Vorrang.** Daten sollen fachlich
+verständlich, zeitlich zuordenbar und mit nachvollziehbarer Herkunft,
+Qualität und Unsicherheit verfügbar sein. Fehlende, widersprüchliche oder
+veraltete Informationen müssen erkennbar bleiben. Die Schema-Prüfung ist
+dabei ein Teil der Datenqualität. Der Harness stellt den angeschlossenen
+Reasonern den für die Aufgabe erforderlichen Kontext bereit; konkrete
+Wahrnehmung und Lösungsverfahren bleiben austauschbare Komponenten.
+
 **Universalität ist eine verbindliche Architekturvorgabe.** ARCS bleibt ein
 allgemeines Agenten-Framework. Die Drohnensuche dient als erster großer
 Anwendungs- und Bewährungsfall. Allgemeine Zielverfolgung, Beobachtung,
@@ -161,17 +197,29 @@ und ein Modell-Testadapter weisen sie nach; echte Modellanbieter fehlen noch.
 Den verbindlichen Ausbau beschreibt der
 [Reasoning-Entwurf](docs/REASONING.md).
 
+Wie bei mehreren an ein Betriebssystem angeschlossenen Geräten können alle
+sieben Adapter-Rollen mehrfach vertreten sein. Anschlüsse umfassen Geräte,
+Datenquellen und unterschiedliche Software-/Reasoning-Verfahren. Jede
+Installation hat eine eigene Adapter-ID und eigene Grants; lokale
+Capability-Namen dürfen sich wiederholen. Der
+[Anschlusskatalog und Prozessnachweis](apps/adapter-host/examples/multiple-adapters.md)
+zeigt diese Auswahl mit mehreren Instanzen jeder Rolle.
+
 Das erste große Anwendungsziel ist: **ARCS steuert eine simulierte Drohne
-durch einen simulierten Raum und findet darin ein vorgegebenes Zielobjekt
-mithilfe der Drohnenkamera.**
+durch einen anfangs unbekannten simulierten Raum ohne vorgegebene Karte und
+findet darin ein vorgegebenes Zielobjekt mithilfe der Drohnenkamera.**
 
 Die Drohne soll dafür wiederholt beobachten, eine Suchentscheidung treffen,
 eine freigegebene Bewegung ausführen und das Ergebnis erneut beobachten.
 Ein Fund muss auf Kamerabildern beruhen und mit gespeicherter Evidenz
-nachvollziehbar sein. Drohnenadapter und Simulation bleiben außerhalb des
-Core. Aktuell sind die allgemeine Adapteranbindung und die kontrollierte
-Action-Pipeline sowie eine einfache Drohnenbewegung in einer Raumsimulation
-vorhanden. Kamera und Suchsteuerung sind noch nicht implementiert.
+nachvollziehbar sein. Drohnenadapter, Kamera, Simulation und fachliche Demo
+liegen im eigenständigen Nachbarprojekt `drone-sim`, außerhalb des
+ARCS-Repositorys und -Workspace. Aktuell sind die allgemeine Adapteranbindung
+und die kontrollierte Action-Pipeline sowie eine einfache Drohnenbewegung in einer Raumsimulation
+vorhanden. Eine optionale simulierte Kamera liefert zugeordnete Bildsnapshots.
+Ein externer Rules-Reasoner weist sichtbare und fehlende Farbsignale anhand
+der übertragenen Pixel nach. Semantische Objekterkennung und autonome
+Suchsteuerung sind noch nicht implementiert.
 
 Etappen, Zuständigkeiten und Erfolgskriterien stehen im
 [Plan für die Drohnensuche](docs/DRONE_SEARCH.md).
@@ -210,12 +258,13 @@ Observation → Belief Update → Goal → Memory/Skill Retrieval
 | --- | --- |
 | Versionierte Artefakte, Schemas, Provenance und Trust | Implementiert |
 | Adapter-Manifeste und getrennte Betreiber-Grants | Implementiert |
+| Mehrere Installationen aller sieben Rollen und Anschlusskatalog | `Host::adapter_catalog`, `Host::capabilities` und CLI `--list-adapters`; Prozess- und Neustartnachweis |
 | Gemeinsames Adapter-SDK für Input, Observe, Request, Transform, Reason, Act und Output | Implementiert, einschließlich neutralem Reasoning-V2-Port |
 | Transform mit geprüften Ein-/Ausgaben, Provenienz und persistentem Replay | Implementiert, allgemeiner Zahlen-Normalisierer als Beispiel |
 | Output mit gebundenem Auftrag, Verification, Approval und Beleg | Implementiert, Dateiausgabe mit Journal und Recovery |
 | Mehrstufige Observe → Transform → Output-Pipelines | Allgemeiner Host-Runner mit gebundener Definition, Checkpoints und Cursor; Freigabepolicy in der Anwendung |
-| Raum- und Drohnensimulation | Bewegung bei fester Höhe, Kollisionsprüfung, persistente Telemetrie und freigegebene Action mit Wirkungsprüfung |
-| Referenzierte Binärdaten mit begrenztem Abruf und separaten Grants | Implementiert, allgemeine Dateiquelle als Prozessnachweis |
+| Externer Raum- und Drohnennachweis | Im getrennten Projekt `../drone-sim`: Bewegung, Kollisionsprüfung und freigegebene Action mit Wirkungsprüfung |
+| Referenzierte Binärdaten und explizite Reasoning-V2-Eingaben | Begrenzter Abruf und Empfang unter getrennten Grants; generischer Transport und externer Pixel-Suchnachweis |
 | Allgemeiner Host mit JSON-Konfiguration und mehreren Adapterprozessen | Implementiert, einschließlich konfigurierter Datenabfragen |
 | Externer stdio-Adapter mit Geräteprofil, ACK und persistentem Replay | Erster Observation-Slice implementiert |
 | Request und freigegebene Action über stdio | Implementiert, inklusive persistentem Lüfter-Simulator |
@@ -223,6 +272,8 @@ Observation → Belief Update → Goal → Memory/Skill Retrieval
 | Observation → Entity → StateEstimate → WorldState | Implementiert |
 | Append-only SQLite-Store und deterministisches Replay | Implementiert |
 | Artifact-Netz als bekannter Fast Path | Implementiert |
+| Externe Kamera und Pixel-Suche | In `../drone-sim`: zielunabhängige Kamera und separater Rules-Reasoner mit ausgewählten Bildbytes; noch keine autonome Suche |
+| Dauerhafte Aufgabenverarbeitung | Konfigurierbare Input-/Observe-zu-Reason-Routen, persistente Queue, Wiederaufnahme und Review-Übergabe; serielles Polling |
 | Kuratiertes Reasoning | V1-Modellfall und allgemeiner V2-Port; externe Solver und Modell-Testadapter, noch kein echter Modellanbieter |
 | Verification → Approval → Action → Execution → Outcome | Implementiert |
 | Explizite Goals und maschinenprüfbare Zielbedingungen | Geplant |
@@ -329,6 +380,17 @@ ARCS setzt Autorität an mehreren Stellen ausdrücklich nicht voraus:
   ist eine daraus reproduzierbare aktuelle Sicht.
 
 ## Schnellstart
+
+Für ein eigenes Desktop-Fenster:
+
+```bash
+./arcs-control
+```
+
+Das [Kontrollpanel](apps/control-panel/README.md) bietet Start und Stopp,
+Konfigurationsauswahl, Adapterkatalog mit Rollenfiltern, aktuelle Statusdaten
+und Protokolle. `./arcs-control --install-launcher` ergänzt einen Eintrag im
+persönlichen Anwendungsmenü.
 
 Voraussetzung ist eine Rust-Toolchain mit Unterstützung für Edition 2024.
 SQLite wird über die `bundled`-Option von `rusqlite` eingebunden.

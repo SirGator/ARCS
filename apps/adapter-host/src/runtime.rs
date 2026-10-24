@@ -82,6 +82,7 @@ struct RunningAdapter {
 }
 
 pub struct Host {
+    database_path: std::path::PathBuf,
     schemas: SchemaRegistry,
     registry: AdapterRegistry,
     store: SqliteArtifactStore,
@@ -143,6 +144,7 @@ fn register_host(
         max_payload_bytes: 65_536,
         max_external_reference_bytes: 2048,
         data_limits: None,
+        input_data_limits: None,
         reasoning_limits_v2: None,
         reasoning_limits: None,
     };
@@ -207,15 +209,54 @@ fn validate_operations(
 }
 
 impl Host {
+    /// Mehrere Implementierungen pro Rolle sind gleichberechtigte Ziele.
+    pub fn capabilities(&self, role: arcs::adapters::AdapterRole) -> Vec<CapabilityRef> {
+        self.registry
+            .capabilities(role)
+            .into_iter()
+            .filter(|cap| {
+                self.adapters
+                    .iter()
+                    .any(|adapter| adapter.config.grant.adapter_id == cap.adapter_id)
+            })
+            .collect()
+    }
+
+    /// Katalog der angeschlossenen externen Installationen mit ihren vom
+    /// Betreiber freigeschalteten Fähigkeiten. Kein Health- oder Wirkungsnachweis.
+    pub fn adapter_catalog(&self) -> Vec<arcs::adapters::AdapterConnection> {
+        self.registry
+            .catalog()
+            .into_iter()
+            .filter(|connection| {
+                self.adapters
+                    .iter()
+                    .any(|adapter| adapter.config.grant.adapter_id == connection.adapter_id)
+            })
+            .collect()
+    }
+
     pub fn reason(
         &mut self,
         request: arcs::reasoning::ReasoningRequestV2,
+    ) -> Result<arcs::reasoning::general::ReasoningResult, HostError> {
+        self.reason_with_data(request, &[])
+    }
+    pub fn reason_with_data(
+        &mut self,
+        request: arcs::reasoning::ReasoningRequestV2,
+        inputs: &[arcs::adapters::input_data::InputDataSelection],
     ) -> Result<arcs::reasoning::general::ReasoningResult, HostError> {
         let adapter = self
             .adapters
             .iter()
             .find(|adapter| adapter.config.grant.adapter_id == request.capability.adapter_id)
             .ok_or_else(|| invalid("unknown reasoning adapter"))?;
+        let sources: Vec<&dyn arcs::adapters::data::DataAdapter> = self
+            .adapters
+            .iter()
+            .map(|adapter| &adapter.endpoint as &dyn arcs::adapters::data::DataAdapter)
+            .collect();
         arcs::reasoning::general::GeneralReasoningService {
             registry: &self.registry,
             schemas: &self.schemas,
@@ -223,7 +264,7 @@ impl Host {
             ids: &mut self.ids,
             clock: &SystemClock,
         }
-        .reason(&adapter.endpoint, request)
+        .reason_with_data(&adapter.endpoint, request, inputs, &sources)
         .map_err(HostError::Reasoning)
     }
 
@@ -263,6 +304,15 @@ impl Host {
             }
         }
         Ok(received)
+    }
+
+    /// Im Dauerbetrieb enthält der Bericht nur Inputs der aktuellen Runde.
+    pub(crate) fn poll_event_tick(&mut self) -> Result<(), HostError> {
+        for adapter in &mut self.adapters {
+            adapter.report.inputs.clear();
+        }
+        self.poll_inputs()?;
+        self.poll_round()
     }
 
     pub fn prepare_output(
@@ -339,6 +389,13 @@ impl Host {
             })?;
         }
         let store = SqliteArtifactStore::open(&config.database).map_err(HostError::Store)?;
+        let database_path = config
+            .database
+            .canonicalize()
+            .map_err(|source| HostError::Io {
+                path: config.database.clone(),
+                source,
+            })?;
         let ids = store
             .durable_id_generator(&config.node_id)
             .map_err(HostError::Store)?;
@@ -394,6 +451,7 @@ impl Host {
             });
         }
         Ok(Self {
+            database_path,
             schemas: config.schemas,
             registry,
             store,
@@ -406,6 +464,9 @@ impl Host {
 
     pub fn store(&self) -> &SqliteArtifactStore {
         &self.store
+    }
+    pub(crate) fn database_path(&self) -> &Path {
+        &self.database_path
     }
     pub fn schemas(&self) -> &SchemaRegistry {
         &self.schemas
@@ -769,9 +830,9 @@ impl Host {
         })
     }
 
-    /// Führt konfigurierte Abfragen und Transforms einmal und danach die Polling-Runden aus.
-    /// Alle Prozesse werden vor Rückgabe beendet, auch bei Fehlern via Drop.
-    pub fn run(mut self) -> Result<HostReport, HostError> {
+    /// Führt die ausdrücklich konfigurierten Abfragen und Transforms aus.
+    /// Dauerbetrieb und begrenzter Lauf verwenden dieselben Aufrufe und IDs.
+    pub fn run_configured_operations(&mut self) -> Result<(), HostError> {
         let requests: Vec<_> = self
             .adapters
             .iter()
@@ -790,6 +851,13 @@ impl Host {
         for id in transforms {
             self.transform_configured(&id)?;
         }
+        Ok(())
+    }
+
+    /// Führt konfigurierte Abfragen und Transforms einmal und danach die Polling-Runden aus.
+    /// Alle Prozesse werden vor Rückgabe beendet, auch bei Fehlern via Drop.
+    pub fn run(mut self) -> Result<HostReport, HostError> {
+        self.run_configured_operations()?;
         for round in 0..self.polling.rounds {
             self.poll_inputs()?;
             self.poll_round()?;

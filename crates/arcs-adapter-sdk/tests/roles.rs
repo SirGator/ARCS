@@ -83,6 +83,7 @@ fn invocation() -> ReasoningInvocationV2 {
         method: ReasoningMethod::Solver,
         objective: "test".into(),
         context: vec![],
+        input_data: vec![],
         target_schema_id: SchemaId("arcs.sample_candidate.v1".into()),
         allowed_capabilities: vec![],
         constraints: serde_json::json!({}),

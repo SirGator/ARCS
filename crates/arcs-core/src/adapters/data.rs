@@ -44,22 +44,16 @@ impl<'a> DataService<'a> {
         Self { registry }
     }
 
-    /// Schreibt geprüfte Blöcke fortlaufend. Bei Fehlern können bereits Bytes
-    /// geschrieben sein; ein Dateiexport sollte eine temporäre Datei verwenden.
-    pub fn copy(
+    /// Prüft aktuelle Leserechte ohne Datenabruf, auch vor Cache-Replay.
+    pub fn authorize(
         &self,
-        adapter: &impl DataAdapter,
         capability: &CapabilityRef,
         reference: &DataReference,
-        writer: &mut impl Write,
-    ) -> Result<u64, DataError> {
+    ) -> Result<DataLimits, DataError> {
         let (registered, descriptor) = self
             .registry
             .authorized_capability(&capability.adapter_id, &capability.capability_id)
             .map_err(DataError::Authorization)?;
-        if registered.manifest() != adapter.manifest() {
-            return Err(DataError::EndpointMismatch);
-        }
         if !descriptor.contract.is_observation()
             && !descriptor.contract.is_request()
             && !descriptor.contract.is_transform()
@@ -82,6 +76,27 @@ impl<'a> DataService<'a> {
         }
         if reference.size_bytes > limits.max_object_bytes {
             return Err(DataError::ObjectTooLarge);
+        }
+        Ok(limits)
+    }
+
+    /// Schreibt geprüfte Blöcke fortlaufend. Bei Fehlern können bereits Bytes
+    /// geschrieben sein; ein Dateiexport sollte eine temporäre Datei verwenden.
+    pub fn copy(
+        &self,
+        adapter: &(impl DataAdapter + ?Sized),
+        capability: &CapabilityRef,
+        reference: &DataReference,
+        writer: &mut impl Write,
+    ) -> Result<u64, DataError> {
+        let limits = self.authorize(capability, reference)?;
+        if self
+            .registry
+            .get(&capability.adapter_id)
+            .map(|registered| registered.manifest())
+            != Some(adapter.manifest())
+        {
+            return Err(DataError::EndpointMismatch);
         }
         let mut offset = 0;
         let mut first = true;

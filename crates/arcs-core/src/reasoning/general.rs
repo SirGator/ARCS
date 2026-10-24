@@ -21,6 +21,18 @@ use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
 pub trait GeneralReasoningAdapter: Send + Sync {
+    fn propose_with_data(
+        &self,
+        invocation: &ReasoningInvocationV2,
+        inputs: &[arcs_adapter_protocol::ReceivedInputData],
+    ) -> Result<ReasoningResponseV2, AdapterCallError> {
+        if !inputs.is_empty() {
+            return Err(AdapterCallError::Rejected(
+                "binary input unsupported".into(),
+            ));
+        }
+        self.propose_v2(invocation)
+    }
     fn manifest(&self) -> &AdapterManifest;
     fn propose_v2(
         &self,
@@ -62,6 +74,15 @@ impl GeneralReasoningService<'_> {
         &mut self,
         endpoint: &dyn GeneralReasoningAdapter,
         request: ReasoningRequestV2,
+    ) -> Result<ReasoningResult, ReasoningError> {
+        self.reason_with_data(endpoint, request, &[], &[])
+    }
+    pub fn reason_with_data(
+        &mut self,
+        endpoint: &dyn GeneralReasoningAdapter,
+        request: ReasoningRequestV2,
+        selections: &[arcs_adapter_protocol::InputDataSelection],
+        sources: &[&dyn crate::adapters::data::DataAdapter],
     ) -> Result<ReasoningResult, ReasoningError> {
         for schema in ["arcs.reasoning_request.v2", "arcs.reasoning_result.v2"] {
             if self.schemas.get(&SchemaId(schema.into())).is_none() {
@@ -169,6 +190,12 @@ impl GeneralReasoningService<'_> {
                 &request.request_id,
             ],
         );
+        let input_data = crate::adapters::input_data::InputDataService::new(
+            self.registry,
+            self.schemas,
+            self.store,
+        )
+        .prepare(&request.capability, &context, selections)?;
         let invocation = ReasoningInvocationV2 {
             invocation_id: invocation_id.clone(),
             request_id: request.request_id,
@@ -176,6 +203,7 @@ impl GeneralReasoningService<'_> {
             method: request.method,
             objective: request.objective,
             context,
+            input_data,
             target_schema_id: request.target_schema_id,
             allowed_capabilities: request.allowed_capabilities,
             constraints: request.constraints,
@@ -235,8 +263,14 @@ impl GeneralReasoningService<'_> {
             let invocations = InvocationService::new(self.store, self.schemas, self.clock);
             let dispatched = invocations.dispatch(&invocations.recover(&prepared)?)?;
             let outcome = (|| {
+                let inputs = crate::adapters::input_data::InputDataService::new(
+                    self.registry,
+                    self.schemas,
+                    self.store,
+                )
+                .read(&invocation.input_data, sources)?;
                 let started = Instant::now();
-                let response = endpoint.propose_v2(&invocation)?;
+                let response = endpoint.propose_with_data(&invocation, &inputs)?;
                 if started.elapsed() > Duration::from_millis(invocation.budget.max_runtime_ms) {
                     return Err(ReasoningError::AdapterCall(AdapterCallError::Timeout));
                 }
@@ -262,6 +296,12 @@ impl GeneralReasoningService<'_> {
                         error,
                         ReasoningError::AdapterCall(
                             AdapterCallError::Timeout | AdapterCallError::Unavailable(_)
+                        ) | ReasoningError::InputData(
+                            crate::adapters::input_data::InputDataError::Data(
+                                crate::adapters::data::DataError::Adapter(
+                                    AdapterCallError::Timeout | AdapterCallError::Unavailable(_)
+                                )
+                            )
                         )
                     );
                     InvocationService::new(self.store, self.schemas, self.clock).fail(

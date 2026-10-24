@@ -7,6 +7,20 @@ use crate::SchemaId;
 /// Version des universellen ARCS-Adapterprotokolls.
 pub const ADAPTER_PROTOCOL_VERSION: u32 = 1;
 
+/// Eine Rolle kann von beliebig vielen eindeutig benannten Installationen
+/// angeboten werden. Sie ist kein Singleton und keine Auswahlentscheidung.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AdapterRole {
+    Input,
+    Observe,
+    Request,
+    Transform,
+    Reason,
+    Act,
+    Output,
+}
+
 /// Stabile Identität eines extern installierten Adapters.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -96,6 +110,17 @@ pub enum CapabilityContract {
 }
 
 impl CapabilityContract {
+    pub fn role(&self) -> AdapterRole {
+        match self {
+            Self::Input { .. } => AdapterRole::Input,
+            Self::Observe { .. } => AdapterRole::Observe,
+            Self::Request { .. } => AdapterRole::Request,
+            Self::Transform { .. } => AdapterRole::Transform,
+            Self::Reason { .. } => AdapterRole::Reason,
+            Self::Act { .. } => AdapterRole::Act,
+            Self::Output { .. } => AdapterRole::Output,
+        }
+    }
     /// Alle Verträge, die diese Fähigkeit als Ausgabe erzeugen darf.
     pub fn emitted_schemas(&self) -> &[SchemaId] {
         match self {

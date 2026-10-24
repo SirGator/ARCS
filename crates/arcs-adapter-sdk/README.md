@@ -5,6 +5,15 @@ Gemeinsame Rust-Basis für externe Adapter. Das Paket hängt vom
 Geräteabhängigkeiten. Der Host kann auch Adapter in anderen Sprachen
 anbinden, sofern sie das gleiche Protokoll implementieren.
 
+Jede Installation liefert eine eigene `adapter_id`. Mehrere Instanzen
+desselben Programms dürfen dieselben lokalen Capability-Namen verwenden;
+das Ziel ist immer die vollständige `CapabilityRef`. Ein Prozess kann mehrere
+Rollen anbieten, und jede Rolle kann bei mehreren Installationen vorkommen.
+Die Treiber machen ihren Installationsnamen konfigurierbar und binden
+zustandsbehaftete Journale an diese Identität. Der
+[Mehrfachanschluss-Nachweis](../../apps/adapter-host/examples/multiple-adapters.md)
+verwendet hierfür denselben SDK-Dialog für alle sieben Rollen.
+
 Ein Adapter implementiert den Trait `Adapter`. Er liefert sein Manifest
 und überschreibt die benötigten Methoden:
 
@@ -124,3 +133,13 @@ verlorene Antworten und Prozessneustarts anhand der Invocation-ID erkennen
 und darf dieselbe Zustellung nicht erneut wirken lassen. Die Dateiausgabe
 unter `adapters/file-output` zeigt ein persistentes Journal samt atomarer
 Dateiveröffentlichung und Wiederherstellung zwischen beiden Schritten.
+
+Ein Reasoner mit Binäreingaben implementiert
+`reason_with_data(ReasoningInvocationV2, Vec<ReceivedInputData>)`. Das SDK sammelt
+vorher begrenzte Blöcke, prüft Invocation, Ziel-Capability, Referenzen im
+ausgewählten Kontext und vollständige Längen und verbraucht den Puffer einmalig.
+Es vergibt weder Quell-Leserechte noch Empfangsrechte; diese prüft der Host.
+Pro Auftrag sind höchstens acht Objekte und insgesamt 16 MiB erlaubt, im
+Host gegebenenfalls weniger. Das Backend muss für Replay und Neustart sein
+eigenes Journal führen und dabei auch die exakten Eingabebytes binden.
+Bestehende Reasoner ohne Binäreingaben behalten ihren `reason_v2`-Callback.

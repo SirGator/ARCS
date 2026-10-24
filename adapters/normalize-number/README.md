@@ -34,6 +34,15 @@ Einheiten und Einheiten mit Steuerzeichen werden abgewiesen.
 
 ## Allgemeiner Ablauf
 
+Mehrere Instanzen können dieselbe lokale Capability `number.normalize`
+anbieten. `arcs-normalize-number --adapter-id normalize.left` wählt einen
+eigenen Installationsnamen; der zugehörige Betreiber-Grant muss denselben
+Namen verwenden. Ohne Argument bleibt `example.normalize` erhalten.
+Die Bibliothek bietet dafür `NormalizerInstance::new(AdapterId)`; der
+bisherige `Normalizer` behält sein Standardverhalten. Ein vollständiges
+[Mehrfachanschluss-Beispiel](../../apps/adapter-host/examples/multiple-adapters.md)
+verwendet zwei Normalisierer gleichzeitig.
+
 1. Der Host persistiert die vollständige Auftragsdefinition und ihren Input.
 2. `TransformService` prüft die aktuelle Capability-Freigabe, beide
    Schema-Verträge und die Größe der gespeicherten Eingabe.

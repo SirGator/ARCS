@@ -1,0 +1,10 @@
+{
+  "$id": "arcs.input.host_runtime.v1",
+  "type": "object",
+  "required": ["runtime_id", "definition"],
+  "properties": {
+    "runtime_id": {"type": "string", "minLength": 1},
+    "definition": {"type": "object"}
+  },
+  "additionalProperties": false
+}

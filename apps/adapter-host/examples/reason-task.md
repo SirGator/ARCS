@@ -56,7 +56,8 @@ an die Anwendung zurück; `Host::run` pollt sie zusätzlich in jeder Runde.
 Die Konfiguration muss zum angebotenen Input-Profil passen; nicht
 freigegebene Capabilities werden sichtbar abgewiesen.
 
-Die mitgelieferte JSON-Quelle ist eine feste Ereignisliste mit SQLite-Outbox.
+Die mitgelieferte JSON-Quelle startet mit einer festen Ereignisliste und SQLite-Outbox.
+Mit `--enqueue` können neue Ereignisse während des Betriebs hinzugefügt werden.
 Sie ist kein HTTP- oder Chatserver. Änderungen am Profil brauchen ein neues
 Journal beziehungsweise eine neue Installation mit passenden stabilen IDs.
 
@@ -104,10 +105,11 @@ Ein Adapter kann weiterhin mehrere Rollen und Fähigkeiten in einem Prozess
 anbieten. Der SDK-Test `tests/roles.rs` nutzt Input und Reason gemeinsam;
 die Sensor-/Lüfter-/Drohnenbeispiele bleiben unverändert anschließbar.
 
-Der Host führt begrenzte synchrone Dialoge aus. Permanente Ereignisverarbeitung,
-asynchrone Planung, parallele Reasoner-Auswahl und automatische Kombination
-mehrerer Ergebnisse sind noch nicht implementiert. Die Anwendung wählt
-explizit, welcher gespeicherte Input an welchen Reasoner geht.
+Dieses Beispiel führt begrenzte synchrone Dialoge aus und wählt Reasoner
+explizit. Die [Aufgaben-Runtime](task-runtime.md) ergänzt einen Dauerlauf
+mit konfigurierten Input-/Observe-Routen, persistenter Queue und Review-Übergabe.
+Asynchrone Planung, parallele Reasoner-Auswahl und automatische Kombination
+mehrerer Ergebnisse sind noch nicht implementiert.
 
 ```bash
 cargo test --locked -p arcs-host --test input_reasoning

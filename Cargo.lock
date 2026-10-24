@@ -40,18 +40,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "arcs-drone-demo"
-version = "0.1.0"
-dependencies = [
- "arcs-core",
- "arcs-host",
- "arcs-simulated-drone",
- "rusqlite",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "arcs-example-reasoner"
 version = "0.1.0"
 dependencies = [
@@ -121,25 +109,6 @@ version = "0.1.0"
 dependencies = [
  "arcs-adapter-protocol",
  "arcs-adapter-sdk",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "arcs-room-sim"
-version = "0.1.0"
-dependencies = [
- "serde",
-]
-
-[[package]]
-name = "arcs-simulated-drone"
-version = "0.1.0"
-dependencies = [
- "arcs-adapter-protocol",
- "arcs-adapter-sdk",
- "arcs-room-sim",
- "rusqlite",
  "serde",
  "serde_json",
 ]

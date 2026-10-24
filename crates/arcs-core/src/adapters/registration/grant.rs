@@ -35,4 +35,7 @@ pub struct AdapterGrant {
     /// Ohne ausdrückliches Limit bleibt der Abruf referenzierter Daten gesperrt.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub data_limits: Option<DataLimits>,
+    /// Separates Empfangsrecht; Leserechte eines Quelladapters genügen nicht.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_data_limits: Option<arcs_adapter_protocol::InputDataLimits>,
 }

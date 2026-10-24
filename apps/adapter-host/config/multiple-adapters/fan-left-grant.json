@@ -1,0 +1,20 @@
+{
+  "adapter_id": "multi.fan.left",
+  "producer_class": "executor",
+  "enabled_capabilities": [
+    "temperature.read",
+    "fan.read",
+    "temperature.observe",
+    "fan.observe",
+    "fan.set"
+  ],
+  "granted_permissions": [
+    "sensor.read",
+    "fan.write"
+  ],
+  "assigned_trust": "medium",
+  "ingress_source_kind": "sensor",
+  "max_payload_bytes": 4096,
+  "max_external_reference_bytes": 512,
+  "reasoning_limits": null
+}

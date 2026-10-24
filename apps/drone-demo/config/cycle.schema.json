@@ -1,7 +1,0 @@
-{
-  "$id":"arcs.input.drone_demo.v1",
-  "type":"object",
-  "required":["config","policy"],
-  "properties":{"config":{"type":"object"},"policy":{"type":"string","minLength":1}},
-  "additionalProperties":false
-}

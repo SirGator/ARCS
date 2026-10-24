@@ -1,0 +1,59 @@
+* { font-family: "Ubuntu", "DejaVu Sans", sans-serif; font-size: 13px; }
+window, .background { background: #1b1e25; color: #e9edf3; }
+headerbar { background: #16191f; border: 0; border-bottom: 1px solid #2c313b; box-shadow: none; min-height: 46px; }
+headerbar label { color: #c7ced9; }
+button { background: #292e38; color: #dce3ee; border: 1px solid #3a414f; border-radius: 7px; padding: 9px 15px; box-shadow: none; text-shadow: none; }
+button:hover { background: #343b47; border-color: #526070; }
+button:disabled { color: #697282; background: #242932; border-color: #303640; }
+button.primary { background: #75dfc2; color: #102d25; border-color: #75dfc2; font-weight: bold; }
+button.primary:hover { background: #93ead2; border-color: #93ead2; }
+button.primary:disabled { background: #2b4843; color: #77a399; border-color: #35574e; }
+button.danger { color: #ffaaaa; border-color: #684249; background: #37272e; }
+button.flat, button.nav { border-color: transparent; background: transparent; box-shadow: none; }
+button.flat:hover { background: #2a3039; }
+button.nav { padding: 13px 16px; border-radius: 7px; color: #929cab; }
+button.nav:hover { color: #e9edf3; background: #252b34; }
+button.nav.active { color: #92e8ce; background: #233731; }
+button.nav label { font-size: 14px; }
+.sidebar { background: #15181e; border-right: 1px solid #2b303a; }
+.brand { font-size: 23px; font-weight: bold; color: #f0f4f9; }
+.brand-subtitle { color: #758090; font-size: 11px; }
+.section-kicker { color: #687687; font-size: 10px; font-weight: bold; }
+.page-title { font-size: 28px; font-weight: bold; color: #f5f7fa; }
+.subtitle { color: #94a0af; font-size: 13px; }
+.muted { color: #8995a6; }
+.small { font-size: 11px; }
+.card { background: #222730; border: 1px solid #343b47; border-radius: 10px; }
+.metric-title { color: #8997aa; font-size: 10px; font-weight: bold; }
+.metric-value { color: #f1f5f9; font-size: 29px; font-weight: bold; }
+.metric-value.green { color: #86e2c7; }
+.card-title { font-size: 15px; font-weight: bold; color: #e9eff6; }
+.badge { background: #29343b; color: #a0adbc; border-radius: 5px; padding: 5px 8px; font-size: 10px; font-weight: bold; }
+.badge.live { background: #233c34; color: #90e4c9; }
+.badge.error { background: #482d32; color: #ffaaaa; }
+entry, combobox entry { background: #1b2028; color: #e0e6f0; border: 1px solid #3a4351; border-radius: 6px; padding: 7px 10px; box-shadow: none; }
+entry:focus { border-color: #75d9bb; }
+entry:disabled { color: #788391; background: #20252c; }
+combobox button { padding: 7px 10px; }
+combobox arrow { color: #a2afc2; }
+.config-label { color: #a7b3c3; font-size: 11px; }
+.banner { background: #263a3b; border: 1px solid #3c6460; border-radius: 7px; padding: 12px; color: #b9e6dd; }
+.banner.error { background: #3c292e; border-color: #77484f; color: #ffb8bd; }
+treeview.view { background: #222730; color: #dce4ef; border: none; -GtkTreeView-grid-line-width: 1; -GtkTreeView-horizontal-separator: 1; }
+treeview.view:selected { background: #2d4842; color: #d4f7eb; }
+treeview.view header button { background: #252b35; border: none; border-radius: 0; color: #8996a9; padding: 9px 12px; font-size: 10px; font-weight: bold; }
+treeview.view:disabled { color: #6e7b8b; }
+scrolledwindow { border: none; }
+scrollbar { background: transparent; }
+scrollbar slider { background: #495362; border-radius: 5px; min-width: 5px; min-height: 25px; }
+separator { background: #343b47; min-height: 1px; }
+.activity { background: transparent; }
+.activity-row { padding: 12px 0; border-bottom: 1px solid #303744; }
+.activity-dot { color: #7dddc2; font-size: 17px; }
+.activity-schema { font-size: 12px; color: #dce4f0; font-weight: bold; }
+.activity-source { font-size: 10px; color: #8795a9; }
+.empty { color: #8290a3; padding: 26px; }
+textview, textview text { background: #191e26; color: #bcc9db; font-family: "Ubuntu Mono", "DejaVu Sans Mono", monospace; font-size: 12px; }
+.details { background: #222730; }
+.footer { color: #788496; font-size: 11px; }
+tooltip { background: #303846; color: #eef2f8; border: 1px solid #526175; }
