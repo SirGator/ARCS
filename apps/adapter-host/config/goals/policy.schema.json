@@ -1,0 +1,20 @@
+{
+  "$id": "arcs.policy_candidate.fan_cycle.v1",
+  "type": "object",
+  "required": [
+    "device_id",
+    "enabled"
+  ],
+  "properties": {
+    "device_id": {
+      "type": "string",
+      "enum": [
+        "fan-01"
+      ]
+    },
+    "enabled": {
+      "type": "boolean"
+    }
+  },
+  "additionalProperties": false
+}

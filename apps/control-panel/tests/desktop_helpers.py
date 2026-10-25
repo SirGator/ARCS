@@ -4,8 +4,8 @@ import json
 from pathlib import Path
 
 
-def real_configuration(root: Path, directory: Path):
-    source=root/'apps/adapter-host/config/multiple-adapters'
+def real_configuration(root: Path, directory: Path, example='multiple-adapters'):
+    source=root/'apps/adapter-host/config'/example
     for file in source.glob('*.json'):
         (directory/file.name).write_bytes(file.read_bytes())
     path=directory/'host.json'
@@ -21,6 +21,8 @@ def real_configuration(root: Path, directory: Path):
     path.write_text(json.dumps(config))
     for side in ['left','right']:
         path=directory/f'output-{side}.json'
+        if not path.exists():
+            continue
         profile=json.loads(path.read_text());profile['directory']='reports-'+side
         path.write_text(json.dumps(profile))
     return directory/'host.json'
@@ -35,10 +37,15 @@ def render_window(window, target: Path):
         while Gtk.events_pending():
             Gtk.main_iteration_do(False)
         time.sleep(.01)
+    # Status labels can request a new allocation just before the frame clock
+    # paints. Complete native layout before drawing the widget into Cairo.
+    window.check_resize()
     cairo=ctypes.CDLL('libcairo.so.2');gtk=ctypes.CDLL('libgtk-3.so.0')
     cairo.cairo_image_surface_create.argtypes=[ctypes.c_int,ctypes.c_int,ctypes.c_int]
     cairo.cairo_image_surface_create.restype=ctypes.c_void_p
     cairo.cairo_create.argtypes=[ctypes.c_void_p];cairo.cairo_create.restype=ctypes.c_void_p
+    cairo.cairo_image_surface_get_data.argtypes=[ctypes.c_void_p];cairo.cairo_image_surface_get_data.restype=ctypes.c_void_p
+    cairo.cairo_image_surface_get_stride.argtypes=[ctypes.c_void_p];cairo.cairo_image_surface_get_stride.restype=ctypes.c_int
     cairo.cairo_surface_write_to_png.argtypes=[ctypes.c_void_p,ctypes.c_char_p]
     cairo.cairo_surface_write_to_png.restype=ctypes.c_int
     cairo.cairo_destroy.argtypes=[ctypes.c_void_p];cairo.cairo_surface_destroy.argtypes=[ctypes.c_void_p]
@@ -50,6 +57,9 @@ def render_window(window, target: Path):
     context=cairo.cairo_create(surface)
     try:
         gtk.gtk_widget_draw(capsule(window.__gpointer__,None),context)
+        center=(window.get_allocated_height()//2)*cairo.cairo_image_surface_get_stride(surface)+(window.get_allocated_width()//2)*4
+        if not any(ctypes.string_at(cairo.cairo_image_surface_get_data(surface)+center,4)):
+            raise RuntimeError('GTK screenshot was not rendered')
         if cairo.cairo_surface_write_to_png(surface,str(target).encode()):
             raise RuntimeError('GTK screenshot failed')
     finally:

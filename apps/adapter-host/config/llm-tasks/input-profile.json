@@ -1,0 +1,6 @@
+{
+  "adapter_id": "llm.text",
+  "capability_id": "llm.submit",
+  "schema_id": "arcs.input.v1",
+  "events": []
+}

@@ -466,6 +466,12 @@ fn monitor_streams_real_catalog_and_snapshots_without_creating_effects() {
         .collect::<Vec<_>>();
     assert_eq!(events[0]["event"], "ready");
     assert_eq!(events[0]["catalog"].as_array().unwrap().len(), 11);
+    let contracts = events[0]["input_contracts"].as_array().unwrap();
+    assert_eq!(contracts.len(), 2);
+    assert!(contracts.iter().all(
+        |contract| contract["schema"]["$id"] == "arcs.task.nearest.v1"
+            && contract["max_payload_bytes"].as_u64().unwrap() > 0
+    ));
     let snapshot = events
         .iter()
         .rev()

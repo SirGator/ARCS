@@ -1,0 +1,6 @@
+{
+  "adapter_id": "panel.text",
+  "capability_id": "message.submit",
+  "schema_id": "arcs.input.v1",
+  "events": []
+}

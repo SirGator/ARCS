@@ -1,0 +1,14 @@
+{
+  "adapter_id": "panel.text",
+  "producer_class": "adapter",
+  "enabled_capabilities": [
+    "message.submit"
+  ],
+  "granted_permissions": [
+    "input.read"
+  ],
+  "assigned_trust": "medium",
+  "ingress_source_kind": "file",
+  "max_payload_bytes": 32768,
+  "max_external_reference_bytes": 256
+}

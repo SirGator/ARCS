@@ -506,3 +506,30 @@ fn a_runtime_instance_cannot_poll_a_different_host_store() {
     host.shutdown().unwrap();
     other_host.shutdown().unwrap();
 }
+
+#[test]
+fn a_legacy_review_journal_is_migrated_without_recomputing_or_changing_completed_jobs() {
+    let fixture = Fixture::new();
+    let mut host = fixture.host();
+    let mut runtime = fixture.runtime(&host);
+    let done = runtime.tick(&mut host).unwrap().ready_for_review;
+    let artifacts = host.report().unwrap().stored_artifacts;
+    host.shutdown().unwrap();
+    drop(runtime);
+    drop(host);
+    fixture.db("runtime").execute_batch("BEGIN IMMEDIATE;
+        DROP INDEX runtime_pending;
+        ALTER TABLE runtime_jobs RENAME TO new_jobs;
+        CREATE TABLE runtime_jobs(sequence INTEGER PRIMARY KEY AUTOINCREMENT,route_id TEXT NOT NULL,input_version TEXT NOT NULL,source_sequence INTEGER NOT NULL,state TEXT NOT NULL CHECK(state IN ('pending','running','failed','ready_for_review')),error TEXT,result_json TEXT,UNIQUE(route_id,input_version));
+        INSERT INTO runtime_jobs SELECT sequence,route_id,input_version,source_sequence,state,error,result_json FROM new_jobs;
+        DROP TABLE new_jobs;
+        CREATE INDEX runtime_pending ON runtime_jobs(state,sequence);
+        COMMIT;").unwrap();
+    let mut host = fixture.host();
+    let mut runtime = fixture.runtime(&host);
+    assert_eq!(runtime.completed_after(0, 10).unwrap(), done);
+    assert!(runtime.tick(&mut host).unwrap().ready_for_review.is_empty());
+    assert_eq!(host.report().unwrap().stored_artifacts, artifacts);
+    assert_eq!(runtime.report(0).unwrap().completed_goals, 0);
+    host.shutdown().unwrap();
+}

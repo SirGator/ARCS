@@ -27,8 +27,12 @@ fn io(path: &Path, source: std::io::Error) -> HostError {
 
 pub(super) struct Journal {
     pub connection: Connection,
+    pub operator: AdapterRegistry,
+    pub ids: arcs::core::SequenceIdGenerator,
     _lock: File,
 }
+pub(super) const ACTIVE: &str = "state IN ('pending','running','failed','awaiting_approval')";
+pub(super) const PENDING_COUNT: &str = "SELECT COUNT(*) FROM runtime_jobs WHERE state IN ('pending','running','failed','awaiting_approval')";
 impl Journal {
     pub fn open(host: &Host, config: &RuntimeConfig, identity: Value) -> Result<Self, HostError> {
         let absolute = std::env::current_dir()
@@ -88,7 +92,7 @@ impl Journal {
                 "journal definition changed; use a new runtime ID and journal",
             ));
         }
-        let anchor = bind_definition(
+        let (anchor, operator, ids) = bind_definition(
             host,
             config,
             serde_json::from_str(&identity).map_err(|e| invalid(e.to_string()))?,
@@ -122,23 +126,39 @@ impl Journal {
             return Err(invalid("runtime journal belongs to another Core store"));
         }
         transaction.commit().map_err(db)?;
+        // Upgrade the operational queue without changing its identity or sequence IDs.
+        let sql: String = connection
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE name='runtime_jobs'",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(db)?;
+        if !sql.contains("goal_json") {
+            connection.execute_batch("BEGIN IMMEDIATE;
+                DROP INDEX IF EXISTS runtime_pending;
+                ALTER TABLE runtime_jobs RENAME TO runtime_jobs_previous;
+                CREATE TABLE runtime_jobs(sequence INTEGER PRIMARY KEY AUTOINCREMENT,route_id TEXT NOT NULL,input_version TEXT NOT NULL,source_sequence INTEGER NOT NULL,state TEXT NOT NULL CHECK(state IN ('pending','running','failed','ready_for_review','awaiting_approval','completed','blocked','rejected','budget_exhausted','cancelled')),error TEXT,result_json TEXT,goal_json TEXT,UNIQUE(route_id,input_version));
+                INSERT INTO runtime_jobs(sequence,route_id,input_version,source_sequence,state,error,result_json) SELECT sequence,route_id,input_version,source_sequence,state,error,result_json FROM runtime_jobs_previous;
+                DROP TABLE runtime_jobs_previous;
+                CREATE INDEX runtime_pending ON runtime_jobs(state,sequence);
+                COMMIT;").map_err(db)?;
+        }
         Ok(Self {
             connection,
+            operator,
+            ids,
             _lock: lock,
         })
     }
     pub fn pending(&self) -> Result<usize, HostError> {
         self.connection
-            .query_row(
-                "SELECT COUNT(*) FROM runtime_jobs WHERE state!='ready_for_review'",
-                [],
-                |row| row.get::<_, i64>(0),
-            )
+            .query_row(PENDING_COUNT, [], |row| row.get::<_, i64>(0))
             .map(|count| count as usize)
             .map_err(db)
     }
-    pub fn next(&self) -> Result<Option<(u64, String, VersionId)>, HostError> {
-        self.connection.query_row("SELECT sequence,route_id,input_version FROM runtime_jobs WHERE state!='ready_for_review' ORDER BY sequence LIMIT 1",[],|row| Ok((row.get::<_,i64>(0)? as u64,row.get(1)?,VersionId(row.get(2)?)))).optional().map_err(db)
+    pub fn next(&self, cursor: u64) -> Result<Option<(u64, String, VersionId)>, HostError> {
+        self.connection.query_row(&format!("SELECT sequence,route_id,input_version FROM runtime_jobs WHERE {ACTIVE} ORDER BY (sequence<=?1),sequence LIMIT 1"),[cursor.min(i64::MAX as u64) as i64],|row| Ok((row.get::<_,i64>(0)? as u64,row.get(1)?,VersionId(row.get(2)?)))).optional().map_err(db)
     }
     pub fn start(&self, sequence: u64) -> Result<(), HostError> {
         self.connection
@@ -170,28 +190,45 @@ fn bind_definition(
     host: &Host,
     config: &RuntimeConfig,
     identity: Value,
-) -> Result<VersionId, HostError> {
+) -> Result<(VersionId, AdapterRegistry, arcs::core::SequenceIdGenerator), HostError> {
     let mut registry = AdapterRegistry::new();
     let adapter = AdapterId(RUNTIME_ID.into());
     let capability = CapabilityId("runtime.definition".into());
+    let mut capabilities = vec![CapabilityDescriptor {
+        id: capability.clone(),
+        contract: CapabilityContract::Input {
+            emits: vec![SchemaId("arcs.input.host_runtime.v1".into())],
+        },
+        required_permissions: vec![],
+    }];
+    for route in &config.routes {
+        if let Some(goal) = &route.goal {
+            for source in &goal.sources {
+                if let Some(query) = &source.query {
+                    capabilities.push(CapabilityDescriptor {
+                        id: CapabilityId(format!("runtime.query.{}.{}", route.id, source.id)),
+                        contract: CapabilityContract::Input {
+                            emits: vec![query.schema_id.clone()],
+                        },
+                        required_permissions: vec![],
+                    });
+                }
+            }
+        }
+    }
+    let enabled_capabilities = capabilities.iter().map(|cap| cap.id.clone()).collect();
     registry
         .register(
             AdapterManifest {
                 protocol_version: 1,
                 adapter_id: adapter.clone(),
                 adapter_version: "1".into(),
-                capabilities: vec![CapabilityDescriptor {
-                    id: capability.clone(),
-                    contract: CapabilityContract::Input {
-                        emits: vec![SchemaId("arcs.input.host_runtime.v1".into())],
-                    },
-                    required_permissions: vec![],
-                }],
+                capabilities,
             },
             AdapterGrant {
                 adapter_id: adapter.clone(),
                 producer_class: ProducerClass::System,
-                enabled_capabilities: vec![capability.clone()],
+                enabled_capabilities,
                 granted_permissions: vec![],
                 assigned_trust: TrustLevel::High,
                 ingress_source_kind: Some(SourceKind::Internal),
@@ -230,5 +267,5 @@ fn bind_definition(
         request: config.runtime_id.clone(),
         source,
     })?;
-    Ok(artifact.version_id)
+    Ok((artifact.version_id, registry, ids))
 }

@@ -23,6 +23,7 @@ gilt unabhängig von der Drohnenanwendung.
 | Gemeinsame Adapter-Session für alle sieben Rollen | `crates/arcs-adapter-sdk` |
 | Externe Eingaben mit dauerhaften Empfangsbelegen und eigenem ACK | `InputService::ingest_once` und `adapters/json-input` |
 | Dauerhafte Input-/Observe-zu-Reason-Verarbeitung mit Wiederaufnahme | `arcs_host::task_runtime`, persistente Queue und Review-Liste |
+| Allgemeine Aufgabensteuerung bis Outcome und erneuter Planung | Optionale [Goal-Routen](../apps/adapter-host/examples/goal-runtime.md), externe Planner und Bewertungs-Reasoner, explizite Betreiberfreigaben |
 | Allgemeiner externer Reasoning-V2-Port | `GeneralReasoningService`, `Host::reason` und `adapters/example-reasoner` |
 | Deterministische Verarbeitung mit Provenienz, Trust-Grenze und Replay | `TransformService` und `adapters/normalize-number` |
 | Referenzierte Binärdaten und begrenzter Abruf unter separatem Grant | Protokoll, SDK, `DataService` und `Host::copy_data` |

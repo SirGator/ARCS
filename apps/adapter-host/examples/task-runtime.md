@@ -17,9 +17,11 @@ Input / Observe → Core-Log mit ACK
                        ↓ Anwendung: Verification → Approval → Act / Output
 ```
 
-Die letzte Zeile führt diese Runtime nicht automatisch aus. Sie bietet die
-persistente Übergabe an die vorhandenen Dienste. Ein Auftrag oder Kandidat
-erteilt keine Freigabe.
+Ohne `goal` bietet die Route die persistente Übergabe an die Anwendung.
+Optionale [Goal-Routen](goal-runtime.md) koordinieren auch die letzte Zeile,
+frische Wirkungsdaten und erneute externe Planung. Ein Auftrag oder Kandidat
+erteilt keine Freigabe; manuelle Entscheidung oder ausdrückliche Betreiberpolicy
+bleiben erforderlich.
 
 ## Start und neue Aufgaben
 
@@ -85,7 +87,7 @@ Die Runtime-Konfiguration ist separat von der Anschlusskonfiguration des Hosts.
 relativ zur Hostdatei; die CLI-Option `--stop-file` bezieht sich auf das aktuelle
 Arbeitsverzeichnis. Absolute Konfigurationspfade erlauben Starts aus jedem
 Verzeichnis. Der Aufruf ohne `--runtime` behält sein bisheriges Verhalten. Der Runtime-Modus
-plant nur Input-/Observe-zu-Reason-Routen; konfigurierte einmalige Request-/
+verarbeitet Input-/Observe-Routen mit optionaler Zielsteuerung; konfigurierte einmalige Request-/
 Transform-Aufrufe des begrenzten Hosts werden dabei nicht automatisch ausgeführt.
 
 | Feld | Bedeutung |
@@ -95,7 +97,7 @@ Transform-Aufrufe des begrenzten Hosts werden dabei nicht automatisch ausgeführ
 | `journal` | Separate SQLite-Datenbank der Aufgabenwarteschlange |
 | `interval_ms` | Pause zwischen Runden, 1–60.000 ms; Standard 100 |
 | `max_events_per_tick` | Größe einer Core-Logseite, 1–10.000; Standard 1000; höchstens zwei Seiten je Runde |
-| `max_jobs_per_tick` | Maximale Reasoning-Aufrufe je Runde, 1–1000; Standard 100 |
+| `max_jobs_per_tick` | Maximale bearbeitete Aufgaben/Schritte je Runde, 1–1000; Standard 100 |
 | `max_pending_jobs` | Offene Aufgaben, mindestens Anzahl der Routen, höchstens 100.000; Standard 1000 |
 | `routes` | 1–32 Zuordnungen mit eindeutigen IDs |
 
@@ -156,7 +158,8 @@ idempotenter Speicherung fortgeschrieben werden. Auch `no_solution` und
 `TaskRuntime::run` unterstützt einen Stop-Callback und optional eine Rundenzahl.
 Die Runtime hält Verbindungen offen und verarbeitet seriell. Sie umfasst kein
 Push-Protokoll, keine parallele Reasoner-Ausführung, keine automatische Modellwahl
-und keine automatische Action-/Output-Policy. Die Host-Inputberichte enthalten
+und keine implizite Action-/Output-Policy. Goal-Aktionen benötigen die oben
+beschriebene ausdrückliche Konfiguration. Die Host-Inputberichte enthalten
 im Dauerbetrieb nur die letzte Empfangsrunde statt einer unbegrenzten In-Memory-Liste.
 
 ```bash

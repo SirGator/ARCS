@@ -1,0 +1,106 @@
+{
+  "config_version": 1,
+  "runtime_id": "fan-goal-loop",
+  "journal": "../../../../var/goals/runtime.sqlite",
+  "interval_ms": 100,
+  "max_events_per_tick": 1000,
+  "max_jobs_per_tick": 4,
+  "max_pending_jobs": 100,
+  "routes": [
+    {
+      "id": "fan-cycle",
+      "source": {
+        "adapter_id": "goal.input",
+        "capability_id": "task.submit"
+      },
+      "input_schema_id": "arcs.task.fan_goal.v1",
+      "payload_fields": [
+        "device_id",
+        "enabled",
+        "minimum_actuations"
+      ],
+      "reasoner": {
+        "adapter_id": "goal.planner",
+        "capability_id": "solution.propose"
+      },
+      "method": "rules",
+      "objective": "Propose one switch step toward the requested fan cycle goal. Use persisted current state.",
+      "target_schema_id": "arcs.fan_candidate.v1",
+      "allowed_capabilities": [
+        {
+          "adapter_id": "demo.fan",
+          "capability_id": "fan.set"
+        }
+      ],
+      "constraints": {},
+      "budget": {
+        "max_context_items": 16,
+        "max_context_bytes": 32768,
+        "max_output_bytes": 8192,
+        "max_candidates": 1,
+        "max_runtime_ms": 1000,
+        "max_iterations": 4096,
+        "max_output_tokens": null
+      },
+      "goal": {
+        "max_rounds": 4,
+        "max_wait_ticks": 100,
+        "sources": [
+          {
+            "id": "fan-state",
+            "capability": {
+              "adapter_id": "demo.fan",
+              "capability_id": "fan.read"
+            },
+            "schema_id": "arcs.state.fan.v1",
+            "payload_fields": [
+              "device_id",
+              "enabled",
+              "actuation_count"
+            ],
+            "query": {
+              "schema_id": "arcs.request.fan.v1",
+              "payload": {
+                "device_id": "fan-01"
+              }
+            }
+          }
+        ],
+        "actions": [
+          {
+            "capability": {
+              "adapter_id": "demo.fan",
+              "capability_id": "fan.set"
+            },
+            "verification_schema_id": "arcs.policy_candidate.fan_cycle.v1"
+          }
+        ],
+        "approval": {
+          "mode": "policy",
+          "policy_id": "operator.fan-cycle.v1"
+        },
+        "assessment": {
+          "capability": {
+            "adapter_id": "goal.assessor",
+            "capability_id": "solution.propose"
+          },
+          "method": "rules",
+          "objective": "Compare before/after state and execution receipt, then assess the task goal.",
+          "constraints": {},
+          "budget": {
+            "max_context_items": 16,
+            "max_context_bytes": 32768,
+            "max_output_bytes": 8192,
+            "max_candidates": 1,
+            "max_runtime_ms": 1000,
+            "max_iterations": 4096,
+            "max_output_tokens": null
+          }
+        },
+        "execution_payload_fields": [
+          "result"
+        ]
+      }
+    }
+  ]
+}

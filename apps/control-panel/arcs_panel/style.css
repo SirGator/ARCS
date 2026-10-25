@@ -55,5 +55,7 @@ separator { background: #343b47; min-height: 1px; }
 .empty { color: #8290a3; padding: 26px; }
 textview, textview text { background: #191e26; color: #bcc9db; font-family: "Ubuntu Mono", "DejaVu Sans Mono", monospace; font-size: 12px; }
 .details { background: #222730; }
+.input-editor { border: 1px solid #3a4351; border-radius: 7px; background: #191e26; }
+.input-text, .input-text text { font-family: "Ubuntu", "DejaVu Sans", sans-serif; font-size: 14px; color: #e0e6f0; }
 .footer { color: #788496; font-size: 11px; }
 tooltip { background: #303846; color: #eef2f8; border: 1px solid #526175; }

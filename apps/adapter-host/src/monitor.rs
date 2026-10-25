@@ -41,9 +41,25 @@ pub fn run(
         .transpose()
         .map_err(fail)?;
     let started = Instant::now();
+    let mut input_contracts = Vec::new();
+    for capability in host.capabilities(arcs::adapters::AdapterRole::Input) {
+        let (adapter, descriptor) = host
+            .registry()
+            .authorized_capability(&capability.adapter_id, &capability.capability_id)
+            .map_err(|error| format!("{error:?}"))?;
+        for schema_id in descriptor.contract.emitted_schemas() {
+            let schema = host
+                .schemas()
+                .get(schema_id)
+                .ok_or("missing input schema")?;
+            input_contracts.push(json!({"capability":capability,"schema":schema.document,
+                "max_payload_bytes":adapter.grant().max_payload_bytes,
+                "max_external_reference_bytes":adapter.grant().max_external_reference_bytes}));
+        }
+    }
     emit(
         writer,
-        json!({"event":"ready","catalog":host.adapter_catalog(),"has_runtime":runtime.is_some()}),
+        json!({"event":"ready","catalog":host.adapter_catalog(),"has_runtime":runtime.is_some(),"input_contracts":input_contracts}),
     )?;
     let outcome = (|| {
         if runtime.is_none() && !stop_file.exists() {
@@ -124,6 +140,30 @@ fn snapshot(
         .map(|runtime| runtime.report(ticks))
         .transpose()
         .map_err(fail)?;
+    let mut runtime = runtime
+        .map(|report| serde_json::to_value(report).map_err(|error| error.to_string()))
+        .transpose()?;
+    if let Some(goals) = runtime
+        .as_mut()
+        .and_then(|value| value.get_mut("goals"))
+        .and_then(Value::as_array_mut)
+    {
+        for goal in goals {
+            let version = arcs::core::VersionId(
+                goal["input_version_id"]
+                    .as_str()
+                    .ok_or("missing goal input version")?
+                    .into(),
+            );
+            let input = host
+                .store()
+                .get(&version)
+                .map_err(|error| format!("{error:?}"))?
+                .ok_or("missing goal input")?;
+            goal["input_source"] =
+                json!({"adapter_id":input.created_by.id,"reference":input.source.reference});
+        }
+    }
     emit(
         writer,
         json!({"event":"snapshot","ticks":ticks,"uptime_ms":started.elapsed().as_millis(),

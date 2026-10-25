@@ -1,0 +1,6 @@
+{
+  "adapter_id": "task.text",
+  "capability_id": "task.submit",
+  "schema_id": "arcs.input.v1",
+  "events": []
+}

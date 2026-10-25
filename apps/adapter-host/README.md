@@ -125,6 +125,16 @@ Host mit `--monitor`. Der Modus liefert fortlaufende JSON-Lines für Katalog,
 Status, Aufgaben zur Prüfung und Artefakt-Zusammenfassungen. Er benötigt einen
 frischen `--stop-file`-Pfad und ist mit einer optionalen Aufgaben-Runtime
 kombinierbar. Die bestehenden Grants und Effektgrenzen gelten unverändert.
+`ready.input_contracts` enthält die tatsächlichen Input-Schemas und Limits
+für lokale Eingabeclients. Das Panel kann damit Aufgaben über den vorhandenen
+`arcs-json-input --enqueue`-Eingang einreichen. `config/text-input/host.json`
+verbindet einen allgemeinen Texteingang ohne vorgegebene Ereignisse.
+
+`arcs-host --validate-input <datei.json>` prüft ein Objekt aus `schema` und
+`payload` mit dem Core-Validator und liefert bei Erfolg `{"valid":true}`.
+Dieser reine Vorprüfungsmodus öffnet weder einen Host noch eine Datenbank.
+Die GUI verwendet ihn vor der Adapter-Outbox; der normale Ingress prüft
+anschließend erneut unter dem aktuellen Grant.
 
 Alle sieben Rollen können mehrfach angeschlossen sein. `adapter_catalog()`
 zeigt die externen Installationen, freigeschaltete Rollen, Schemas und
@@ -157,6 +167,9 @@ enthält noch keinen echten Modellanbieter. Die
 [Aufgaben-Runtime](examples/task-runtime.md) ergänzt eine dauerhafte synchrone
 Polling-Schleife mit konfigurierbarer Zuordnung, persistenter Queue und
 Wiederaufnahme. Fertige Kandidaten werden zur fachlichen Prüfung bereitgestellt.
+Optionale [Goal-Routen](examples/goal-runtime.md) führen nach separater
+Verification und Freigabe eine Aktion aus, erfassen frische Wirkungsdaten und
+lassen einen unabhängigen Reasoner über Weiterplanen oder Abschluss entscheiden.
 
 ## Konfigurierte Datenabfragen
 
@@ -255,7 +268,7 @@ eine Request-Capability mit einem bereits gespeicherten Query-Artefakt aus.
 Die Anwendung erzeugt dessen Eingabe über den InputService. Eine neue
 Eingabeversion ermöglicht eine neue Messung; dieselbe Version liefert den
 persistierten Snapshot. Auch konfigurierte Requests verwenden diesen Weg.
-Der [Drohnen-Bewegungsnachweis](../drone-demo/README.md) nutzt ihn für
+Der [Drohnen-Bewegungsnachweis](../../../drone-sim/apps/drone-demo/README.md) nutzt ihn für
 getrennte Vorher-/Nachher-Abfragen ohne fachliche Sonderfälle im Host.
 
 ## Kontrollierte Ausgabe
@@ -337,8 +350,9 @@ Producer stammen. Der [Vertrag](../../docs/REASONING.md#explizite-binäreingaben
 beschreibt Limits, Transport und Wiederholungen; der
 [externe Pixel-Suchnachweis](../../../drone-sim/adapters/image-reasoner/README.md)
 verwendet ihn mit einer Kamera und einem unabhängigen Regel-Reasoner.
-Die Aufgaben-Runtime routet weiterhin JSON-Kontext; Binäreingaben werden in
-diesem Schritt ausdrücklich über die Host-API ausgewählt.
+Reine Reasoning-Routen verwenden JSON-Kontext. Goal-Routen können zusätzlich
+Binärreferenzen ihrer ausdrücklich konfigurierten Quellen auswählen und
+unter denselben Grants an Planner und Bewertungs-Reasoner übergeben.
 
 `config/data.json` startet die allgemeine Dateiquelle. Sie veröffentlicht
 kleine Referenzen des Schemas `arcs.data.reference.v1`. Diese werden wie

@@ -54,6 +54,9 @@ pub struct ReasoningRoute {
     pub allowed_capabilities: Vec<CapabilityRef>,
     pub constraints: Value,
     pub budget: ReasoningResources,
+    /// Ohne diese Option bleibt die Route eine reine Reasoning-/Review-Route.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub goal: Option<super::goal::GoalConfig>,
 }
 
 pub(super) fn invalid(message: impl Into<String>) -> HostError {
@@ -180,6 +183,9 @@ impl RuntimeConfig {
                     capability.adapter_id.0.clone(),
                     registered.manifest().clone(),
                 );
+            }
+            if let Some(goal) = &route.goal {
+                goal.validate(host, route, &mut manifests)?;
             }
         }
         // Polling budgets may change. Task semantics and actual manifests may not.

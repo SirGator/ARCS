@@ -14,6 +14,7 @@ gi.require_version("Gdk", "3.0")
 from gi.repository import Gdk, GdkPixbuf, Gio, GLib, Gtk, Pango
 
 from .controller import Configuration, PROJECT_ROOT, SessionController, read_configuration
+from .input_page import InputPage
 
 ASSETS = Path(__file__).resolve().parent
 ROLES = ["input", "observe", "request", "transform", "reason", "act", "output"]
@@ -70,14 +71,19 @@ class ControlWindow(Gtk.ApplicationWindow):
         self.log_lines = []
         self._last_artifacts = None
         self._last_ready = None
+        self._last_goals = {}
         self._closing = False
         self._updating = False
         self._stopping_since = None
         self._source_id = None
         self.presets = [
+            ("Aufgaben per Text · Beispiel", Configuration(self.root / "apps/adapter-host/config/text-tasks/host.json", self.root / "apps/adapter-host/config/text-tasks/runtime.json")),
             ("Mehrere Adapter", Configuration(self.root / "apps/adapter-host/config/multiple-adapters/host.json")),
             ("Aufgaben & Reasoning", Configuration(self.root / "apps/adapter-host/config/roles/host.json", self.root / "apps/adapter-host/config/roles/runtime.json")),
+            ("Zielablauf · Lüftertest", Configuration(self.root / "apps/adapter-host/config/goals/host.json", self.root / "apps/adapter-host/config/goals/runtime.json")),
+            ("Texteingabe", Configuration(self.root / "apps/adapter-host/config/text-input/host.json")),
             ("Sensor & Lüfter", Configuration(self.root / "apps/adapter-host/config/host.json")),
+            ("Aufgaben per Text · LLM-API", Configuration(self.root / "apps/adapter-host/config/llm-tasks/host.json", self.root / "apps/adapter-host/config/llm-tasks/runtime.json")),
         ]
         provider = Gtk.CssProvider()
         provider.load_from_path(str(ASSETS / "style.css"))
@@ -88,7 +94,7 @@ class ControlWindow(Gtk.ApplicationWindow):
         self.connect("delete-event", self._on_close)
         self.connect("destroy", self._on_destroy)
         self.show_all()
-        self.show_page("overview")
+        self.show_page("input")
         self.force_button.hide()
         self.banner_row.hide()
         if configuration is None:
@@ -120,7 +126,7 @@ class ControlWindow(Gtk.ApplicationWindow):
         nav.pack_start(kicker, False, False, 0)
         self.stack = Gtk.Stack(transition_type=Gtk.StackTransitionType.NONE)
         self.nav_buttons = {}
-        for key, title, icon in [("overview", "Übersicht", "view-grid-symbolic"), ("adapters", "Adapter", "network-workgroup-symbolic"), ("logs", "Protokolle", "utilities-terminal-symbolic")]:
+        for key, title, icon in [("overview", "Übersicht", "view-grid-symbolic"), ("input", "Eingabe", "mail-message-new-symbolic"), ("adapters", "Adapter", "network-workgroup-symbolic"), ("logs", "Protokolle", "utilities-terminal-symbolic")]:
             item = button(title, icon, "nav", lambda _, name=key: self.show_page(name))
             self.nav_buttons[key] = item
             nav.pack_start(item, False, False, 0)
@@ -173,7 +179,10 @@ class ControlWindow(Gtk.ApplicationWindow):
             grid.attach(browse, 2, row, 1, 1)
         self.clear_runtime = button("Entfernen", css="flat", callback=self._clear_runtime)
         grid.attach(self.clear_runtime, 3, 1, 1, 1)
-        config_inner.pack_start(grid, False, False, 0)
+        self.connection_settings = Gtk.Expander(label="Verbindungen konfigurieren", expanded=False)
+        grid.set_margin_top(10)
+        self.connection_settings.add(grid)
+        config_inner.pack_start(self.connection_settings, False, False, 0)
         main.pack_start(self.config_card, False, False, 0)
         self.banner_row = box(False, 10)
         self.banner = box(False, 12, css="banner")
@@ -187,6 +196,8 @@ class ControlWindow(Gtk.ApplicationWindow):
         self.stack.set_vexpand(True)
         main.pack_start(self.stack, True, True, 0)
         self._build_overview()
+        self.input_page = InputPage(self.controller.submit_input)
+        self.stack.add_named(self.input_page, "input")
         self._build_adapters()
         self._build_logs()
         footer = box(False)
@@ -327,7 +338,7 @@ class ControlWindow(Gtk.ApplicationWindow):
         if self.controller.busy:
             return
         self._updating = True
-        index = next((index for index, (_, config) in enumerate(self.presets) if config == configuration), 3)
+        index = next((index for index, (_, config) in enumerate(self.presets) if config == configuration), len(self.presets))
         self.preset_combo.set_active(index)
         self.host_entry.set_text(str(configuration.host.expanduser().resolve()))
         self.runtime_entry.set_text(str(configuration.runtime.expanduser().resolve()) if configuration.runtime else "")
@@ -336,6 +347,7 @@ class ControlWindow(Gtk.ApplicationWindow):
         self._configuration_valid = False
         self.snapshot = {}
         self.recent = []
+        self.input_page.reset()
         try:
             preview = read_configuration(configuration)
             self.catalog = preview["adapters"]
@@ -394,6 +406,8 @@ class ControlWindow(Gtk.ApplicationWindow):
             self.banner_row.hide()
             self._last_artifacts = None
             self._last_ready = None
+            self._last_goals = {}
+            self.input_page.reset()
             self.snapshot = {}
             self.metrics["artifacts"][0].set_text("—")
             self.metrics["review"][0].set_text("—")
@@ -427,6 +441,7 @@ class ControlWindow(Gtk.ApplicationWindow):
 
     def _set_state(self, state):
         self.state = state
+        self.input_page.set_running(state == "running")
         text, sub = {
             "idle": ("Bereit", "Wartet auf den Start"), "building": ("Build", "Programme werden gebaut"),
             "starting": ("Startet", "Adapter werden verbunden"), "running": ("Läuft", "Verarbeitung ist aktiv"),
@@ -532,8 +547,17 @@ class ControlWindow(Gtk.ApplicationWindow):
                 self.snapshot = event
                 self.metrics["artifacts"][0].set_text(f"{event['stored_artifacts']:,}".replace(",", "."))
                 runtime = event.get("runtime")
-                self.metrics["review"][0].set_text(str(runtime["ready_for_review"]) if runtime else "—")
+                self.input_page.goal_progress(runtime.get("goals", []) if runtime else [])
+                self.metrics["review"][0].set_text(str(runtime["ready_for_review"] + runtime.get("awaiting_approval", 0)) if runtime else "—")
                 self.metrics["review"][1].set_text(f"{runtime['pending_jobs']} offen · {runtime['failed_jobs']} fehlgeschlagen" if runtime else "Keine Aufgaben-Runtime")
+                if runtime and runtime.get("goals"):
+                    self.metrics["review"][1].set_text(f"{runtime['completed_goals']} Ziele fertig · {runtime['awaiting_approval']} Freigaben offen")
+                    for goal in runtime["goals"]:
+                        key = (runtime["runtime_id"], goal["sequence"])
+                        progress = (goal["state"], goal["round"])
+                        if self._last_goals.get(key) != progress:
+                            self._log(f"Ziel {goal['sequence']} · {goal['state']} · Schritt {goal['round']}" + (f" · {goal['detail']}" if goal['detail'] else ""))
+                            self._last_goals[key] = progress
                 seconds = int(event["uptime_ms"] / 1000)
                 self.uptime_label.set_text(f"Laufzeit {seconds // 3600:02}:{seconds // 60 % 60:02}:{seconds % 60:02}  ·  Runde {event['ticks']}")
                 if self._last_artifacts != event["stored_artifacts"]:
@@ -544,6 +568,14 @@ class ControlWindow(Gtk.ApplicationWindow):
                     self._last_ready = runtime["ready_for_review"]
                 self.recent = (self.recent + event.get("recent_artifacts", []))[-20:]
                 self._render_activity()
+            elif kind == "inputs":
+                self.input_page.connect_targets(event["targets"], event["has_runtime"])
+            elif kind in ["input_queued", "input_error"]:
+                self.input_page.result(event)
+                if kind == "input_queued":
+                    self._log(f"Eingabe {event['id']} im Input-Adapter {event['adapter_id']} gespeichert.")
+                else:
+                    self._log(f"Eingabe {event['id']}: {event['message']}")
             elif kind == "log":
                 self._log(event["message"])
             elif kind == "error":
@@ -603,7 +635,13 @@ class ControlWindow(Gtk.ApplicationWindow):
             return None
         try:
             values = json.loads((self.root / "var/control-panel/settings.json").read_text(encoding="utf-8"))
-            return Configuration(Path(values["host"]), Path(values["runtime"]) if values.get("runtime") else None)
+            configuration = Configuration(Path(values["host"]), Path(values["runtime"]) if values.get("runtime") else None)
+            # Older versions saved the structured multi-adapter demo as their
+            # default. Move that default to text tasks once, while preserving
+            # custom configurations and subsequent deliberate selections.
+            if values.get("settings_version", 0) == 0 and configuration == self.presets[1][1]:
+                return self.presets[0][1]
+            return configuration
         except (OSError, ValueError, KeyError, TypeError):
             return None
 
@@ -614,7 +652,7 @@ class ControlWindow(Gtk.ApplicationWindow):
             path = self.root / "var/control-panel/settings.json"
             path.parent.mkdir(parents=True, exist_ok=True)
             temporary = path.with_suffix(".tmp")
-            temporary.write_text(json.dumps({"host": str(configuration.host), "runtime": str(configuration.runtime) if configuration.runtime else None}), encoding="utf-8")
+            temporary.write_text(json.dumps({"settings_version": 1, "host": str(configuration.host), "runtime": str(configuration.runtime) if configuration.runtime else None}), encoding="utf-8")
             temporary.replace(path)
         except OSError as error:
             self._log("Auswahl konnte nicht gespeichert werden: " + str(error))

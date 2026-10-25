@@ -14,6 +14,8 @@ import tempfile
 import threading
 from dataclasses import dataclass
 
+from .input_bridge import configured_inputs, connected_inputs, make_submission, enqueue_submission
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
@@ -60,7 +62,8 @@ def read_configuration(configuration: Configuration) -> dict:
             runtime = json.load(reader)
         if not isinstance(runtime, dict) or runtime.get("config_version") != 1:
             raise ValueError("Die Aufgaben-Runtime benötigt config_version 1.")
-    return {"database": (host.parent / database).resolve(), "adapters": preview, "programs": programs}
+    return {"database": (host.parent / database).resolve(), "adapters": preview, "programs": programs,
+        "input_candidates": configured_inputs(host, adapters)}
 
 
 class SessionController:
@@ -73,11 +76,55 @@ class SessionController:
         self._forced = threading.Event()
         self._stop_file: Path | None = None
         self._busy = False
+        self._input_candidates = []
+        self._input_targets = []
+        self._accepting_input = False
+        self._submission_thread = None
+        self._submission_pending = False
+        self._retry_submission = None
 
     @property
     def busy(self) -> bool:
         with self._lock:
             return self._busy
+
+    @property
+    def submission_pending(self) -> bool:
+        with self._lock:
+            return self._submission_pending
+
+    def submit_input(self, key: str, payload) -> str:
+        with self._lock:
+            if not self._accepting_input or self._stop.is_set():
+                raise RuntimeError("Bitte ARCS starten und einen verbundenen Eingang auswählen.")
+            if self._submission_pending:
+                raise RuntimeError("Eine Eingabe wird bereits übertragen.")
+            target = next((target for target in self._input_targets if target.key == key), None)
+            if target is None:
+                raise ValueError("Dieser Eingang gehört nicht zur laufenden Sitzung.")
+            event = make_submission(target, payload)
+            if self._retry_submission:
+                previous_target, previous_event = self._retry_submission
+                if previous_target == target and json.dumps(previous_event["payload"], sort_keys=True, allow_nan=False) == json.dumps(event["payload"], sort_keys=True, allow_nan=False):
+                    event = previous_event
+            self._submission_pending = True
+            self._submission_thread = threading.Thread(target=self._submit_worker, args=(target, event), daemon=True)
+            self._submission_thread.start()
+        return event["id"]
+
+    def _submit_worker(self, target, event):
+        try:
+            enqueue_submission(target, event, self.root / "target/debug/arcs-host")
+        except Exception as error:
+            with self._lock:
+                self._retry_submission = (target, event)
+                self._submission_pending = False
+            self._push("input_error", adapter_id=target.adapter_id, id=event["id"], message=str(error))
+        else:
+            with self._lock:
+                self._retry_submission = None
+                self._submission_pending = False
+            self._push("input_queued", adapter_id=target.adapter_id, id=event["id"])
 
     def start(self, configuration: Configuration) -> None:
         read_configuration(configuration)
@@ -93,6 +140,8 @@ class SessionController:
             self._busy = True
             self._stop.clear()
             self._forced.clear()
+            self._accepting_input = False
+            self._input_targets = []
         threading.Thread(target=self._worker, args=(configuration,), daemon=True).start()
 
     def _push(self, event: str, **values) -> None:
@@ -126,7 +175,14 @@ class SessionController:
                         event = json.loads(line)
                         if not isinstance(event, dict) or "event" not in event:
                             raise ValueError("Ungültige Statusnachricht")
+                        if event["event"] == "ready":
+                            targets = connected_inputs(self._input_candidates, event.get("input_contracts", []))
+                            with self._lock:
+                                self._input_targets = targets
+                                self._accepting_input = not self._stop.is_set()
                         self.events.put(event)
+                        if event["event"] == "ready":
+                            self._push("inputs", targets=targets, has_runtime=event["has_runtime"])
                     except (ValueError, json.JSONDecodeError):
                         self._push("log", message=line.rstrip()[:4000], level="stdout")
                 else:
@@ -147,6 +203,7 @@ class SessionController:
         try:
             if configuration:
                 preview = read_configuration(configuration)
+                self._input_candidates = preview["input_candidates"]
                 lock_dir = self.root / "var/control-panel"
                 lock_dir.mkdir(parents=True, exist_ok=True)
                 name = hashlib.sha256(str(preview["database"]).encode()).hexdigest()[:24]
@@ -184,16 +241,23 @@ class SessionController:
             result, message = 1, str(error)
             self._push("error", message=message)
         finally:
+            with self._lock:
+                self._accepting_input = False
+                submission = self._submission_thread
+            if submission:
+                submission.join(timeout=22)
             if lock_file:
                 lock_file.close()
             with self._lock:
                 self._stop_file = None
                 self._busy = False
+                self._input_targets = []
             self._push("finished", code=result, operation=operation, requested=self._stop.is_set(), forced=self._forced.is_set(), message=message)
 
     def request_stop(self) -> None:
         self._stop.set()
         with self._lock:
+            self._accepting_input = False
             if self._stop_file is not None:
                 try:
                     self._stop_file.touch(exist_ok=True)

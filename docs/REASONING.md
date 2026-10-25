@@ -1,5 +1,11 @@
 # Reasoning als allgemeiner Anschluss für Lösungsverfahren
 
+Eine konkrete externe API-Anbindung liegt im Nachbarprojekt
+[`llm-api`](../../llm-api/README.md). Sie unterstützt fünf konfigurierbare
+API-Formate und wird vom Host ausschließlich per stdio/Reasoning V2 angesprochen.
+Die [Beispielroute](../apps/adapter-host/examples/llm-tasks.md) verwendet getrennte
+Planner-/Bewertungsinstanzen; Anbieterlogik und Prompts bleiben außerhalb von ARCS.
+
 ## Verbindliches Ziel
 
 Reasoning ist der gemeinsame Zugang zu austauschbaren Lösungsverfahren.
@@ -124,6 +130,10 @@ Die [Aufgaben-Runtime](../apps/adapter-host/examples/task-runtime.md) ordnet
 Inputs und Beobachtungen jetzt dauerhaft konfigurierten Reasonern zu. Sie
 speichert Aufgaben und Leseposition, setzt nach Neustarts fort und stellt
 Ergebnisse zur fachlichen Prüfung bereit. Die Ausführung bleibt serielles Polling.
+Optionale [Goal-Routen](../apps/adapter-host/examples/goal-runtime.md) koordinieren
+anschließend Verification, Freigabe, Ausführung und frische Wirkungsdaten.
+Ein separat konfigurierter Reasoner bewertet Wirkung und Ziel; ARCS speichert
+den Outcome und plant innerhalb des Rundenbudgets weiter oder beendet die Aufgabe.
 Ein echter Modelladapter, automatische Reasoner-Auswahl, Vergleich oder
 Kombination mehrerer Ergebnisse und gelerntes Kostenrouting bleiben eigene Aufgaben.
 

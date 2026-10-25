@@ -1,0 +1,18 @@
+{
+  "config_version": 1,
+  "database": "../../../../var/text-input/core.sqlite",
+  "node_id": "text-input",
+  "schemas": [],
+  "adapters": [
+    {
+      "program": "../../../../target/debug/arcs-json-input",
+      "profile": "input-profile.json",
+      "args": [
+        {
+          "path": "../../../../var/text-input/input.sqlite"
+        }
+      ],
+      "grant_file": "input-grant.json"
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "adapter_id": "llm.text",
+  "producer_class": "adapter",
+  "enabled_capabilities": [
+    "llm.submit"
+  ],
+  "granted_permissions": [
+    "input.read"
+  ],
+  "assigned_trust": "medium",
+  "ingress_source_kind": "file",
+  "max_payload_bytes": 8192,
+  "max_external_reference_bytes": 256,
+  "reasoning_limits": null
+}

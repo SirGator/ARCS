@@ -236,6 +236,12 @@ impl PreparedConfig {
                 path: "<host-runtime>".into(),
                 source,
             })?;
+        schemas
+            .register_json(include_str!("../schemas/goal-assessment.schema.json"))
+            .map_err(|source| HostError::Schema {
+                path: "<host-goal-assessment>".into(),
+                source,
+            })?;
         for path in config.schemas {
             let path = resolve(base, &path)?;
             let document = std::fs::read_to_string(&path).map_err(|source| HostError::Io {

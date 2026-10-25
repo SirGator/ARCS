@@ -1,0 +1,5 @@
+{
+  "adapter_id": "task.assessor",
+  "method": "rules",
+  "scenario": "text_fan_goal"
+}

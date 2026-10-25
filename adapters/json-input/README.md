@@ -35,3 +35,10 @@ Geänderter Inhalt unter derselben ID wird abgewiesen. Das gebundene Profil
 bleibt unverändert; die Queue wird über eine eigene SQLite-Verbindung erweitert.
 Ein Ablauf mit laufendem Host steht im
 [Runtime-Beispiel](../../apps/adapter-host/examples/task-runtime.md).
+
+Das [Desktop-Kontrollpanel](../../apps/control-panel/README.md#eingaben-über-adapter)
+verwendet denselben `--enqueue`-Weg für Formular-, JSON- und Texteingaben.
+Seine Schema-Vorprüfung stammt aus dem aktiven Host-Vertrag. Die Eingabe
+bleibt eine externe Adaptereingabe; die GUI erteilt weder zusätzlichen Trust
+noch eine Aktionsfreigabe. `config/text-input` des Hosts liefert dafür ein
+Beispiel mit dem allgemeinen `raw_text`-Schema und ohne vorgegebene Ereignisse.

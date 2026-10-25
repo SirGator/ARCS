@@ -1,0 +1,12 @@
+{
+  "$id": "arcs.goal_assessment_candidate.v1",
+  "type": "object",
+  "required": ["goal_status", "effect", "detail", "evidence_version_ids"],
+  "properties": {
+    "goal_status": {"type": "string", "enum": ["achieved", "continue", "blocked", "unknown"]},
+    "effect": {"type": "string", "enum": ["success", "failure", "unknown"]},
+    "detail": {"type": "string", "minLength": 1},
+    "evidence_version_ids": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}
+  },
+  "additionalProperties": false
+}

@@ -1,5 +1,6 @@
-//! Persistente Input-/Observe-zu-Reason-Verarbeitung. Freigabe bleibt Anwendungssache.
+//! Persistente Reasoning-Routen und optionale, begrenzte Aufgabensteuerung.
 mod config;
+pub mod goal;
 mod journal;
 pub use config::{ReasoningRoute, RuntimeConfig};
 
@@ -43,6 +44,10 @@ pub struct RuntimeReport {
     pub ready_for_review: u64,
     pub failed_jobs: u64,
     pub source_cursor: u64,
+    pub completed_goals: u64,
+    pub blocked_goals: u64,
+    pub awaiting_approval: u64,
+    pub goals: Vec<goal::GoalTask>,
 }
 
 pub struct TaskRuntime {
@@ -50,6 +55,7 @@ pub struct TaskRuntime {
     identity: Value,
     core_database: std::path::PathBuf,
     journal: Journal,
+    scheduling_cursor: u64,
 }
 impl TaskRuntime {
     pub fn open(host: &Host, config: RuntimeConfig) -> Result<Self, HostError> {
@@ -60,6 +66,7 @@ impl TaskRuntime {
             identity,
             core_database: host.database_path().into(),
             journal,
+            scheduling_cursor: 0,
         })
     }
 
@@ -79,11 +86,21 @@ impl TaskRuntime {
         {
             host.poll_event_tick()?;
             self.discover(host, &mut report)?;
+        } else if self.config.routes.iter().any(|route| route.goal.is_some()) {
+            // Eine volle Aufgabenqueue darf Wirkungsbeobachtungen nicht anhalten.
+            host.poll_round()?;
         }
+        let mut visited = std::collections::HashSet::new();
         for _ in 0..self.config.max_jobs_per_tick {
-            let Some((sequence, route_id, input_version_id)) = self.journal.next()? else {
+            let Some((sequence, route_id, input_version_id)) =
+                self.journal.next(self.scheduling_cursor)?
+            else {
                 break;
             };
+            if !visited.insert(sequence) {
+                break;
+            }
+            self.scheduling_cursor = sequence;
             let route = self
                 .config
                 .routes
@@ -97,6 +114,15 @@ impl TaskRuntime {
                 .ok_or_else(|| invalid("saved task input is missing"))?;
             if !matches_source(route, &input) {
                 return Err(invalid("saved task no longer matches source"));
+            }
+            if let Some(goal) = &route.goal {
+                let route = route.clone();
+                let goal = goal.clone();
+                if let Err(error) = self.advance_goal(host, sequence, &route, &goal, &input) {
+                    self.journal.fail(sequence, &error)?;
+                    return Err(error);
+                }
+                continue;
             }
             self.journal.start(sequence)?;
             let request = ReasoningRequestV2 {
@@ -166,11 +192,7 @@ impl TaskRuntime {
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(db)?;
         let mut pending: usize = transaction
-            .query_row(
-                "SELECT COUNT(*) FROM runtime_jobs WHERE state!='ready_for_review'",
-                [],
-                |row| row.get::<_, i64>(0),
-            )
+            .query_row(journal::PENDING_COUNT, [], |row| row.get::<_, i64>(0))
             .map(|value| value as usize)
             .map_err(db)?;
         for event in &page {
@@ -260,6 +282,13 @@ impl TaskRuntime {
                     row.get::<_, i64>(0).map(|value| value as u64)
                 })
                 .map_err(db)?,
+            completed_goals: count("completed")?,
+            blocked_goals: count("blocked")?
+                + count("rejected")?
+                + count("budget_exhausted")?
+                + count("cancelled")?,
+            awaiting_approval: count("awaiting_approval")?,
+            goals: self.goals_for_report()?,
         })
     }
     /// Stop wird zwischen Runden und während Wartepausen geprüft. Ein laufender

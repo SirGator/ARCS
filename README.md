@@ -68,6 +68,12 @@ schließt dessen ausführbaren Adapter ausschließlich per stdio und
 Betreiberkonfiguration an; auch die fachlichen Schemas liegen beim externen
 Projekt. Im ARCS-Protokoll bleiben nur die geräteunabhängigen Verträge.
 
+Auch die Anbindung externer LLM-APIs liegt im getrennten Nachbarprojekt
+[`../llm-api`](../llm-api/README.md). Der Host schließt dessen Planner- und
+Bewertungsinstanzen über denselben Reasoning-V2-Vertrag an. Ein
+[Textaufgaben-Beispiel](apps/adapter-host/examples/llm-tasks.md) verbindet die
+Modellvorschläge mit der vorhandenen kontrollierten Aufgabensteuerung.
+
 Sensor und Lüfter nutzen das gemeinsame Protokoll, das Adapter-SDK und ihre
 eigenen Bibliotheken. Der Lüfter nutzt SQLite für seinen simulierten
 Gerätezustand. Kein Adapter hängt von `arcs-core` ab. Auch der Core hat keine
@@ -136,7 +142,10 @@ Die [Aufgaben-Runtime](apps/adapter-host/examples/task-runtime.md) verbindet
 Input oder Observe dauerhaft mit konfigurierten Reasonern. Sie hält eine
 persistente Aufgabenqueue, setzt nach einem Neustart fort und stellt fertige
 Kandidaten zur Prüfung bereit. Neue JSON-Aufgaben lassen sich während des
-laufenden Hosts einreihen. Die fachliche Freigabe bleibt bei der Anwendung.
+laufenden Hosts einreihen. Mit der optionalen [Zielsteuerung](apps/adapter-host/examples/goal-runtime.md)
+koordiniert sie außerdem Vorschlag, Verification, manuelle oder konfigurierte
+Freigabe, Aktion, frische Wirkungsdaten und erneute externe Planung bis zum
+Zielabschluss oder Budgetende. Die fachlichen Regeln bleiben in den Komponenten.
 
 Der erste [externe Drohnen-Bewegungsnachweis](../drone-sim/apps/drone-demo/README.md) verbindet
 eine separate Raum-Simulation mit einem externen Drohnenadapter und den
@@ -174,6 +183,12 @@ eine Änderung am Core ist dafür nicht erforderlich.
 Aufgaben mit austauschbarer Wahrnehmung, Reasoning und ausführbaren Fähigkeiten
 bearbeiten kann.** ARCS liefert dafür den Harness zur Datenzusammenführung,
 Kontextbereitstellung, Koordination und kontrollierten Ausführung.
+
+**Aufgaben sollen hauptsächlich als Text eingegeben werden.** ARCS bewahrt die
+Zielbeschreibung und reicht sie mit ausgewähltem Kontext an externe Reasoner
+weiter. Interpretation und fachliche Planung bleiben dort; Formulare und JSON
+sind zusätzliche technische Eingänge. Der [Textaufgaben-Nachweis](apps/adapter-host/examples/text-tasks.md)
+verbindet dies bereits mit einem begrenzten externen Rules-Reasoner.
 
 **Die verlässliche Datengrundlage hat zunächst Vorrang.** Daten sollen fachlich
 verständlich, zeitlich zuordenbar und mit nachvollziehbarer Herkunft,
@@ -274,9 +289,10 @@ Observation → Belief Update → Goal → Memory/Skill Retrieval
 | Artifact-Netz als bekannter Fast Path | Implementiert |
 | Externe Kamera und Pixel-Suche | In `../drone-sim`: zielunabhängige Kamera und separater Rules-Reasoner mit ausgewählten Bildbytes; noch keine autonome Suche |
 | Dauerhafte Aufgabenverarbeitung | Konfigurierbare Input-/Observe-zu-Reason-Routen, persistente Queue, Wiederaufnahme und Review-Übergabe; serielles Polling |
+| Allgemeine Zielschleife | Optional pro Route: externe Planung und Bewertung, kontrollierte Aktionen, frische Quellen, Wiederaufnahme und Rundenbudget; Lüftertest nachgewiesen |
 | Kuratiertes Reasoning | V1-Modellfall und allgemeiner V2-Port; externe Solver und Modell-Testadapter, noch kein echter Modellanbieter |
 | Verification → Approval → Action → Execution → Outcome | Implementiert |
-| Explizite Goals und maschinenprüfbare Zielbedingungen | Geplant |
+| Explizite Goals und maschinenprüfbare Zielbedingungen | Aufgabensteuerung vorhanden; Zielbedeutung und Wirkungsprüfung über konfigurierte externe Reasoner, kein universeller Beweisprüfer |
 | Episodisches Memory und wiederverwendbare Skills | Geplant |
 | Gelerntes Kosten-/Latenz-/Risiko-Routing | Geplant |
 | Kalibrierte Sensorfusion und probabilistischer Belief State | Geplant |
@@ -389,7 +405,11 @@ Für ein eigenes Desktop-Fenster:
 
 Das [Kontrollpanel](apps/control-panel/README.md) bietet Start und Stopp,
 Konfigurationsauswahl, Adapterkatalog mit Rollenfiltern, aktuelle Statusdaten
-und Protokolle. `./arcs-control --install-launcher` ergänzt einen Eintrag im
+und Protokolle. Unter **Eingabe** lassen sich Texte, Formulare und JSON-Aufgaben
+an verbundene JSON-Input-Adapter senden. **Aufgaben per Text · Beispiel**
+verbindet den Originaltext mit externen Reasonern und der Zielsteuerung.
+Die zusätzliche Konfiguration **Texteingabe** empfängt Nachrichten ohne
+Bearbeitungsroute. `./arcs-control --install-launcher` ergänzt einen Eintrag im
 persönlichen Anwendungsmenü.
 
 Voraussetzung ist eine Rust-Toolchain mit Unterstützung für Edition 2024.

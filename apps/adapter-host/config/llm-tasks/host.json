@@ -1,0 +1,62 @@
+{
+  "config_version": 1,
+  "database": "../../../../var/llm-tasks/core.sqlite",
+  "node_id": "llm-tasks",
+  "schemas": [
+    "../../../../adapters/simulated-fan/schemas/temperature.schema.json",
+    "../../../../adapters/simulated-fan/schemas/request-temperature.schema.json",
+    "../../../../adapters/simulated-fan/schemas/request-fan.schema.json",
+    "../../../../adapters/simulated-fan/schemas/fan-candidate.schema.json",
+    "../../../../adapters/simulated-fan/schemas/fan-state.schema.json",
+    "../../../../adapters/simulated-fan/schemas/fan-execution-result.schema.json",
+    "policy.schema.json"
+  ],
+  "adapters": [
+    {
+      "program": "../../../../target/debug/arcs-json-input",
+      "profile": "input-profile.json",
+      "args": [
+        {
+          "path": "../../../../var/llm-tasks/input.sqlite"
+        }
+      ],
+      "grant_file": "input-grant.json",
+      "timeout_ms": 15000
+    },
+    {
+      "program": "../../../../target/debug/arcs-simulated-fan",
+      "profile": "fan-profile.json",
+      "args": [
+        {
+          "path": "../../../../var/llm-tasks/fan.sqlite"
+        },
+        "--adapter-id",
+        "llm.fan"
+      ],
+      "grant_file": "fan-grant.json",
+      "timeout_ms": 15000
+    },
+    {
+      "program": "../../../../../llm-api/arcs-llm-api",
+      "profile": "../../../../../llm-api/examples/fan/planner.json",
+      "args": [
+        {
+          "path": "../../../../var/llm-tasks/planner.sqlite"
+        }
+      ],
+      "grant_file": "planner-grant.json",
+      "timeout_ms": 65000
+    },
+    {
+      "program": "../../../../../llm-api/arcs-llm-api",
+      "profile": "../../../../../llm-api/examples/fan/assessor.json",
+      "args": [
+        {
+          "path": "../../../../var/llm-tasks/assessor.sqlite"
+        }
+      ],
+      "grant_file": "assessor-grant.json",
+      "timeout_ms": 65000
+    }
+  ]
+}

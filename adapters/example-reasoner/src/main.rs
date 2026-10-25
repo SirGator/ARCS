@@ -9,11 +9,28 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 const TASK: &str = "arcs.task.nearest.v1";
 const CANDIDATE: &str = "arcs.solution_candidate.nearest.v1";
+mod goal_fan;
+mod text_fan;
+#[derive(Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum Scenario {
+    #[default]
+    Nearest,
+    FanGoal,
+    TextFanGoal,
+}
+impl Scenario {
+    fn is_nearest(&self) -> bool {
+        matches!(self, Self::Nearest)
+    }
+}
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Profile {
     adapter_id: AdapterId,
     method: ReasoningMethod,
+    #[serde(default, skip_serializing_if = "Scenario::is_nearest")]
+    scenario: Scenario,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -40,7 +57,14 @@ impl Adapter for Reasoner {
             capabilities: vec![CapabilityDescriptor {
                 id: CapabilityId("solution.propose".into()),
                 contract: CapabilityContract::Reason {
-                    emits: vec![SchemaId(CANDIDATE.into())],
+                    emits: if self.profile.scenario.is_nearest() {
+                        vec![SchemaId(CANDIDATE.into())]
+                    } else {
+                        vec![
+                            SchemaId(goal_fan::CANDIDATE.into()),
+                            SchemaId(goal_fan::ASSESSMENT.into()),
+                        ]
+                    },
                 },
                 required_permissions: vec!["reason.compute".into()],
             }],
@@ -72,82 +96,88 @@ impl Adapter for Reasoner {
             }
             return serde_json::from_str(&response).map_err(unavailable);
         }
-        let context = invocation
-            .context
-            .iter()
-            .find(|item| item.schema_id.0 == TASK)
-            .ok_or_else(|| rejected("missing task context"))?;
-        let task: Task = serde_json::from_value(context.payload.clone()).map_err(rejected)?;
-        if task.values.len() > 4096
-            || !task.target.is_finite()
-            || task
-                .values
-                .iter()
-                .any(|value| !value.is_finite() || !(*value - task.target).abs().is_finite())
-        {
-            return Err(rejected("invalid finite search task"));
-        }
-        let solver = self.profile.method == ReasoningMethod::Solver;
-        let exhausted = solver
-            && invocation
-                .budget
-                .max_iterations
-                .is_none_or(|max| task.values.len() as u64 > max);
-        let status = if exhausted {
-            ReasoningStatus::BudgetExhausted
-        } else if task.values.is_empty() {
-            ReasoningStatus::NoSolution
+        let response = if matches!(self.profile.scenario, Scenario::TextFanGoal) {
+            text_fan::reason(&invocation)?
+        } else if matches!(self.profile.scenario, Scenario::FanGoal) {
+            goal_fan::reason(&invocation)?
         } else {
-            ReasoningStatus::Solved
-        };
-        let mut candidates = Vec::new();
-        if status == ReasoningStatus::Solved {
-            let value = if solver {
-                *task
+            let context = invocation
+                .context
+                .iter()
+                .find(|item| item.schema_id.0 == TASK)
+                .ok_or_else(|| rejected("missing task context"))?;
+            let task: Task = serde_json::from_value(context.payload.clone()).map_err(rejected)?;
+            if task.values.len() > 4096
+                || !task.target.is_finite()
+                || task
                     .values
                     .iter()
-                    .min_by(|a, b| {
-                        (**a - task.target)
-                            .abs()
-                            .total_cmp(&(**b - task.target).abs())
-                    })
-                    .unwrap()
+                    .any(|value| !value.is_finite() || !(*value - task.target).abs().is_finite())
+            {
+                return Err(rejected("invalid finite search task"));
+            }
+            let solver = self.profile.method == ReasoningMethod::Solver;
+            let exhausted = solver
+                && invocation
+                    .budget
+                    .max_iterations
+                    .is_none_or(|max| task.values.len() as u64 > max);
+            let status = if exhausted {
+                ReasoningStatus::BudgetExhausted
+            } else if task.values.is_empty() {
+                ReasoningStatus::NoSolution
             } else {
-                task.values[0]
+                ReasoningStatus::Solved
             };
-            candidates.push(ProposalSubmission {
-                schema_id: invocation.target_schema_id.clone(),
-                required_capabilities: vec![],
-                referenced_versions: vec![context.version_id.clone()],
-                payload: json!({"value":value,"distance":(value-task.target).abs()}),
-            });
-        }
-        let response = ReasoningResponseV2 {
-            invocation_id: invocation.invocation_id.clone(),
-            request_id: invocation.request_id,
-            status,
-            candidates,
-            trace: ReasoningTraceV2 {
-                method: self.profile.method,
-                implementation: if solver {
-                    "finite-nearest-solver"
+            let mut candidates = Vec::new();
+            if status == ReasoningStatus::Solved {
+                let value = if solver {
+                    *task
+                        .values
+                        .iter()
+                        .min_by(|a, b| {
+                            (**a - task.target)
+                                .abs()
+                                .total_cmp(&(**b - task.target).abs())
+                        })
+                        .unwrap()
                 } else {
-                    "recorded-model-fixture"
-                }
-                .into(),
-                version: env!("CARGO_PKG_VERSION").into(),
-                iterations: if solver {
-                    Some(if exhausted {
-                        0
+                    task.values[0]
+                };
+                candidates.push(ProposalSubmission {
+                    schema_id: invocation.target_schema_id.clone(),
+                    required_capabilities: vec![],
+                    referenced_versions: vec![context.version_id.clone()],
+                    payload: json!({"value":value,"distance":(value-task.target).abs()}),
+                });
+            }
+            ReasoningResponseV2 {
+                invocation_id: invocation.invocation_id.clone(),
+                request_id: invocation.request_id.clone(),
+                status,
+                candidates,
+                trace: ReasoningTraceV2 {
+                    method: self.profile.method,
+                    implementation: if solver {
+                        "finite-nearest-solver"
                     } else {
-                        task.values.len() as u64
-                    })
-                } else {
-                    None
+                        "recorded-model-fixture"
+                    }
+                    .into(),
+                    version: env!("CARGO_PKG_VERSION").into(),
+                    iterations: if solver {
+                        Some(if exhausted {
+                            0
+                        } else {
+                            task.values.len() as u64
+                        })
+                    } else {
+                        None
+                    },
+                    output_tokens: None,
+                    details: json!({"fixture":!solver,"task_schema":TASK}),
                 },
-                output_tokens: None,
-                details: json!({"fixture":!solver,"task_schema":TASK}),
-            },
+            }
         };
         transaction
             .execute(
@@ -169,11 +199,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Err("usage: arcs-example-reasoner <profile.json> <journal.sqlite>".into());
     }
     let profile: Profile = serde_json::from_slice(&std::fs::read(&args[0])?)?;
-    if !matches!(
-        profile.method,
-        ReasoningMethod::Solver | ReasoningMethod::Learned
-    ) {
-        return Err("example supports solver or learned test fixture only".into());
+    if (profile.scenario.is_nearest()
+        && !matches!(
+            profile.method,
+            ReasoningMethod::Solver | ReasoningMethod::Learned
+        ))
+        || (!profile.scenario.is_nearest() && profile.method != ReasoningMethod::Rules)
+    {
+        return Err("nearest supports solver/learned; fan_goal supports rules".into());
     }
     let identity = serde_json::to_string(&profile)?;
     let mut database = Connection::open(&args[1])?;
