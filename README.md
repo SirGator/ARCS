@@ -184,6 +184,52 @@ Aufgaben mit austauschbarer Wahrnehmung, Reasoning und ausführbaren Fähigkeite
 bearbeiten kann.** ARCS liefert dafür den Harness zur Datenzusammenführung,
 Kontextbereitstellung, Koordination und kontrollierten Ausführung.
 
+**Leistungsfähigkeit und einfache Bedienung sind gleichrangige Ziele.**
+Eine gemeinsame Desktop-Oberfläche soll Aufgaben, angeschlossene Komponenten,
+Fortschritt, nötige Freigaben und Ergebnisse verständlich zugänglich machen.
+Der Nutzer beschreibt sein Ziel; ARCS organisiert den Datenaustausch, die
+Zusammenarbeit der externen Verfahren und den weiteren Aufgabenablauf.
+Die Oberfläche soll die Einrichtung, den Start und die Verwaltung der
+Anbindungen übernehmen. Für die normale Nutzung sollen verständliche
+Voreinstellungen und die Oberfläche genügen. Eigene Programme, Adapter oder
+manuell bearbeitete Konfigurationsdateien sollen dafür nicht erforderlich sein.
+
+**Erweiterung und Anpassung bleiben optional zugänglich.** Erfahrene Nutzer
+sollen eigene Adapter und Reasoning-Verfahren anschließen, Abläufe und
+Freigaberegeln konfigurieren sowie Komponenten austauschen können. Zusätzliche
+Expertenansichten und dokumentierte Schnittstellen erschließen diese
+Möglichkeiten, ohne sie zur Voraussetzung für die normale Bedienung zu machen.
+
+**Selbstständiger Fähigkeitsausbau ist ein langfristiges Ziel.** Wenn für eine
+Aufgabe eine passende Fähigkeit fehlt, soll ARCS externe Reasoner mit dem
+Entwurf eigener Werkzeuge, Adapter, Programme oder Abläufe beauftragen können.
+ARCS soll deren Erstellung in einer isolierten Arbeitsumgebung koordinieren,
+Builds und Tests über angeschlossene Fähigkeiten ausführen lassen und geprüfte
+Ergebnisse versioniert einbinden können. Später können auch vorgeschlagene
+Änderungen an ARCS selbst diesen Ablauf durchlaufen.
+
+Erzeugter Code und neue Fähigkeiten bleiben Vorschläge, bis die konfigurierten
+Prüfungen und Freigaberegeln erfüllt sind. Die Betreiberkonfiguration bestimmt,
+welche Schritte automatisch erlaubt sind und welche eine manuelle Freigabe
+benötigen. Aktivierungen sollen nachvollziehbar und rücknehmbar sein. Entwurf
+und fachliche Bewertung bleiben bei externen Komponenten; ARCS organisiert den
+Ablauf. Auch dieser Fähigkeitsausbau soll über die normale Oberfläche nutzbar
+sein. Die allgemeine Build-, Test- und Einbindungskette ist noch umzusetzen.
+
+Modelle, APIs, Datenquellen und Geräte sollen sich über diese Oberfläche
+anschließen lassen. Bei einem Modelldienst gehören dazu Anbieter beziehungsweise
+API-Format, Endpunkt, Modell und die geschützte Zugangskonfiguration. Die
+Übersetzung und das fachliche Reasoning bleiben bei austauschbaren externen
+Komponenten, auch wenn ARCS ihre Einrichtung und Prozesse im Hintergrund
+verwaltet. Die Seite **Modelle** im Kontrollpanel bietet inzwischen die
+Einrichtung, den Verbindungstest und getrennte Zuordnung für Planung,
+Wirkungsprüfung und optional Bildauswertung. Die lokale Umgebung
+[model-services](../model-services/README.md) betreibt Ollama und YOLO als
+eigene API-Dienste; Modellgewichte und Inferenz bleiben außerhalb von ARCS.
+Schlüssel bleiben im geöffneten Fenster oder werden optional
+im Systemschlüsselbund gespeichert. Eigene Profile und Umgebungsvariablen
+bleiben zusätzlich verfügbar.
+
 **Aufgaben sollen hauptsächlich als Text eingegeben werden.** ARCS bewahrt die
 Zielbeschreibung und reicht sie mit ausgewähltem Kontext an externe Reasoner
 weiter. Interpretation und fachliche Planung bleiben dort; Formulare und JSON
@@ -208,7 +254,10 @@ Das gilt ausdrücklich auch für Reasoning: Mehrere mathematische Solver,
 Regelverfahren, LLMs und andere KI-Modelle sollen nebeneinander anschließbar
 sein. Reasoning ist die allgemeine Lösungsrolle; die neue
 V2-Schnittstelle unterstützt diese Verfahren. Ein mathematischer Solver
-und ein Modell-Testadapter weisen sie nach; echte Modellanbieter fehlen noch.
+und ein Modell-Testadapter weisen sie nach. Das externe Projekt `llm-api`
+ergänzt konfigurierbare Anbindungen für lokale Modelle und entfernte
+Modelldienste. Der Prozessweg ist mit lokalen API-Testservern geprüft;
+ein Test mit einem echten Modell steht nach Einrichtung des Zugangs noch aus.
 Den verbindlichen Ausbau beschreibt der
 [Reasoning-Entwurf](docs/REASONING.md).
 

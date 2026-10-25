@@ -126,14 +126,14 @@ class SessionController:
                 self._submission_pending = False
             self._push("input_queued", adapter_id=target.adapter_id, id=event["id"])
 
-    def start(self, configuration: Configuration) -> None:
+    def start(self, configuration: Configuration, credentials=None) -> None:
         read_configuration(configuration)
-        self._begin(configuration)
+        self._begin(configuration, credentials)
 
     def build(self) -> None:
         self._begin(None)
 
-    def _begin(self, configuration: Configuration | None) -> None:
+    def _begin(self, configuration: Configuration | None, credentials=None) -> None:
         with self._lock:
             if self._busy:
                 raise RuntimeError("Es läuft bereits ein Vorgang.")
@@ -142,17 +142,18 @@ class SessionController:
             self._forced.clear()
             self._accepting_input = False
             self._input_targets = []
-        threading.Thread(target=self._worker, args=(configuration,), daemon=True).start()
+        threading.Thread(target=self._worker, args=(configuration, credentials), daemon=True).start()
 
     def _push(self, event: str, **values) -> None:
         self.events.put({"event": event, **values})
 
-    def _run_process(self, command: list[str], json_events: bool) -> int:
+    def _run_process(self, command: list[str], json_events: bool, environment=None) -> int:
         if self._stop.is_set():
             return 0
         process = subprocess.Popen(command, cwd=self.root, stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8",
-            errors="replace", start_new_session=True, bufsize=1)
+            errors="replace", start_new_session=True, bufsize=1,
+            env={**os.environ, **environment} if environment is not None else None)
         with self._lock:
             self._process = process
             if self._stop.is_set() and not json_events and process.poll() is None:
@@ -196,7 +197,7 @@ class SessionController:
             with self._lock:
                 self._process = None
 
-    def _worker(self, configuration: Configuration | None) -> None:
+    def _worker(self, configuration: Configuration | None, credentials=None) -> None:
         lock_file = None
         result, message = 0, ""
         operation = "build" if configuration is None else "host"
@@ -234,7 +235,8 @@ class SessionController:
                         "--monitor", "--stop-file", str(stop_file)]
                     if configuration.runtime:
                         command += ["--runtime", str(configuration.runtime.expanduser().resolve())]
-                    result = self._run_process(command, True)
+                    environment = credentials(configuration) if credentials else None
+                    result = self._run_process(command, True, environment)
                     if result and not self._stop.is_set():
                         raise RuntimeError(f"ARCS wurde mit Status {result} beendet. Details stehen im Protokoll.")
         except Exception as error:

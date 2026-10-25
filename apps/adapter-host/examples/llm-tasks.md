@@ -13,6 +13,15 @@ bleiben unverändert.
 
 ## Start
 
+Der normale Weg ist jetzt **Modelle** im Kontrollpanel: Verbindung anlegen,
+**Verbindung testen**, **Speichern**, Modelle für Planung und Wirkungsprüfung
+auswählen und **Für Aufgaben übernehmen** drücken. Schlüssel werden im
+geöffneten Fenster gehalten oder optional im Systemschlüsselbund gespeichert.
+Dieser Weg benötigt keine Umgebungsvariablen und erzeugt eine eigene
+Startkonfiguration. Details stehen in der [Panel-Anleitung](../../control-panel/README.md#modellverbindungen-und-schlüssel).
+
+Für eigene Profile und den direkten CLI-Start bleibt zusätzlich dieser Weg:
+
 1. `ARCS_LLM_PROVIDER` und `ARCS_LLM_MODEL` im startenden Terminal setzen.
 2. Für einen entfernten Dienst die passende Schlüsselvariable setzen;
    `ARCS_LLM_ENDPOINT` überschreibt optional den vollständigen Endpunkt.

@@ -25,6 +25,20 @@ eigenständigen Projekt `../drone-sim`, mit eigenem Repository und Cargo-
 Workspace. ARCS-Host und Core stellen den allgemeinen Harness und die
 Anschlussverträge bereit.
 
+## Erste externe Modelle
+
+Im Nachbarprojekt `../model-services` laufen ein LLM über Ollama und YOLO
+als eigener HTTP-Bilddienst. Das Kontrollpanel kann beide APIs speichern und
+die Bildfähigkeit getrennt von Planung und Wirkungsprüfung zuordnen. YOLO
+liefert allgemeine Objekterkennungen mit Herkunft und Bildkoordinaten; weder
+Kamera noch Bilddienst benötigen dafür den Suchauftrag. Der externe Planer
+muss Erkennungen und Auftrag später zusammenführen. Bildkoordinaten allein
+geben keine räumliche Zielposition an.
+
+Die allgemeine Anbindung ist vorhanden. Die automatische Verarbeitung
+Kamera → YOLO → Planer → Drohnenaktion und eine für die Objekterkennung
+geeignete Simulationsszene sind noch umzusetzen.
+
 ## Verbindliche Architekturvorgabe: Universalität
 
 Die Drohnensuche ist der erste große Anwendungsfall des allgemeinen

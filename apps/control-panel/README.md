@@ -34,6 +34,26 @@ des Checkouts lassen sie sich mit demselben Befehl aktualisieren.
 
 ## Bedienung
 
+- **Modelle:** Lokale Modelle und API-Verbindungen direkt einrichten, ohne
+  Terminal oder Umgebungsvariablen. Anbieter/Format auswählen, Modellnamen,
+  vollständige API-Adresse und gegebenenfalls den maskierten Schlüssel
+  eintragen. **Verbindung testen** sendet eine kurze Modellanfrage ohne
+  Aufgaben- oder Gerätedaten. **Speichern** legt die Verbindung an. Für
+  **Planung** und **Wirkungsprüfung** je ein gespeichertes Modell auswählen
+  und **Für Aufgaben übernehmen** drücken. Beide Rollen dürfen dasselbe
+  Modell nutzen; mehrere gespeicherte Verbindungen sind möglich. Danach
+  unter **Eingabe** ARCS starten und eine Textaufgabe senden. Das vorhandene
+  Aufgabenbeispiel steuert den simulierten Lüfter. Neue Fähigkeiten und andere
+  Aufgabenabläufe bleiben über Adapter und eigene Konfigurationen anschließbar.
+  Während einer laufenden Sitzung sind Änderungen an den Modellen gesperrt.
+  Für einen externen Bilddienst gibt es **YOLO · Bildauswertung** und die
+  getrennte Zuordnung **Bildauswertung (optional)**. Der Verbindungstest führt
+  dort eine echte Bildinferenz aus. Die lokale Umgebung mit Ollama und YOLO
+  liegt im Nachbarprojekt [model-services](../../../model-services/README.md);
+  Modelle und Gewichte bleiben außerhalb von ARCS. Die Bildfähigkeit ist
+  anschließbar, die automatische Kamera- und Drohnenroute ist noch auszubauen.
+  Unter **Erweitert** stehen optionale Namen, Schlüsselanforderung,
+  Chat-JSON-Modus, Tokenparameter und Anthropic-Version bereit.
 - **Startkonfiguration:** Zuerst steht „Aufgaben per Text · Beispiel“ als
   durchgängiger [Textaufgaben-Nachweis](../adapter-host/examples/text-tasks.md).
   Weitere Beispiele sind „Mehrere Adapter“, „Aufgaben & Reasoning“
@@ -42,10 +62,10 @@ des Checkouts lassen sie sich mit demselben Befehl aktualisieren.
   für das simulierte Gerät; Details stehen im [Nachweis](../adapter-host/examples/goal-runtime.md). Eine Aufgaben-
   Runtime kann separat hinzugefügt oder entfernt werden. Auch Konfigurationen
   externer Projekte sind auswählbar; deren Programme werden in ihrem Projekt gebaut.
-- **Aufgaben per Text · LLM-API:** Verbindet externe API-Reasoner aus dem
-  Nachbarprojekt `llm-api`. Vor dem Panel-Start Modell, Anbieter und gegebenenfalls
-  API-Zugang im startenden Terminal konfigurieren. Die [Anleitung](../adapter-host/examples/llm-tasks.md)
-  beschreibt den Start; bestehende Fenster erben neue Umgebungsvariablen nicht.
+- **Aufgaben per Text · LLM-API:** Bleibt als zusätzliche Konfiguration für
+  eigene Profile und Umgebungsvariablen verfügbar. Für die normale Einrichtung
+  genügt die neue Seite **Modelle**. Die [Anleitung](../adapter-host/examples/llm-tasks.md)
+  beschreibt beide Wege und das eigenständige Nachbarprojekt `llm-api`.
 - **ARCS starten:** Öffnet den Host und verbindet die konfigurierten Adapter.
   Ohne Aufgaben-Runtime werden konfigurierte Requests und Transforms einmal
   ausgeführt; anschließend werden Inputs und Beobachtungen dauerhaft abgeholt.
@@ -83,6 +103,43 @@ gleichzeitig starten. Diese Sperre gilt zwischen Kontrollpanels.
 Die Oberfläche bietet keine manuellen Approval-Buttons. Freigaben folgen der
 Runtime-Konfiguration beziehungsweise dem dokumentierten Betreiberkommando.
 Adapter werden weiterhin durch die Host-Konfiguration beim Start angeschlossen.
+
+## Modellverbindungen und Schlüssel
+
+Anbieterbeschreibungen und Verbindungstests übernimmt der externe Adapter
+`../llm-api/arcs-llm-api` mit `--describe` und `--probe`. Die GUI enthält keine
+Anbieter-API-Aufrufe oder fachliches Reasoning. Ein erfolgreicher Verbindungstest
+weist eine kurze vollständige JSON-Modellantwort nach, keine allgemeine
+Problemlösungsfähigkeit des Modells. Tests werden nur durch den Testknopf
+ausgelöst; beim Öffnen oder Speichern entstehen keine Modellanfragen.
+
+Verbindungsdaten und Zuordnungen liegen ohne Schlüssel in
+`var/control-panel/models/connections.json`. Schlüssel bleiben im Speicher
+des geöffneten Fensters. Mit optional verfügbarem `libsecret`-Python-Binding
+und einem laufenden Secret-Service kann **Schlüssel im Systemschlüsselbund
+merken** gewählt werden. Schlüsselbundzugriffe laufen im Hintergrund.
+Ohne diese Anbindung zeigt die Oberfläche ausdrücklich die Speicherung nur
+für das geöffnete Kontrollpanel an: Nach dessen Neustart ist der Schlüssel
+erneut einzugeben. Verbindungen und Zuordnungen bleiben erhalten. Die
+Oberfläche schreibt keine Klartext-Schlüsseldatei und übernimmt Keys nicht in
+Konfigurations- oder Programmargumente. Der eigene Host bekommt ausschließlich
+die für die gewählte Modellkonfiguration benötigten Schlüssel als Umgebung;
+angeschlossene Kindprozesse erben diese wie andere Host-Umgebungsvariablen.
+
+**Für Aufgaben übernehmen** erzeugt ein eigenes Konfigurationsverzeichnis
+unter `var/control-panel/models/sessions/`. Unterschiedliche Modelle, Anbieter,
+Profile und Schemas erhalten getrennte Core-, Runtime- und Adapterjournale.
+Schlüsselrotation und Umbenennung behalten die fachlich gleiche Konfiguration.
+Die Auswahl erscheint oben als **Meine Modelle · Textaufgaben** und wird wie
+andere Startkonfigurationen wiederhergestellt. Generierte Profile und Schemas
+sind eingefrorene Kopien; manuell geänderte Dateien werden nicht überschrieben.
+Bei einem Anbieter- oder Adresswechsel muss ein Schlüssel ausdrücklich neu
+eingegeben werden. Gleichzeitige Änderungen in mehreren Fenstern werden
+erkannt; **Neu laden** übernimmt den neueren Stand. Zugeordnete Verbindungen
+können erst nach einer anderen gespeicherten Zuordnung entfernt werden.
+
+Die optionalen Schlüsselbundaufrufe folgen den
+[libsecret-Python-Beispielen](https://gnome.pages.gitlab.gnome.org/libsecret/libsecret-python-examples.html).
 
 ## Eingaben über Adapter
 

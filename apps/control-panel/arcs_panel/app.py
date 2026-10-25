@@ -15,6 +15,7 @@ from gi.repository import Gdk, GdkPixbuf, Gio, GLib, Gtk, Pango
 
 from .controller import Configuration, PROJECT_ROOT, SessionController, read_configuration
 from .input_page import InputPage
+from .models_page import ModelsPage
 
 ASSETS = Path(__file__).resolve().parent
 ROLES = ["input", "observe", "request", "transform", "reason", "act", "output"]
@@ -54,10 +55,11 @@ def button(text, icon=None, css=None, callback=None):
 
 
 class ControlWindow(Gtk.ApplicationWindow):
-    def __init__(self, application=None, configuration=None, root=PROJECT_ROOT, persist_settings=True):
+    def __init__(self, application=None, configuration=None, root=PROJECT_ROOT, persist_settings=True, model_connections=None):
         super().__init__(application=application, title="ARCS Control")
         self.root = root.resolve()
         self.persist_settings = persist_settings
+        self._model_connections = model_connections
         self._configuration_valid = False
         self.controller = SessionController(self.root)
         self.set_default_size(1260, 850)
@@ -126,7 +128,7 @@ class ControlWindow(Gtk.ApplicationWindow):
         nav.pack_start(kicker, False, False, 0)
         self.stack = Gtk.Stack(transition_type=Gtk.StackTransitionType.NONE)
         self.nav_buttons = {}
-        for key, title, icon in [("overview", "Übersicht", "view-grid-symbolic"), ("input", "Eingabe", "mail-message-new-symbolic"), ("adapters", "Adapter", "network-workgroup-symbolic"), ("logs", "Protokolle", "utilities-terminal-symbolic")]:
+        for key, title, icon in [("overview", "Übersicht", "view-grid-symbolic"), ("input", "Eingabe", "mail-message-new-symbolic"), ("models", "Modelle", "preferences-system-symbolic"), ("adapters", "Adapter", "network-workgroup-symbolic"), ("logs", "Protokolle", "utilities-terminal-symbolic")]:
             item = button(title, icon, "nav", lambda _, name=key: self.show_page(name))
             self.nav_buttons[key] = item
             nav.pack_start(item, False, False, 0)
@@ -198,6 +200,8 @@ class ControlWindow(Gtk.ApplicationWindow):
         self._build_overview()
         self.input_page = InputPage(self.controller.submit_input)
         self.stack.add_named(self.input_page, "input")
+        self.models_page = ModelsPage(self.root, self._use_models, self._model_connections)
+        self.stack.add_named(self.models_page, "models")
         self._build_adapters()
         self._build_logs()
         footer = box(False)
@@ -334,11 +338,20 @@ class ControlWindow(Gtk.ApplicationWindow):
         runtime = self.runtime_entry.get_text()
         return Configuration(Path(host), Path(runtime) if runtime else None)
 
+    def _use_models(self, configuration):
+        if self.controller.busy:
+            return
+        self.select_configuration(configuration)
+        self.show_page("input")
+
     def select_configuration(self, configuration):
         if self.controller.busy:
             return
         self._updating = True
         index = next((index for index, (_, config) in enumerate(self.presets) if config == configuration), len(self.presets))
+        managed = configuration.host.expanduser().resolve().is_relative_to((self.models_page.connections.directory / "sessions").resolve())
+        model = self.preset_combo.get_model()
+        model.set_value(model.iter_nth_child(None, len(self.presets)), 0, "Meine Modelle · Textaufgaben" if managed else "Eigene Konfiguration")
         self.preset_combo.set_active(index)
         self.host_entry.set_text(str(configuration.host.expanduser().resolve()))
         self.runtime_entry.set_text(str(configuration.runtime.expanduser().resolve()) if configuration.runtime else "")
@@ -402,7 +415,7 @@ class ControlWindow(Gtk.ApplicationWindow):
     def _on_start(self, _=None):
         try:
             configuration = self.current_configuration()
-            self.controller.start(configuration)
+            self.controller.start(configuration, self.models_page.connections.environment_for)
             self.banner_row.hide()
             self._last_artifacts = None
             self._last_ready = None
@@ -452,6 +465,7 @@ class ControlWindow(Gtk.ApplicationWindow):
         self.side_status.set_text("●  " + text)
         self.footer_status.set_text(sub)
         busy = self.controller.busy
+        self.models_page.set_session_busy(busy)
         for widget in [self.start_button, self.build_button, self.preset_combo, self.clear_runtime, *self.config_buttons]:
             widget.set_sensitive(not busy)
         self.start_button.set_sensitive(not busy and self._configuration_valid)
@@ -670,6 +684,7 @@ class ControlWindow(Gtk.ApplicationWindow):
         if self._source_id:
             GLib.source_remove(self._source_id)
             self._source_id = None
+        self.models_page.close()
 
 
 def launch(host: Path | None = None, runtime: Path | None = None) -> int:
