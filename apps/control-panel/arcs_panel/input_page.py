@@ -295,6 +295,7 @@ class InputPage(Gtk.Box):
         labels = {'acquiring':'Daten erfassen', 'checking':'Aufgabe prüfen', 'planning':'Nächsten Schritt planen',
             'verifying':'Vorschlag prüfen', 'awaiting_approval':'Wartet auf Freigabe', 'executing':'Aktion ausführen',
             'observing':'Wirkung beobachten', 'assessing':'Ziel bewerten', 'completed':'Ziel erreicht',
+            'waiting_time':'Wartet auf Termin', 'waiting_event':'Wartet auf Ereignis',
             'blocked':'Aufgabe angehalten', 'rejected':'Abgelehnt', 'budget_exhausted':'Schrittbudget erreicht', 'cancelled':'Abgebrochen'}
         lines = []
         for record in reversed(self.history):

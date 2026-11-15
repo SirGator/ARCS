@@ -149,6 +149,16 @@ impl<'a> InputDataService<'a> {
         inputs: &[InputDataDescriptor],
         sources: &[&dyn DataAdapter],
     ) -> Result<Vec<ReceivedInputData>, InputDataError> {
+        Self::read_prepared(self.registry, inputs, sources)
+    }
+
+    /// Liest bereits vom Core geprüfte Deskriptoren ohne Zugriff auf den Store.
+    /// Die Registry ist der unveränderliche Grant-Snapshot dieses Dispatchs.
+    pub fn read_prepared(
+        registry: &AdapterRegistry,
+        inputs: &[InputDataDescriptor],
+        sources: &[&dyn DataAdapter],
+    ) -> Result<Vec<ReceivedInputData>, InputDataError> {
         let mut received = Vec::new();
         for input in inputs {
             let endpoint = sources
@@ -158,7 +168,7 @@ impl<'a> InputDataService<'a> {
                 })
                 .ok_or_else(|| invalid("binary source endpoint is missing"))?;
             let mut bytes = Vec::new();
-            DataService::new(self.registry).copy(
+            DataService::new(registry).copy(
                 *endpoint,
                 &input.selection.source,
                 &input.reference,

@@ -13,6 +13,7 @@ import uuid
 
 from .controller import Configuration
 from .credentials import Credentials
+from .process_environment import process_environment, validate_names
 
 
 def canonical(value):
@@ -96,7 +97,7 @@ class AdapterSetup:
             if self._closed:
                 raise ValueError("Modelleinrichtung wurde geschlossen.")
             process = subprocess.Popen([str(program), option], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL, env={**os.environ, **(environment or {})}, start_new_session=True)
+                stderr=subprocess.DEVNULL, env=process_environment(environment), start_new_session=True)
             self._processes.add(process)
         try:
             output, _ = process.communicate(canonical(packet).encode() if packet is not None else b"", timeout=20)
@@ -298,6 +299,7 @@ class ModelConnections:
                     profile = json.loads(original.read_text())
                     profile.update({field: record[field] for field in ("provider", "model", "endpoint", "provider_options")})
                     profile["api_key_env"] = "ARCS_PANEL_KEY_" + record["id"].upper() if record["requires_key"] else None
+                    adapter["inherit_env"] = [profile["api_key_env"]] if profile["api_key_env"] else []
                     for schema_id, relative in profile["target_schemas"].items():
                         name = role + "-" + Path(relative).name
                         files[name] = json.loads((original.parent / relative).read_text())
@@ -362,6 +364,8 @@ class ModelConnections:
         manifest = json.loads((path.parent / "credentials.json").read_text())
         if manifest.get("version") != 1:
             raise ValueError("Ungültige Zugangskonfiguration.")
+        host = json.loads(path.read_text())
+        declared = {name for adapter in host["adapters"] for name in validate_names(adapter.get("inherit_env", []))}
         result = {}
         for item in manifest["credentials"]:
             if not isinstance(item, dict) or set(item) != {"connection_id", "env", "remember_key"} or type(item["remember_key"]) is not bool:
@@ -372,6 +376,8 @@ class ModelConnections:
                 raise ValueError("Ungültige Schlüsselreferenz.") from None
             if item["env"] != "ARCS_PANEL_KEY_" + identifier.upper():
                 raise ValueError("Ungültige Schlüsselreferenz.")
+            if item["env"] not in declared:
+                raise ValueError("Diese Modellkonfiguration enthält noch keine Prozessfreigaben für Schlüssel. Unter Modelle bitte erneut Für Aufgaben übernehmen wählen.")
             key = self.credentials.get(item["connection_id"], item["remember_key"])
             if not key:
                 raise ValueError("API-Schlüssel fehlt für diese Sitzung. Unter Modelle die Verbindung öffnen, Schlüssel eintragen und speichern.")

@@ -1,0 +1,12 @@
+{
+  "id": "project-nearest-ready",
+  "subject": "project-nearest",
+  "reference": "event:project-nearest-ready",
+  "payload": {
+    "values": [
+      3,
+      7
+    ],
+    "target": 6
+  }
+}

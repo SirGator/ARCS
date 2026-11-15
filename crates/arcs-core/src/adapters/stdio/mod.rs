@@ -6,8 +6,9 @@ pub mod protocol;
 
 use std::io::BufReader;
 use std::process::{Child, Command, Stdio};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender};
+use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
@@ -55,10 +56,13 @@ type Response = Result<Envelope<AdapterMessage>, WireError>;
 pub struct StdioAdapter {
     manifest: AdapterManifest,
     session: Mutex<Session>,
+    child: Arc<Mutex<Child>>,
+    cancelled: Arc<AtomicBool>,
 }
 
 struct Session {
-    child: Child,
+    child: Arc<Mutex<Child>>,
+    cancelled: Arc<AtomicBool>,
     requests: Option<SyncSender<Envelope<HostMessage>>>,
     responses: Receiver<Response>,
     worker: Option<JoinHandle<()>>,
@@ -68,7 +72,7 @@ struct Session {
 
 impl StdioAdapter {
     pub fn poll_input(
-        &mut self,
+        &self,
         inputs: &mut crate::input::InputService<'_>,
     ) -> Result<Option<crate::core::Artifact>, StdioError> {
         match self.exchange(HostMessage::PollInput)? {
@@ -128,8 +132,11 @@ impl StdioAdapter {
                 }
             }
         });
+        let child = Arc::new(Mutex::new(child));
+        let cancelled = Arc::new(AtomicBool::new(false));
         let mut session = Session {
-            child,
+            child: Arc::clone(&child),
+            cancelled: Arc::clone(&cancelled),
             requests: Some(requests),
             responses,
             worker: Some(worker),
@@ -154,6 +161,8 @@ impl StdioAdapter {
         Ok(Self {
             manifest,
             session: Mutex::new(session),
+            child,
+            cancelled,
         })
     }
 
@@ -164,7 +173,7 @@ impl StdioAdapter {
     /// Poll liefert höchstens eine Observation. Idle beendet keinen Prozess.
     /// Wiederholte Messungen liefern den ursprünglichen Commit zurück.
     pub fn poll(
-        &mut self,
+        &self,
         observations: &mut ObservationService<'_>,
     ) -> Result<Option<RecordedObservation>, StdioError> {
         match self.exchange(HostMessage::Poll)? {
@@ -204,7 +213,7 @@ impl StdioAdapter {
         }
     }
 
-    pub fn shutdown(&mut self) -> Result<(), StdioError> {
+    pub fn shutdown(&self) -> Result<(), StdioError> {
         let result = match self.exchange(HostMessage::Shutdown) {
             Ok(AdapterMessage::Bye) => Ok(()),
             Ok(_) => Err(StdioError::UnexpectedMessage),
@@ -212,6 +221,16 @@ impl StdioAdapter {
         };
         self.stop();
         result
+    }
+
+    /// Bricht ausschließlich den eigenen Adapterprozess ab, ohne auf den
+    /// Session-Mutex eines laufenden Dialogs zu warten. Externe Wirkungen
+    /// können dabei bereits eingetreten sein und bleiben ein Recovery-Fall.
+    pub fn abort(&self) {
+        self.cancelled.store(true, Ordering::Release);
+        if let Ok(mut child) = self.child.lock() {
+            let _ = child.kill();
+        }
     }
 
     fn exchange(&self, message: HostMessage) -> Result<AdapterMessage, StdioError> {
@@ -508,6 +527,9 @@ impl Session {
     }
 
     fn exchange_inner(&mut self, message: HostMessage) -> Result<AdapterMessage, StdioError> {
+        if self.cancelled.load(Ordering::Acquire) {
+            return Err(StdioError::Disconnected);
+        }
         let request_id = format!("stdio-{}", self.next_request);
         self.next_request = self
             .next_request
@@ -522,14 +544,25 @@ impl Session {
                 message,
             })
             .map_err(|_| StdioError::Disconnected)?;
-        let response = self
-            .responses
-            .recv_timeout(self.timeout)
-            .map_err(|error| match error {
-                RecvTimeoutError::Timeout => StdioError::Timeout,
-                RecvTimeoutError::Disconnected => StdioError::Disconnected,
-            })?
-            .map_err(StdioError::Wire)?;
+        let started = std::time::Instant::now();
+        let response = loop {
+            if self.cancelled.load(Ordering::Acquire) {
+                return Err(StdioError::Disconnected);
+            }
+            let remaining = self
+                .timeout
+                .checked_sub(started.elapsed())
+                .filter(|remaining| !remaining.is_zero())
+                .ok_or(StdioError::Timeout)?;
+            match self
+                .responses
+                .recv_timeout(remaining.min(Duration::from_millis(25)))
+            {
+                Ok(response) => break response.map_err(StdioError::Wire)?,
+                Err(RecvTimeoutError::Timeout) => continue,
+                Err(RecvTimeoutError::Disconnected) => return Err(StdioError::Disconnected),
+            }
+        };
         if response.protocol_version != WIRE_VERSION {
             return Err(StdioError::UnsupportedVersion(response.protocol_version));
         }
@@ -551,8 +584,10 @@ impl Session {
     }
 
     fn stop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        if let Ok(mut child) = self.child.lock() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
         self.requests.take();
         if let Some(worker) = self.worker.take() {
             // Ein vom Child gestarteter Nachfahre könnte stdout weiter offen

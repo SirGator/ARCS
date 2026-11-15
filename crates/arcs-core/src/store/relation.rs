@@ -92,4 +92,20 @@ pub mod relation_kinds {
     pub fn evaluates() -> RelationKind {
         known("evaluates")
     }
+
+    pub fn contradicts() -> RelationKind {
+        known("contradicts")
+    }
+    pub fn supersedes() -> RelationKind {
+        known("supersedes")
+    }
+    pub fn part_of_goal() -> RelationKind {
+        known("part_of_goal")
+    }
+    pub fn solved_by() -> RelationKind {
+        known("solved_by")
+    }
+    pub fn similar_to() -> RelationKind {
+        known("similar_to")
+    }
 }

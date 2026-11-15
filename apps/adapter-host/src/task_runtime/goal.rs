@@ -2,6 +2,7 @@
 //! externen Reasonern; Autorität folgt ausschließlich der Betreiberpolicy.
 mod engine;
 mod gates;
+mod waiting;
 
 use std::collections::{BTreeMap, HashSet};
 
@@ -22,6 +23,9 @@ pub const ASSESSMENT_SCHEMA: &str = "arcs.goal_assessment_candidate.v1";
 pub struct GoalConfig {
     #[serde(default, skip_serializing_if = "is_false")]
     pub initial_assessment: bool,
+    /// Betreiberdefinierte Wartebedingung nach einer abgeschlossenen Runde.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub between_rounds: Option<super::scheduler::Activation>,
     pub max_rounds: u32,
     pub max_wait_ticks: u32,
     pub sources: Vec<GoalSource>,
@@ -99,7 +103,10 @@ pub enum GoalState {
     Executing,
     Observing,
     Assessing,
+    WaitingTime,
+    WaitingEvent,
     Completed,
+    Failed,
     Blocked,
     Rejected,
     BudgetExhausted,
@@ -109,11 +116,13 @@ impl GoalState {
     pub(super) fn queue_state(self) -> &'static str {
         match self {
             Self::Completed => "completed",
+            Self::Failed => "failed",
             Self::Blocked => "blocked",
             Self::Rejected => "rejected",
             Self::BudgetExhausted => "budget_exhausted",
             Self::Cancelled => "cancelled",
             Self::AwaitingApproval => "awaiting_approval",
+            Self::WaitingTime | Self::WaitingEvent => "pending",
             _ => "running",
         }
     }
@@ -121,6 +130,7 @@ impl GoalState {
         matches!(
             self,
             Self::Completed
+                | Self::Failed
                 | Self::Blocked
                 | Self::Rejected
                 | Self::BudgetExhausted
@@ -216,6 +226,9 @@ impl GoalConfig {
             && !identifier(policy_id)
         {
             return Err(invalid("invalid approval policy ID"));
+        }
+        if let Some(activation) = &self.between_rounds {
+            activation.validate(host, manifests)?;
         }
         let mut contract = |cap: &CapabilityRef| -> Result<CapabilityContract, HostError> {
             let (registered, descriptor) = host

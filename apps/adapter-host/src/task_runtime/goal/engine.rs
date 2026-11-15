@@ -1,76 +1,30 @@
+use arcs::adapters::AdapterId;
 use arcs::adapters::input_data::InputDataSelection;
-use arcs::adapters::{AdapterId, CapabilityId};
 use arcs::core::{Artifact, SchemaId, SystemClock, VersionId};
 use arcs::input::{InputMessage, InputService};
 use arcs::outcome::OutcomeVerdict;
 use arcs::reasoning::{ContextSelection, ReasoningRequestV2, ReasoningStatus};
 use arcs::runtime::{InvocationKind, deterministic_invocation_id};
-use rusqlite::{OptionalExtension, params};
 
 use super::*;
 use crate::config::RUNTIME_ID;
-use crate::task_runtime::{TaskRuntime, journal::db};
+use crate::task_runtime::TaskRuntime;
 
 impl TaskRuntime {
     pub(in crate::task_runtime) fn goals_for_report(&self) -> Result<Vec<GoalTask>, HostError> {
-        let mut query = self.journal.connection.prepare("SELECT goal_json FROM runtime_jobs WHERE goal_json IS NOT NULL ORDER BY (state IN ('pending','running','failed','awaiting_approval')) DESC,sequence DESC LIMIT 50").map_err(db)?;
-        let rows = query
-            .query_map([], |row| row.get::<_, String>(0))
-            .map_err(db)?;
-        rows.map(|row| {
-            serde_json::from_str(&row.map_err(db)?)
-                .map_err(|e| invalid(format!("invalid goal checkpoint: {e}")))
-        })
-        .collect()
+        self.journal.goals_for_report()
     }
     pub fn goals_after(&self, sequence: u64, limit: usize) -> Result<Vec<GoalTask>, HostError> {
-        if !(1..=1000).contains(&limit) {
-            return Err(invalid("goal page size must be 1..1000"));
-        }
-        let mut query = self.journal.connection.prepare("SELECT goal_json FROM runtime_jobs WHERE sequence>?1 AND goal_json IS NOT NULL ORDER BY sequence LIMIT ?2").map_err(db)?;
-        let rows = query
-            .query_map(
-                params![sequence.min(i64::MAX as u64) as i64, limit as i64],
-                |row| row.get::<_, String>(0),
-            )
-            .map_err(db)?;
-        rows.map(|row| {
-            serde_json::from_str(&row.map_err(db)?)
-                .map_err(|e| invalid(format!("invalid goal checkpoint: {e}")))
-        })
-        .collect()
+        self.journal.goals_after(sequence, limit)
     }
-
-    pub(super) fn saved_goal(&self, sequence: u64) -> Result<Option<GoalTask>, HostError> {
-        let value: Option<Option<String>> = self
-            .journal
-            .connection
-            .query_row(
-                "SELECT goal_json FROM runtime_jobs WHERE sequence=?1",
-                [sequence.min(i64::MAX as u64) as i64],
-                |row| row.get(0),
-            )
-            .optional()
-            .map_err(db)?;
-        value
-            .flatten()
-            .map(|json| {
-                serde_json::from_str(&json)
-                    .map_err(|e| invalid(format!("invalid goal checkpoint: {e}")))
-            })
-            .transpose()
+    pub(in crate::task_runtime) fn saved_goal(
+        &self,
+        sequence: u64,
+    ) -> Result<Option<GoalTask>, HostError> {
+        self.journal.saved_goal(sequence)
     }
-
-    pub(super) fn save_goal(&self, task: &GoalTask) -> Result<(), HostError> {
-        let json = serde_json::to_string(task).map_err(|e| invalid(e.to_string()))?;
-        self.journal
-            .connection
-            .execute(
-                "UPDATE runtime_jobs SET state=?2,goal_json=?3,error=NULL WHERE sequence=?1",
-                params![task.sequence as i64, task.state.queue_state(), json],
-            )
-            .map_err(db)?;
-        Ok(())
+    pub(in crate::task_runtime) fn save_goal(&self, task: &GoalTask) -> Result<(), HostError> {
+        self.journal.save_goal(task)
     }
 
     pub(in crate::task_runtime) fn advance_goal(
@@ -80,26 +34,26 @@ impl TaskRuntime {
         route: &ReasoningRoute,
         config: &GoalConfig,
         input: &Artifact,
+        now_unix_ms: u64,
     ) -> Result<(), HostError> {
         let mut task = match self.saved_goal(sequence)? {
             Some(task) => task,
             None => {
-                let input_cursor: i64 = self
-                    .journal
-                    .connection
-                    .query_row(
-                        "SELECT source_sequence FROM runtime_jobs WHERE sequence=?1",
-                        [sequence as i64],
-                        |row| row.get(0),
-                    )
-                    .map_err(db)?;
+                // A generated goal may start long after its original input or
+                // plan admission. Begin its freshness window at acquisition,
+                // not at the old input cursor; persist it before any query.
+                let input_cursor = if self.journal.dynamic_origin(sequence)?.is_some() {
+                    host.store().latest_sequence().map_err(HostError::Store)?
+                } else {
+                    self.journal.source_sequence(sequence)?
+                };
                 let task = GoalTask {
                     sequence,
                     route_id: route.id.clone(),
                     input_version_id: input.version_id.clone(),
                     state: GoalState::Acquiring,
                     round: 1,
-                    observation_cursor: input_cursor as u64,
+                    observation_cursor: input_cursor,
                     dispatch_cursor: None,
                     wait_ticks: 0,
                     source_cursors: BTreeMap::new(),
@@ -156,7 +110,9 @@ impl TaskRuntime {
                 }];
                 append_sources(&mut context, config, &task.before);
                 let assessment = &config.assessment;
-                let result = host.reason_with_data(
+                let Some(result) = self.reason_for_task(
+                    host,
+                    task.sequence,
                     ReasoningRequestV2 {
                         request_id: self.goal_request_id(&task, "check"),
                         capability: assessment.capability.clone(),
@@ -174,7 +130,11 @@ impl TaskRuntime {
                         budget: assessment.budget.clone(),
                     },
                     &binary_inputs(config, &task.before),
-                )?;
+                    route.memory.as_ref(),
+                )?
+                else {
+                    return self.save_goal(&task);
+                };
                 if result.status != ReasoningStatus::Solved || result.candidates.len() != 1 {
                     task.state = GoalState::Blocked;
                     task.detail = reasoning_explanation(
@@ -186,8 +146,7 @@ impl TaskRuntime {
                     let candidate = &result.candidates[0];
                     let verdict: GoalAssessment = serde_json::from_value(candidate.payload.clone())
                         .map_err(|e| invalid(format!("invalid goal assessment: {e}")))?;
-                    let allowed: HashSet<_> =
-                        task.before.iter().chain([&input.version_id]).collect();
+                    let allowed = reasoning_context_versions(host, &result)?;
                     validate_assessment_evidence(&verdict, &allowed, &task.before)?;
                     task.assessment = Some(candidate.version_id.clone());
                     task.detail = verdict.detail;
@@ -224,8 +183,16 @@ impl TaskRuntime {
                     constraints: goal_constraints(&route.constraints, config, &task, "plan"),
                     budget: route.budget.clone(),
                 };
-                let result =
-                    host.reason_with_data(request, &binary_inputs(config, &task.before))?;
+                let Some(result) = self.reason_for_task(
+                    host,
+                    task.sequence,
+                    request,
+                    &binary_inputs(config, &task.before),
+                    route.memory.as_ref(),
+                )?
+                else {
+                    return self.save_goal(&task);
+                };
                 if result.status != ReasoningStatus::Solved || result.candidates.len() != 1 {
                     task.state = GoalState::Blocked;
                     task.detail = reasoning_explanation(
@@ -311,7 +278,9 @@ impl TaskRuntime {
                 append_sources(&mut context, config, &task.before);
                 append_sources(&mut context, config, &task.after);
                 let assessment = &config.assessment;
-                let result = host.reason_with_data(
+                let Some(result) = self.reason_for_task(
+                    host,
+                    task.sequence,
                     ReasoningRequestV2 {
                         request_id: self.goal_request_id(&task, "assess"),
                         capability: assessment.capability.clone(),
@@ -329,7 +298,11 @@ impl TaskRuntime {
                         budget: assessment.budget.clone(),
                     },
                     &binary_inputs(config, &task.after),
-                )?;
+                    route.memory.as_ref(),
+                )?
+                else {
+                    return self.save_goal(&task);
+                };
                 if result.status != ReasoningStatus::Solved || result.candidates.len() != 1 {
                     task.state = GoalState::Blocked;
                     task.detail =
@@ -339,12 +312,7 @@ impl TaskRuntime {
                     let artifact = &result.candidates[0];
                     let verdict: GoalAssessment = serde_json::from_value(artifact.payload.clone())
                         .map_err(|e| invalid(format!("invalid goal assessment: {e}")))?;
-                    let allowed: HashSet<_> = task
-                        .before
-                        .iter()
-                        .chain(&task.after)
-                        .chain([&input.version_id, &candidate.version_id, execution])
-                        .collect();
+                    let allowed = reasoning_context_versions(host, &result)?;
                     validate_assessment_evidence(&verdict, &allowed, &task.after)?;
                     task.assessment = Some(artifact.version_id.clone());
                     task.outcome = Some(self.record_goal_outcome(host, &task, &verdict)?);
@@ -358,7 +326,13 @@ impl TaskRuntime {
                             task.round += 1;
                             task.before = task.after.clone();
                             task.after.clear();
-                            GoalState::Planning
+                            match &config.between_rounds {
+                                Some(crate::task_runtime::scheduler::Activation::OnEvent {
+                                    ..
+                                }) => GoalState::WaitingEvent,
+                                Some(_) => GoalState::WaitingTime,
+                                None => GoalState::Planning,
+                            }
                         }
                         (GoalVerdict::Continue, _) if task.round >= config.max_rounds => {
                             GoalState::BudgetExhausted
@@ -367,9 +341,14 @@ impl TaskRuntime {
                     };
                 }
             }
+            GoalState::WaitingTime | GoalState::WaitingEvent => {
+                if !self.resume_waiting_goal(host, &mut task)? {
+                    return Ok(());
+                }
+            }
             _ => return Ok(()),
         }
-        self.save_goal(&task)
+        self.persist_goal_step(host, config, &task, now_unix_ms)
     }
 
     fn goal_request_id(&self, task: &GoalTask, phase: &str) -> String {
@@ -413,6 +392,9 @@ impl TaskRuntime {
                         &source.id,
                     ],
                 );
+                let query_capability =
+                    self.journal
+                        .goal_query_capability(task.sequence, &route.id, &source.id)?;
                 let query = InputService::new(
                     &self.journal.operator,
                     host.schemas(),
@@ -423,10 +405,7 @@ impl TaskRuntime {
                 .ingest(
                     &AdapterId(RUNTIME_ID.into()),
                     InputMessage {
-                        capability_id: CapabilityId(format!(
-                            "runtime.query.{}.{}",
-                            route.id, source.id
-                        )),
+                        capability_id: query_capability,
                         external_subject: Some(task.input_version_id.0.clone()),
                         external_reference: key,
                         payload: query.payload.clone(),
@@ -551,7 +530,7 @@ pub(super) fn assessment_fields() -> Vec<String> {
 }
 fn validate_assessment_evidence(
     verdict: &GoalAssessment,
-    allowed: &HashSet<&VersionId>,
+    allowed: &HashSet<VersionId>,
     required: &[VersionId],
 ) -> Result<(), HostError> {
     let evidence: HashSet<_> = verdict.evidence_version_ids.iter().collect();
@@ -559,7 +538,7 @@ fn validate_assessment_evidence(
         || verdict.detail.len() > 2000
         || verdict.evidence_version_ids.len() > 32
         || evidence.len() != verdict.evidence_version_ids.len()
-        || !evidence.iter().all(|version| allowed.contains(version))
+        || !evidence.iter().all(|version| allowed.contains(*version))
         || !required.iter().all(|version| evidence.contains(version))
     {
         return Err(invalid(
@@ -594,4 +573,26 @@ pub(super) fn load(host: &Host, version: &VersionId) -> Result<Artifact, HostErr
         .get(version)
         .map_err(HostError::Store)?
         .ok_or_else(|| invalid("missing goal artifact"))
+}
+
+// Evidence may include recalled context, but it must come from the actual
+// immutable Core request. Fresh after-observations remain mandatory separately.
+fn reasoning_context_versions(
+    host: &Host,
+    result: &arcs::reasoning::general::ReasoningResult,
+) -> Result<HashSet<VersionId>, HostError> {
+    let request = load(host, &result.request_version_id)?;
+    if request.schema_id.0 != "arcs.reasoning_request.v2"
+        || request.created_by.id != "arcs.reasoning.v2"
+    {
+        return Err(invalid("invalid goal reasoning request"));
+    }
+    let invocation: arcs::reasoning::ReasoningInvocationV2 =
+        serde_json::from_value(request.payload["invocation"].clone())
+            .map_err(|error| invalid(format!("invalid goal context: {error}")))?;
+    Ok(invocation
+        .context
+        .into_iter()
+        .map(|item| item.version_id)
+        .collect())
 }

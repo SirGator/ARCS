@@ -89,6 +89,31 @@ Arbeitsverzeichnis müssen existieren. Das Elternverzeichnis der Core-
 Datenbank wird angelegt; andere durch Argumente bezeichnete Verzeichnisse
 legt der Host nicht selbst an.
 
+Jeder Adapter startet mit einer begrenzten Basisumgebung. Zusätzliche
+Variablen werden nur über `"inherit_env": ["PLANNER_API_KEY"]` für diesen
+Adapter freigegeben. Ohne diese Liste werden keine Modellschlüssel aus der
+Host-Umgebung übernommen. Details und Hinweise für bestehende Konfigurationen:
+[Prozessumgebung und Schlüssel](examples/process-environment.md).
+
+Aufgabenrouten unterstützen mit `activation` eine dauerhafte Termin- oder
+Ereignisbedingung vor ihrem ersten Schritt. Das
+[Scheduler-Beispiel](examples/scheduled-runtime.md) zeigt Wiederaufnahme und
+den Empfang benötigter Signale bei voller Aufgabenqueue.
+Mit [`goal.between_rounds`](examples/goal-pauses.md) kann auch ein bereits
+laufendes Ziel zwischen abgeschlossenen Runden dauerhaft warten.
+Mit [`dependencies`](examples/task-dependencies.md) warten nachfolgende Routen
+auf alle konfigurierten Voraussetzungen derselben Eingabe und erhalten nur
+deren ausdrücklich ausgewählte Ergebnisfelder.
+Mit [`plan`](examples/dynamic-plans.md) kann ein externer Reasoner einen
+begrenzten Graphen aus freigegebenen Reasoning-Vorlagen auswählen. Die Runtime
+prüft ihn, speichert ihn als Plan-Artefakt und nimmt seine Schritte atomar auf.
+Über [`--plan-command`](examples/dynamic-plans.md#einen-plan-gezielt-abbrechen)
+lassen sich offene Pläne einschließlich ihrer Kindaufträge dauerhaft abbrechen;
+fertige Ergebnisse bleiben erhalten.
+Erzeugte Pläne können auch [manuell freigegebene Goal-Schritte](examples/goal-plans.md)
+enthalten. Sie verwenden die bestehende Zielschleife und exportieren ihre
+Bewertung erst nach bestätigtem Abschluss.
+
 ## Schemas und Berechtigungen
 
 Die allgemeinen Core-Schemas und der hosteigene Vertrag

@@ -51,7 +51,8 @@ zulässige Capabilities, Kontextfelder und Ressourcenbudget. `goal` ergänzt:
 | Feld | Bedeutung |
 | --- | --- |
 | `max_rounds` | Höchstens 1–1000 Aktions-/Bewertungsrunden je Aufgabe |
-| `initial_assessment` | Optionaler externer Zielcheck vor dem ersten Vorschlag; Standard false |
+| `initial_assessment` | Optionaler externer Zielcheck vor dem ersten Vorschlag und nach einer Wartepause; Standard false |
+| `between_rounds` | Optionales Warten auf einen Termin oder ein frisches Ereignis zwischen abgeschlossenen Runden |
 | `max_wait_ticks` | Höchstens 1–10.000 Erfassungsversuche je Quellenphase |
 | `sources` | 1–16 explizite Request-/Observe-Quellen mit ausgewählten Payloadfeldern |
 | `actions` | Erlaubte Act-Capabilities mit je einem zusätzlichen `verification_schema_id` |
@@ -64,6 +65,10 @@ Aktionskandidat verwendet das konfigurierte fachliche Kandidatenschema und
 verlangt genau eine der erlaubten Act-Capabilities. Alle Aktionsziele einer
 Route müssen dieses Schema akzeptieren und idempotente Ausführung anbieten.
 Andere Aufgaben können andere Schemas und Ziele verwenden.
+
+[Wartepausen zwischen Zielrunden](goal-pauses.md) verwenden denselben
+Scheduler wie die anfängliche Aktivierung. Nach dem Wecken werden aktuelle
+Daten erfasst und neue Handlungsvorschläge erneut geprüft und freigegeben.
 
 Die Verification prüft Planner-Herkunft, Aufgabe, alle ausgewählten
 Quellenreferenzen, freigeschaltete Capability und den zusätzlichen

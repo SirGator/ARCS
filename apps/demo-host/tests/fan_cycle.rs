@@ -309,7 +309,7 @@ fn disabled_action_capability_is_checked_even_for_completed_actions() {
     let mut restricted = grant();
     restricted.enabled_capabilities.retain(|c| c.0 != "fan.set");
     restricted.granted_permissions.retain(|p| p != "fan.write");
-    let mut adapter = StdioAdapter::connect(
+    let adapter = StdioAdapter::connect(
         &mut h.simulator(&h.path("adapter.sqlite")),
         Duration::from_secs(3),
         restricted,

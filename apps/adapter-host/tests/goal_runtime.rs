@@ -1,147 +1,17 @@
+#[path = "support/goals.rs"]
+mod goal_support;
+#[path = "support/memory.rs"]
+mod memory;
 mod support;
-
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
+use goal_support::Fixture;
 
 use arcs::approval::ApprovalDecision;
 use arcs::core::{Actor, ActorType, VersionId};
 use arcs_host::Host;
+use arcs_host::task_runtime::TaskRuntime;
 use arcs_host::task_runtime::goal::{GoalState, GoalTask};
-use arcs_host::task_runtime::{RuntimeConfig, TaskRuntime};
 use serde_json::{Value, json};
 
-struct Fixture {
-    directory: PathBuf,
-}
-impl Fixture {
-    fn assessor_peer(&self, mode: &str) {
-        let script = r#"import json, sys
-for line in sys.stdin:
-    packet=json.loads(line); message=packet['message']; kind=message['type']
-    if kind=='hello':
-        reply={'type':'manifest','manifest':{'protocol_version':1,'adapter_id':'goal.assessor','adapter_version':'0.1.0','capabilities':[{'id':'solution.propose','contract':{'kind':'reason','emits':['arcs.goal_assessment_candidate.v1']},'required_permissions':['reason.compute']}]}}
-    elif kind=='reason_v2':
-        inv=message['invocation']; goal=inv['constraints']['goal_runtime']; mode=sys.argv[1]
-        evidence=list(goal['after'].values())
-        if mode=='stale': evidence=list(goal['before'].values())
-        if mode=='invented': evidence=['not-an-observation']
-        payload={'goal_status':'achieved','effect':'unknown' if mode=='unknown' else 'success','detail':'external test assessment','evidence_version_ids':evidence}
-        response={'invocation_id':inv['invocation_id'],'request_id':inv['request_id'],'status':'solved','candidates':[{'schema_id':inv['target_schema_id'],'required_capabilities':[],'referenced_versions':[c['version_id'] for c in inv['context']],'payload':payload}],'trace':{'method':inv['method'],'implementation':'assessment-peer','version':'1','iterations':1,'output_tokens':None,'details':{}}}
-        if mode=='no_solution': response['status']='no_solution';response['candidates']=[]
-        reply={'type':'reasoning_result_v2','response':response}
-    elif kind=='shutdown': reply={'type':'bye'}
-    else: raise RuntimeError(kind)
-    print(json.dumps({'protocol_version':1,'request_id':packet['request_id'],'message':reply}),flush=True)
-    if kind=='shutdown': break
-"#;
-        std::fs::write(self.directory.join("assessor.py"), script).unwrap();
-        let mut config = self.read("host.json");
-        config["adapters"][3] = json!({"program":"/usr/bin/python3","args":[{"path":"assessor.py"},mode],"grant_file":"assessor-grant.json","timeout_ms":15000});
-        self.write("host.json", config);
-    }
-    fn new() -> Self {
-        Self::example("goals")
-    }
-    fn example(example: &str) -> Self {
-        static NEXT: AtomicU64 = AtomicU64::new(1);
-        let directory = std::env::temp_dir().join(format!(
-            "arcs-goal-{}-{}",
-            std::process::id(),
-            NEXT.fetch_add(1, Ordering::Relaxed)
-        ));
-        std::fs::create_dir(&directory).unwrap();
-        let source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("config")
-            .join(example);
-        for file in std::fs::read_dir(&source).unwrap() {
-            let file = file.unwrap();
-            std::fs::copy(file.path(), directory.join(file.file_name())).unwrap();
-        }
-        let fixture = Self { directory };
-        let mut host = fixture.read("host.json");
-        host["database"] = json!(fixture.directory.join("core.sqlite"));
-        for schema in host["schemas"].as_array_mut().unwrap() {
-            *schema = json!(
-                source
-                    .join(schema.as_str().unwrap())
-                    .canonicalize()
-                    .unwrap()
-            );
-        }
-        for adapter in host["adapters"].as_array_mut().unwrap() {
-            let name = PathBuf::from(adapter["program"].as_str().unwrap())
-                .file_name()
-                .unwrap()
-                .to_str()
-                .unwrap()
-                .to_owned();
-            adapter["program"] = json!(support::adapter_binary(&name));
-            let profile = adapter["profile"].as_str().unwrap();
-            adapter["args"][0] =
-                json!({"path":fixture.directory.join(profile.replace("-profile.json", ".sqlite"))});
-        }
-        fixture.write("host.json", host);
-        let mut runtime = fixture.read("runtime.json");
-        runtime["journal"] = json!(fixture.directory.join("runtime.sqlite"));
-        runtime["max_jobs_per_tick"] = json!(1);
-        runtime["interval_ms"] = json!(1);
-        fixture.write("runtime.json", runtime);
-        fixture
-    }
-    fn read(&self, name: &str) -> Value {
-        serde_json::from_slice(&std::fs::read(self.directory.join(name)).unwrap()).unwrap()
-    }
-    fn text(text: &str) -> Self {
-        let fixture = Self::example("text-tasks");
-        let mut profile = fixture.read("input-profile.json");
-        profile["events"] = json!([{"id":"text-1","subject":"text-1","reference":"task:text-1","payload":{"raw_text":text}}]);
-        fixture.write("input-profile.json", profile);
-        fixture
-    }
-    fn write(&self, name: &str, value: Value) {
-        std::fs::write(
-            self.directory.join(name),
-            serde_json::to_vec_pretty(&value).unwrap(),
-        )
-        .unwrap();
-    }
-    fn host(&self) -> Host {
-        Host::open(self.directory.join("host.json")).unwrap()
-    }
-    fn runtime(&self, host: &Host) -> TaskRuntime {
-        TaskRuntime::open(
-            host,
-            RuntimeConfig::load(self.directory.join("runtime.json")).unwrap(),
-        )
-        .unwrap()
-    }
-    fn db(&self, name: &str) -> rusqlite::Connection {
-        rusqlite::Connection::open(self.directory.join(format!("{name}.sqlite"))).unwrap()
-    }
-    fn manual(&self) {
-        let mut config = self.read("runtime.json");
-        config["routes"][0]["goal"]["approval"] = json!({"mode":"manual"});
-        self.write("runtime.json", config);
-    }
-    fn with_observer(&self, temperature: bool) {
-        let mut config = self.read("runtime.json");
-        let source = if temperature {
-            json!({"id":"ambient","capability":{"adapter_id":"demo.fan","capability_id":"temperature.observe"},"schema_id":"arcs.measurement.temperature.v1","payload_fields":["value","unit"]})
-        } else {
-            json!({"id":"observed-fan","capability":{"adapter_id":"demo.fan","capability_id":"fan.observe"},"schema_id":"arcs.state.fan.v1","payload_fields":["device_id","enabled","actuation_count"]})
-        };
-        config["routes"][0]["goal"]["sources"]
-            .as_array_mut()
-            .unwrap()
-            .push(source);
-        self.write("runtime.json", config);
-    }
-}
-impl Drop for Fixture {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.directory);
-    }
-}
 fn task(runtime: &TaskRuntime) -> GoalTask {
     runtime.goals_after(0, 100).unwrap().remove(0)
 }
@@ -726,5 +596,149 @@ fn understanding_text_does_not_replace_a_manual_approval() {
     let done = until(&mut host, &mut runtime, GoalState::terminal);
     assert_eq!(done.state, GoalState::Completed);
     assert_eq!(actuations(&fixture), 1);
+    host.shutdown().unwrap();
+}
+
+#[test]
+fn parallel_reasoning_preserves_goal_gates_fresh_evidence_and_action_replay() {
+    let fixture = Fixture::new();
+    fixture.with_observer(false);
+    let mut config = fixture.read("runtime.json");
+    config["max_concurrent_reasoning"] = json!(2);
+    fixture.write("runtime.json", config);
+    let mut host = fixture.host();
+    let mut runtime = fixture.runtime(&host);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    loop {
+        runtime.tick(&mut host).unwrap();
+        if task(&runtime).state.terminal() {
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline, "{:?}", task(&runtime));
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    let completed = task(&runtime);
+    assert_eq!(completed.state, GoalState::Completed);
+    assert_eq!(completed.round, 2);
+    assert_eq!(completed.after.len(), 2);
+    assert_eq!(actuations(&fixture), 2);
+    assert_eq!(count(&host, "approval"), 2);
+    assert_eq!(count(&host, "action"), 2);
+    assert_eq!(count(&host, "outcome"), 2);
+    let artifacts = host.report().unwrap().stored_artifacts;
+    host.shutdown().unwrap();
+    drop(runtime);
+    drop(host);
+    let mut host = fixture.host();
+    let mut runtime = fixture.runtime(&host);
+    for _ in 0..5 {
+        runtime.tick(&mut host).unwrap();
+    }
+    assert_eq!(task(&runtime).state, GoalState::Completed);
+    assert_eq!(task(&runtime).outcome, completed.outcome);
+    assert_eq!(actuations(&fixture), 2);
+    // Observer events may grow the store; action and outcome counts stay fixed.
+    assert!(host.report().unwrap().stored_artifacts >= artifacts);
+    assert_eq!(count(&host, "action"), 2);
+    assert_eq!(count(&host, "outcome"), 2);
+    host.shutdown().unwrap();
+}
+
+#[test]
+fn parallel_goal_rejects_invalid_assessment_and_persists_a_failed_checkpoint() {
+    let fixture = Fixture::new();
+    fixture.assessor_peer("stale");
+    let mut config = fixture.read("runtime.json");
+    config["max_concurrent_reasoning"] = json!(2);
+    fixture.write("runtime.json", config);
+    let mut host = fixture.host();
+    let mut runtime = fixture.runtime(&host);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    loop {
+        runtime.tick(&mut host).unwrap();
+        if task(&runtime).state.terminal() {
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline, "{:?}", task(&runtime));
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert_eq!(task(&runtime).state, GoalState::Failed);
+    assert!(task(&runtime).detail.contains("fresh source"));
+    assert_eq!(runtime.report(0).unwrap().failed_jobs, 1);
+    assert_eq!(runtime.report(0).unwrap().pending_jobs, 0);
+    assert_eq!(actuations(&fixture), 1);
+    for _ in 0..5 {
+        runtime.tick(&mut host).unwrap();
+    }
+    assert_eq!(actuations(&fixture), 1);
+    host.shutdown().unwrap();
+}
+
+#[test]
+fn recalled_memory_augments_planning_and_assessment_without_replacing_fresh_evidence() {
+    let fixture = Fixture::new();
+    let mut config = fixture.read("runtime.json");
+    config["max_concurrent_reasoning"] = json!(2);
+    config["routes"][0]["memory"] = memory::policy("project:goal");
+    fixture.write("runtime.json", config);
+    let mut host = fixture.host();
+    let remembered = memory::append(&host, "goal-memory", "project:goal");
+    let mut runtime = fixture.runtime(&host);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    loop {
+        runtime.tick(&mut host).unwrap();
+        if task(&runtime).state.terminal() {
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline, "{:?}", task(&runtime));
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert_eq!(task(&runtime).state, GoalState::Completed);
+    assert_eq!(actuations(&fixture), 2);
+    let snapshots = memory::snapshots(&host);
+    assert_eq!(snapshots.len(), 4);
+    for saved in snapshots {
+        assert!(
+            saved.payload["selected"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|item| item["selection"]["version_id"] == remembered.version_id.0)
+        );
+    }
+    assert_eq!(count(&host, "approval"), 2);
+    assert_eq!(count(&host, "outcome"), 2);
+    host.shutdown().unwrap();
+}
+
+#[test]
+fn a_scheduled_goal_still_requires_verification_and_manual_approval_after_waking() {
+    let fixture = Fixture::new();
+    fixture.manual();
+    let mut config = fixture.read("runtime.json");
+    config["routes"][0]["activation"] = json!({"kind":"after_delay","delay_ms":7_776_000_000_u64});
+    fixture.write("runtime.json", config);
+    let mut host = fixture.host();
+    let mut runtime = fixture.runtime(&host);
+    runtime.tick_at(&mut host, 1_800_000_000_000).unwrap();
+    assert_eq!(runtime.report(0).unwrap().waiting_time, 1);
+    assert!(runtime.goals_after(0, 10).unwrap().is_empty());
+    assert_eq!(count(&host, "candidate"), 0);
+    assert_eq!(actuations(&fixture), 0);
+    host.shutdown().unwrap();
+    drop(runtime);
+    drop(host);
+
+    let mut host = fixture.host();
+    let mut runtime = fixture.runtime(&host);
+    for _ in 0..10 {
+        runtime.tick_at(&mut host, 1_807_776_000_000).unwrap();
+    }
+    assert_eq!(task(&runtime).state, GoalState::AwaitingApproval);
+    assert!(task(&runtime).verification.is_some());
+    assert!(task(&runtime).approval.is_none());
+    assert_eq!(actuations(&fixture), 0);
+    assert_eq!(runtime.report(0).unwrap().waiting_time, 0);
+    assert_eq!(runtime.report(0).unwrap().awaiting_approval, 1);
     host.shutdown().unwrap();
 }

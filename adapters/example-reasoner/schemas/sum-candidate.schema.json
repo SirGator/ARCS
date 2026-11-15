@@ -1,0 +1,10 @@
+{
+  "$id": "arcs.solution_candidate.sum.v1",
+  "type": "object",
+  "required": ["sum", "count"],
+  "properties": {
+    "sum": {"type": "number"},
+    "count": {"type": "integer", "minimum": 1, "maximum": 32}
+  },
+  "additionalProperties": false
+}

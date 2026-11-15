@@ -5,6 +5,7 @@ pub mod edge;
 pub mod network;
 pub mod relation;
 pub mod relations;
+pub mod retrieval;
 
 pub use database::*;
 pub use edge::*;

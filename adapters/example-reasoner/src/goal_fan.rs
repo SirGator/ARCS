@@ -40,7 +40,8 @@ pub fn reason(invocation: &ReasoningInvocationV2) -> Result<ReasoningResponseV2,
         .filter(|item| item.schema_id.0 == STATE && item.payload["device_id"] == task.device_id)
         .collect();
     let metadata = &invocation.constraints["goal_runtime"];
-    let phase = if invocation.target_schema_id.0 == ASSESSMENT {
+    let checking = metadata["phase"] == "check";
+    let phase = if invocation.target_schema_id.0 == ASSESSMENT && !checking {
         "after"
     } else {
         "before"
@@ -69,6 +70,12 @@ pub fn reason(invocation: &ReasoningInvocationV2) -> Result<ReasoningResponseV2,
                 vec![capability.clone()],
             )
         }
+        ASSESSMENT if checking => (
+            json!({"goal_status":if count >= task.minimum_actuations && enabled == task.enabled {"achieved"} else {"continue"},
+                "effect":"unknown","detail":"check the requested goal against current observed state before proposing another action",
+                "evidence_version_ids":states.iter().map(|state| state.version_id.clone()).collect::<Vec<_>>()}),
+            vec![],
+        ),
         ASSESSMENT => {
             let execution = invocation
                 .context

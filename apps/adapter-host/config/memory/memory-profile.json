@@ -1,0 +1,25 @@
+{
+  "adapter_id": "memory.input",
+  "capability_id": "memory.capture",
+  "schema_id": "arcs.note.project_memory.v1",
+  "events": [
+    {
+      "id": "project-result-1",
+      "subject": "project-nearest",
+      "reference": "memory:nearest:1",
+      "payload": {
+        "body": "Der letzte geprüfte Lauf fand den nächsten Wert durch vollständigen Vergleich. Der neue Auftrag muss erneut geprüft werden.",
+        "private_note": "Dieses Feld bleibt ausschließlich im Store."
+      }
+    },
+    {
+      "id": "other-project-1",
+      "subject": "project-other",
+      "reference": "memory:other:1",
+      "payload": {
+        "body": "Notiz eines anderen Projekts; für diese Route nicht freigegeben.",
+        "private_note": "Nicht an den Reasoner senden."
+      }
+    }
+  ]
+}

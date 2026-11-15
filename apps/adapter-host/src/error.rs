@@ -12,6 +12,7 @@ use arcs::world::ReduceError;
 
 #[derive(Debug)]
 pub enum HostError {
+    AdapterBusy(AdapterId),
     Reasoning(arcs::reasoning::ReasoningError),
     Output {
         adapter: AdapterId,
@@ -59,6 +60,11 @@ pub enum HostError {
 impl fmt::Display for HostError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::AdapterBusy(adapter) => write!(
+                f,
+                "adapter {} is reserved by an active operation",
+                adapter.0
+            ),
             Self::Reasoning(source) => write!(f, "reasoning: {source:?}"),
             Self::Output { adapter, source } => {
                 write!(f, "adapter {} output: {source:?}", adapter.0)

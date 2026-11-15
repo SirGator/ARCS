@@ -15,8 +15,36 @@ werden. Vorschläge werden vor einer Wirkung verifiziert, freigegeben und
 
 > **Projektstatus:** frühe Entwicklung (`0.1.0`). Der erste vertikale
 > World-Model-Slice und die kontrollierte Proposal-to-Action-Pipeline sind
-> implementiert. Goals, eigenständige Skills und ein gelerntes
-> kostenoptimierendes Routing sind noch Roadmap.
+> implementiert. Eine begrenzte Goal-Runtime und konfigurierbares paralleles
+> Reasoning sind vorhanden. Allgemeine Langzeitplanung, eigenständige Skills
+> und gelerntes kostenoptimierendes Routing bleiben Roadmap.
+
+Die [technische Gesamtarchitektur v3.0](docs/ARCHITECTURE.md)
+hält das langfristige Zielbild und die Anforderungen an Heterarchie,
+Parallelität, Artifact-Gedächtnis und mehrmonatige Aufgaben fest.
+Sie ist die maßgebliche Grundlage für die weitere Implementierung.
+Der [Implementierungsplan v2.0](docs/IMPLEMENTATION_PLAN.md)
+hält die weiteren Aufgaben und den aktuellen Implementierungsstand fest.
+Der [Zwischenbericht vom 16. November 2026](docs/ZWISCHENBERICHT_2026-11-16.md)
+fasst die bisherige Umsetzung, ihre Prüfergebnisse und die offenen Grenzen zusammen.
+
+Der [Gedächtnisabruf](apps/adapter-host/examples/artifact-memory.md) ergänzt
+Reasoning-Kontext aus dem gemeinsamen Artifact-Netz. Er begrenzt Suche und
+Payloadfelder und speichert die Auswahl für Wiederaufnahme und parallele Aufrufe.
+
+Die [Termin- und Ereignisaktivierung](apps/adapter-host/examples/scheduled-runtime.md)
+lässt Aufgaben ohne belegten Reasoning-Worker auf Termine oder externe Signale
+warten und erhält ihre Aktivierungsbedingungen über Neustarts.
+[Wartephasen zwischen Zielrunden](apps/adapter-host/examples/goal-pauses.md)
+ermöglichen wiederholte Pausen innerhalb einer Aufgabe. Nach dem Wecken erfasst
+ARCS neue Daten und prüft neue Handlungsvorschläge erneut.
+[Teilaufgaben mit Abhängigkeiten](apps/adapter-host/examples/task-dependencies.md)
+erlauben parallele Zweige mit anschließender Zusammenführung ausgewählter
+Ergebnisfelder im selben persistenten Ablauf.
+[Dynamische Pläne](apps/adapter-host/examples/dynamic-plans.md)
+werden von einem externen Reasoner vorgeschlagen, gegen einen freigegebenen
+Vorlagenkatalog geprüft und als unveränderliche Artefakte ausgeführt.
+Sie unterstützen auch [Goal-Schritte mit manueller Freigabe](apps/adapter-host/examples/goal-plans.md).
 
 ## Projektstruktur
 
@@ -337,12 +365,12 @@ Observation → Belief Update → Goal → Memory/Skill Retrieval
 | Append-only SQLite-Store und deterministisches Replay | Implementiert |
 | Artifact-Netz als bekannter Fast Path | Implementiert |
 | Externe Kamera und Pixel-Suche | In `../drone-sim`: zielunabhängige Kamera und separater Rules-Reasoner mit ausgewählten Bildbytes; noch keine autonome Suche |
-| Dauerhafte Aufgabenverarbeitung | Konfigurierbare Input-/Observe-zu-Reason-Routen, persistente Queue, Wiederaufnahme und Review-Übergabe; serielles Polling |
+| Dauerhafte Aufgabenverarbeitung | Konfigurierbare Input-/Observe-zu-Reason-Routen, persistente Queue, Wiederaufnahme und Review-Übergabe; optional begrenztes [paralleles Reasoning](apps/adapter-host/examples/parallel-runtime.md), Polling weiterhin seriell |
 | Allgemeine Zielschleife | Optional pro Route: externe Planung und Bewertung, kontrollierte Aktionen, frische Quellen, Wiederaufnahme und Rundenbudget; Lüftertest nachgewiesen |
 | Kuratiertes Reasoning | V1-Modellfall und allgemeiner V2-Port; externe Solver und Modell-Testadapter, noch kein echter Modellanbieter |
 | Verification → Approval → Action → Execution → Outcome | Implementiert |
 | Explizite Goals und maschinenprüfbare Zielbedingungen | Aufgabensteuerung vorhanden; Zielbedeutung und Wirkungsprüfung über konfigurierte externe Reasoner, kein universeller Beweisprüfer |
-| Episodisches Memory und wiederverwendbare Skills | Geplant |
+| Artifact-Gedächtnis und wiederverwendbare Skills | Begrenzter Graph-/Metadatenabruf mit eingefrorenem Kontext implementiert; semantische Suche, Konsolidierung und Skills bleiben geplant |
 | Gelerntes Kosten-/Latenz-/Risiko-Routing | Geplant |
 | Kalibrierte Sensorfusion und probabilistischer Belief State | Geplant |
 

@@ -1,0 +1,6 @@
+{
+  "adapter_id": "schedule.events",
+  "capability_id": "task.submit",
+  "schema_id": "arcs.task.nearest.v1",
+  "events": []
+}

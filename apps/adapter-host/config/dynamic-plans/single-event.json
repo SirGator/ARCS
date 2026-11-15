@@ -1,0 +1,11 @@
+{
+  "id": "single-plan",
+  "subject": "single-plan",
+  "reference": "task:single-plan",
+  "payload": {
+    "values": [
+      9
+    ],
+    "target": 8
+  }
+}

@@ -15,6 +15,7 @@ import threading
 from dataclasses import dataclass
 
 from .input_bridge import configured_inputs, connected_inputs, make_submission, enqueue_submission
+from .process_environment import process_environment, inherited_environment, validate_names
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -40,9 +41,11 @@ def read_configuration(configuration: Configuration) -> dict:
     if not isinstance(database, str) or not database.strip():
         raise ValueError("In der Host-Konfiguration fehlt der Datenbankpfad.")
     preview, programs, names = [], [], set()
+    inherit_env = []
     for adapter in adapters:
         if not isinstance(adapter, dict) or not isinstance(adapter.get("grant_file"), str):
             raise ValueError("Ein Adapter hat keine gültige Grant-Datei.")
+        inherit_env.extend(validate_names(adapter.get("inherit_env", [])))
         grant_path = host.parent / adapter["grant_file"]
         with grant_path.open(encoding="utf-8") as reader:
             grant = json.load(reader)
@@ -63,7 +66,7 @@ def read_configuration(configuration: Configuration) -> dict:
         if not isinstance(runtime, dict) or runtime.get("config_version") != 1:
             raise ValueError("Die Aufgaben-Runtime benötigt config_version 1.")
     return {"database": (host.parent / database).resolve(), "adapters": preview, "programs": programs,
-        "input_candidates": configured_inputs(host, adapters)}
+        "input_candidates": configured_inputs(host, adapters), "inherit_env": list(dict.fromkeys(inherit_env))}
 
 
 class SessionController:
@@ -153,7 +156,7 @@ class SessionController:
         process = subprocess.Popen(command, cwd=self.root, stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8",
             errors="replace", start_new_session=True, bufsize=1,
-            env={**os.environ, **environment} if environment is not None else None)
+            env=process_environment(environment) if json_events else None)
         with self._lock:
             self._process = process
             if self._stop.is_set() and not json_events and process.poll() is None:
@@ -235,7 +238,9 @@ class SessionController:
                         "--monitor", "--stop-file", str(stop_file)]
                     if configuration.runtime:
                         command += ["--runtime", str(configuration.runtime.expanduser().resolve())]
-                    environment = credentials(configuration) if credentials else None
+                    environment = inherited_environment(preview["inherit_env"])
+                    if credentials:
+                        environment.update(credentials(configuration))
                     result = self._run_process(command, True, environment)
                     if result and not self._stop.is_set():
                         raise RuntimeError(f"ARCS wurde mit Status {result} beendet. Details stehen im Protokoll.")

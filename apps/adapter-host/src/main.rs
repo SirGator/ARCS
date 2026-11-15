@@ -7,7 +7,13 @@ use arcs_host::Host;
 use arcs_host::task_runtime::{RuntimeConfig, TaskRuntime};
 use serde::Deserialize;
 
-const USAGE: &str = "usage: arcs-host --config <host.json> [--list-adapters | [--monitor --stop-file <path>] [--runtime <runtime.json>] [--ticks <count>] [--stop-file <path>] | --runtime <runtime.json> --goal-command <command.json>]";
+const USAGE: &str = "usage: arcs-host --config <host.json> [--list-adapters | [--monitor --stop-file <path>] [--runtime <runtime.json>] [--ticks <count>] [--stop-file <path>] | --runtime <runtime.json> [--goal-command <command.json> | --plan-command <command.json>]]";
+
+#[derive(Deserialize)]
+#[serde(tag = "command", rename_all = "snake_case", deny_unknown_fields)]
+enum PlanCommand {
+    Cancel { sequence: u64, reason: String },
+}
 
 #[derive(Deserialize)]
 #[serde(tag = "command", rename_all = "snake_case", deny_unknown_fields)]
@@ -64,6 +70,7 @@ fn run() -> Result<(), String> {
     let mut list_adapters = false;
     let mut monitor = false;
     let mut goal_command = None;
+    let mut plan_command = None;
     let mut args = args.into_iter();
     while let Some(argument) = args.next() {
         if argument == "--list-adapters" && !list_adapters {
@@ -90,17 +97,31 @@ fn run() -> Result<(), String> {
             stop_file = Some(PathBuf::from(value));
         } else if argument == "--goal-command" && goal_command.is_none() {
             goal_command = Some(PathBuf::from(value));
+        } else if argument == "--plan-command" && plan_command.is_none() {
+            plan_command = Some(PathBuf::from(value));
         } else {
             return Err(USAGE.into());
         }
     }
     let config = config.ok_or(USAGE)?;
-    if goal_command.is_some()
-        && (runtime.is_none() || list_adapters || monitor || ticks.is_some() || stop_file.is_some())
+    if (goal_command.is_some() && plan_command.is_some())
+        || (goal_command.is_some() || plan_command.is_some())
+            && (runtime.is_none()
+                || list_adapters
+                || monitor
+                || ticks.is_some()
+                || stop_file.is_some())
     {
         return Err(USAGE.into());
     }
     let goal_command: Option<GoalCommand> = goal_command
+        .map(|path| {
+            std::fs::read(path)
+                .map_err(|e| e.to_string())
+                .and_then(|bytes| serde_json::from_slice(&bytes).map_err(|e| e.to_string()))
+        })
+        .transpose()?;
+    let plan_command: Option<PlanCommand> = plan_command
         .map(|path| {
             std::fs::read(path)
                 .map_err(|e| e.to_string())
@@ -137,7 +158,12 @@ fn run() -> Result<(), String> {
         serde_json::to_value(catalog)
     } else if let Some(config) = runtime {
         let mut runtime = TaskRuntime::open(&host, config).map_err(|e| e.to_string())?;
-        let report = if let Some(command) = goal_command {
+        let report = if let Some(PlanCommand::Cancel { sequence, reason }) = plan_command {
+            runtime
+                .cancel_plan(&mut host, sequence, reason)
+                .map_err(|e| e.to_string())?;
+            runtime.report(0).map_err(|e| e.to_string())?
+        } else if let Some(command) = goal_command {
             match command {
                 GoalCommand::Review {
                     sequence,

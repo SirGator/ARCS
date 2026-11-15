@@ -12,6 +12,7 @@ use crate::HostError;
 pub(crate) const HOST_ID: &str = "arcs.host";
 pub(crate) const PIPELINE_ID: &str = "arcs.host.pipeline";
 pub(crate) const RUNTIME_ID: &str = "arcs.host.runtime";
+pub(crate) const PLAN_ID: &str = "arcs.host.plan";
 pub(crate) const DEFINITION_SCHEMA: &str = "arcs.input.host_request.v1";
 pub(crate) const TRANSFORM_DEFINITION_SCHEMA: &str = "arcs.input.host_transform.v1";
 
@@ -48,6 +49,9 @@ pub struct AdapterConfig {
     pub program: PathBuf,
     #[serde(default)]
     pub args: Vec<Argument>,
+    /// Namen freigegebener Variablen; Werte werden niemals gespeichert.
+    #[serde(default)]
+    pub inherit_env: Vec<String>,
     pub profile: Option<PathBuf>,
     pub working_directory: Option<PathBuf>,
     pub grant_file: PathBuf,
@@ -129,6 +133,7 @@ pub(crate) struct PreparedConfig {
 pub(crate) struct PreparedAdapter {
     pub program: PathBuf,
     pub args: Vec<OsString>,
+    pub inherit_env: Vec<String>,
     pub working_directory: PathBuf,
     pub grant: AdapterGrant,
     pub timeout_ms: u64,
@@ -256,6 +261,7 @@ impl PreparedConfig {
         let mut request_ids = HashSet::new();
         let mut adapters = Vec::new();
         for adapter in config.adapters {
+            crate::process_environment::validate(&adapter.inherit_env)?;
             if !(1..=3_600_000).contains(&adapter.timeout_ms) {
                 return Err(invalid("timeout_ms must be 1..3600000"));
             }
@@ -287,7 +293,7 @@ impl PreparedConfig {
                 });
             }
             let grant: AdapterGrant = read_json(&resolve(base, &adapter.grant_file)?)?;
-            if [HOST_ID, PIPELINE_ID, RUNTIME_ID].contains(&grant.adapter_id.0.as_str())
+            if [HOST_ID, PIPELINE_ID, RUNTIME_ID, PLAN_ID].contains(&grant.adapter_id.0.as_str())
                 || !adapter_ids.insert(grant.adapter_id.clone())
             {
                 return Err(invalid(format!(
@@ -423,6 +429,7 @@ impl PreparedConfig {
             adapters.push(PreparedAdapter {
                 program,
                 args,
+                inherit_env: adapter.inherit_env,
                 working_directory,
                 grant,
                 timeout_ms: adapter.timeout_ms,

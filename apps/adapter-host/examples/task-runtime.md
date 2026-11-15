@@ -1,10 +1,32 @@
 # Dauerhafte Aufgabenverarbeitung
 
-`arcs-host --runtime` ergänzt den bisherigen begrenzten Host um eine dauerhafte,
-synchrone Polling-Schleife. Neue Inputs und Beobachtungen werden anhand einer
+`arcs-host --runtime` ergänzt den bisherigen begrenzten Host um eine dauerhafte
+Polling-Schleife. Neue Inputs und Beobachtungen werden anhand einer
 expliziten Konfiguration Reasonern zugeordnet. Das Beispiel verwendet die
 bestehende JSON-Eingabe und den mathematischen Solver. Fachliche Geräte- und
 Solverlogik bleiben in den Adaptern.
+
+Mit `max_concurrent_reasoning` ab 2 laufen unabhängige Reasoning-Aufrufe
+begrenzt parallel. Standard 1 erhält den synchronen Betrieb. Der
+[Parallelitätsnachweis](parallel-runtime.md) beschreibt Ressourcenreservierung,
+Fehlerisolierung und Wiederaufnahme.
+
+Die optionale Route-Einstellung `memory` ergänzt den Pflichtkontext aus dem
+gemeinsamen Artifact-Netz. Der [Gedächtnisnachweis](artifact-memory.md) beschreibt
+Scope-Grenzen, Größenbudgets und die unveränderte Auswahl nach einem Neustart.
+
+Die optionale Route-Einstellung `activation` lässt Aufgaben vor ihrem ersten
+Schritt dauerhaft auf einen Termin oder ein Ereignis warten. Der
+[Scheduler-Nachweis](scheduled-runtime.md) beschreibt Fälligkeiten, Wiederaufnahme
+und den Empfang von Weckereignissen bei voller Aufgabenqueue.
+
+Mit [`dependencies`](task-dependencies.md) können Routen derselben Eingabe
+unabhängig rechnen und anschließend ihre ausgewählten Ergebnisse einer
+nachfolgenden Route bereitstellen. Der begrenzte Graph wird dauerhaft gespeichert.
+
+Die optionale Einstellung [`plan`](dynamic-plans.md) lässt einen externen
+Reasoner den Graphen aus Betreiber-Vorlagen vorschlagen. Queuekapazität für
+seine maximalen Schritte wird bereits bei der Aufgabenaufnahme reserviert.
 
 ```text
 Input / Observe → Core-Log mit ACK
@@ -72,10 +94,12 @@ Geordnetes Beenden:
 touch /tmp/arcs-nearest.stop
 ```
 
-Der Host prüft die Datei zwischen Runden und während der Pausen. Ein laufender
-Dialog ist weiterhin durch seine Deadline begrenzt; die Stop-Datei unterbricht
-keine laufende Runde. Deren gesamte Dialoganzahl und Deadlines bestimmen die
-maximale Reaktionszeit. Danach beendet er die
+Der Host prüft die Datei zwischen Runden und während der Pausen. Im synchronen
+Betrieb bleibt ein laufender Dialog durch seine Deadline begrenzt; die Stop-Datei
+unterbricht keine laufende Runde. Im parallelen Modus wartet die Runde nicht
+auf Reasoning-Antworten. Beim anschließenden Shutdown werden noch aktive lokale
+Reasoning-Dialoge abgebrochen. Andere synchrone Ports begrenzen weiterhin die
+Reaktionszeit ihrer Runde. Danach beendet er die
 Adapter und gibt seinen Bericht aus. Vor einem weiteren Dauerlauf muss die
 von dir erzeugte Stop-Datei wieder entfernt werden. Ein harter Prozessabbruch
 unterbricht den aktuellen Dialog; die gespeicherte Aufgabe bleibt wiederaufnehmbar.
@@ -98,6 +122,7 @@ Transform-Aufrufe des begrenzten Hosts werden dabei nicht automatisch ausgeführ
 | `interval_ms` | Pause zwischen Runden, 1–60.000 ms; Standard 100 |
 | `max_events_per_tick` | Größe einer Core-Logseite, 1–10.000; Standard 1000; höchstens zwei Seiten je Runde |
 | `max_jobs_per_tick` | Maximale bearbeitete Aufgaben/Schritte je Runde, 1–1000; Standard 100 |
+| `max_concurrent_reasoning` | 1–32; Standard 1 erhält synchronen Betrieb, ab 2 laufen Reasoning-Aufrufe begrenzt parallel |
 | `max_pending_jobs` | Offene Aufgaben, mindestens Anzahl der Routen, höchstens 100.000; Standard 1000 |
 | `routes` | 1–32 Zuordnungen mit eindeutigen IDs |
 
@@ -156,8 +181,9 @@ idempotenter Speicherung fortgeschrieben werden. Auch `no_solution` und
 `budget_exhausted` sind gespeicherte Ergebnisse mit leerer Kandidatenliste.
 
 `TaskRuntime::run` unterstützt einen Stop-Callback und optional eine Rundenzahl.
-Die Runtime hält Verbindungen offen und verarbeitet seriell. Sie umfasst kein
-Push-Protokoll, keine parallele Reasoner-Ausführung, keine automatische Modellwahl
+Die Runtime hält Verbindungen offen. Unabhängiges Reasoning kann mit dem oben
+beschriebenen Worker-Limit parallel laufen; andere Ports bleiben synchron.
+Sie umfasst kein Push-Protokoll, keine automatische Modellwahl
 und keine implizite Action-/Output-Policy. Goal-Aktionen benötigen die oben
 beschriebene ausdrückliche Konfiguration. Die Host-Inputberichte enthalten
 im Dauerbetrieb nur die letzte Empfangsrunde statt einer unbegrenzten In-Memory-Liste.

@@ -5,6 +5,7 @@ from dataclasses import dataclass, replace
 import json
 from pathlib import Path
 import subprocess
+from .process_environment import process_environment
 import tempfile
 import uuid
 
@@ -105,7 +106,7 @@ def enqueue_submission(target: InputTarget, event: dict, validator: Path) -> Non
             validation.chmod(0o600)
             json.dump({"schema":target.schema, "payload":event["payload"]}, writer, ensure_ascii=False, allow_nan=False)
         check = subprocess.run([str(validator), "--validate-input", str(validation)], stdin=subprocess.DEVNULL,
-            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10)
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10, env=process_environment())
         if check.returncode:
             raise ValueError(check.stderr.strip()[:1500] or "Die Eingabe passt nicht zum Adaptervertrag.")
         if json.loads(check.stdout) != {"valid": True}:
@@ -114,7 +115,7 @@ def enqueue_submission(target: InputTarget, event: dict, validator: Path) -> Non
             path.chmod(0o600)
             json.dump(event, writer, ensure_ascii=False, allow_nan=False)
         result = subprocess.run([str(target.program), "--enqueue", str(target.profile), str(target.journal), str(path)],
-            cwd=target.working_directory, stdin=subprocess.DEVNULL, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10)
+            cwd=target.working_directory, stdin=subprocess.DEVNULL, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10, env=process_environment())
         if result.returncode:
             raise RuntimeError(result.stderr.strip()[:1500] or f"Input-Adapter beendet mit Status {result.returncode}.")
         try:

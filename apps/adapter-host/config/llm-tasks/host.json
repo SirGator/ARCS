@@ -45,7 +45,15 @@
         }
       ],
       "grant_file": "planner-grant.json",
-      "timeout_ms": 65000
+      "timeout_ms": 65000,
+      "inherit_env": [
+        "ARCS_LLM_PROVIDER",
+        "ARCS_LLM_MODEL",
+        "ARCS_LLM_ENDPOINT",
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "GEMINI_API_KEY"
+      ]
     },
     {
       "program": "../../../../../llm-api/arcs-llm-api",
@@ -56,7 +64,15 @@
         }
       ],
       "grant_file": "assessor-grant.json",
-      "timeout_ms": 65000
+      "timeout_ms": 65000,
+      "inherit_env": [
+        "ARCS_LLM_PROVIDER",
+        "ARCS_LLM_MODEL",
+        "ARCS_LLM_ENDPOINT",
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "GEMINI_API_KEY"
+      ]
     }
   ]
 }

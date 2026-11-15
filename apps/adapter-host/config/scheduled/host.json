@@ -1,0 +1,41 @@
+{
+  "config_version": 1,
+  "database": "../../../../var/scheduled/core.sqlite",
+  "node_id": "scheduled-host",
+  "schemas": [
+    "../../../../adapters/example-reasoner/schemas/task.schema.json",
+    "../../../../adapters/example-reasoner/schemas/candidate.schema.json"
+  ],
+  "adapters": [
+    {
+      "program": "../../../../target/debug/arcs-json-input",
+      "profile": "../roles/input-profile.json",
+      "args": [
+        {
+          "path": "../../../../var/scheduled/input.sqlite"
+        }
+      ],
+      "grant_file": "../roles/input-grant.json"
+    },
+    {
+      "program": "../../../../target/debug/arcs-example-reasoner",
+      "profile": "../roles/solver-profile.json",
+      "args": [
+        {
+          "path": "../../../../var/scheduled/solver.sqlite"
+        }
+      ],
+      "grant_file": "../roles/solver-grant.json"
+    },
+    {
+      "program": "../../../../target/debug/arcs-json-input",
+      "profile": "wake-profile.json",
+      "args": [
+        {
+          "path": "../../../../var/scheduled/wake.sqlite"
+        }
+      ],
+      "grant_file": "wake-grant.json"
+    }
+  ]
+}

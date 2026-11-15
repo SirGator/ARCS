@@ -123,8 +123,12 @@ für das geöffnete Kontrollpanel an: Nach dessen Neustart ist der Schlüssel
 erneut einzugeben. Verbindungen und Zuordnungen bleiben erhalten. Die
 Oberfläche schreibt keine Klartext-Schlüsseldatei und übernimmt Keys nicht in
 Konfigurations- oder Programmargumente. Der eigene Host bekommt ausschließlich
-die für die gewählte Modellkonfiguration benötigten Schlüssel als Umgebung;
-angeschlossene Kindprozesse erben diese wie andere Host-Umgebungsvariablen.
+die für die gewählte Modellkonfiguration benötigten Schlüssel als Umgebung.
+Jeder generierte Modelladapter erhält davon nur seinen eigenen Schlüssel;
+Input- und Geräteadapter bekommen keine Modellschlüssel. Auch Verbindungstests
+und lokale Eingabeprozesse verwenden eine begrenzte Umgebung. Die Regeln und
+Hinweise für ältere generierte Konfigurationen stehen unter
+[Prozessumgebung und Schlüssel](../adapter-host/examples/process-environment.md).
 
 **Für Aufgaben übernehmen** erzeugt ein eigenes Konfigurationsverzeichnis
 unter `var/control-panel/models/sessions/`. Unterschiedliche Modelle, Anbieter,

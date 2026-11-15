@@ -1,14 +1,17 @@
 //! Persistente Reasoning-Routen und optionale, begrenzte Aufgabensteuerung.
 mod config;
+pub mod dependencies;
 pub mod goal;
 mod journal;
+pub mod planning;
+mod reasoning;
+pub mod scheduler;
 pub use config::{ReasoningRoute, RuntimeConfig};
 
 use std::time::{Duration, Instant};
 
 use arcs::core::{Artifact, VersionId};
-use arcs::reasoning::{ContextSelection, ReasoningRequestV2, ReasoningStatus};
-use arcs::runtime::{InvocationKind, deterministic_invocation_id};
+use arcs::reasoning::ReasoningStatus;
 use rusqlite::{OptionalExtension, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -35,6 +38,13 @@ pub struct TickReport {
     pub discovered_jobs: usize,
     pub backpressure: bool,
     pub ready_for_review: Vec<CompletedTask>,
+    pub failed: Vec<FailedTask>,
+}
+#[derive(Debug, Serialize)]
+pub struct FailedTask {
+    pub sequence: u64,
+    pub route_id: String,
+    pub error: String,
 }
 #[derive(Debug, Serialize)]
 pub struct RuntimeReport {
@@ -43,10 +53,22 @@ pub struct RuntimeReport {
     pub pending_jobs: usize,
     pub ready_for_review: u64,
     pub failed_jobs: u64,
+    pub cancelled_jobs: u64,
     pub source_cursor: u64,
     pub completed_goals: u64,
     pub blocked_goals: u64,
     pub awaiting_approval: u64,
+    pub waiting_time: u64,
+    pub waiting_event: u64,
+    pub next_wake_unix_ms: Option<u64>,
+    pub waiting_dependency: u64,
+    pub blocked_dependencies: u64,
+    pub capacity_used: usize,
+    pub plans: Vec<planning::PlanReceipt>,
+    pub planning_jobs: Vec<planning::PlannerJob>,
+    pub running_plans: u64,
+    pub stopped_plans: u64,
+    pub review_plans: u64,
     pub goals: Vec<goal::GoalTask>,
 }
 
@@ -72,28 +94,61 @@ impl TaskRuntime {
 
     /// Pro Runde begrenzte Logseiten und Reasoning-Aufrufe; kein automatischer Retry.
     pub fn tick(&mut self, host: &mut Host) -> Result<TickReport, HostError> {
+        self.tick_at(host, scheduler::now_unix_ms()?)
+    }
+
+    /// Vertrauenswürdige UTC-Zeit aus der Host-Anwendung; ermöglicht Simulationen
+    /// langer Zeiträume ohne Änderungen an den Uhren externer Adapter.
+    pub fn tick_at(&mut self, host: &mut Host, now_unix_ms: u64) -> Result<TickReport, HostError> {
+        if now_unix_ms > i64::MAX as u64 {
+            return Err(invalid("scheduler timestamp exceeds SQLite range"));
+        }
         if host.database_path() != self.core_database
             || self.config.identity(host)? != self.identity
         {
             return Err(invalid("runtime topology changed"));
         }
+        self.reap_cancelled_task_reasoning(host)?;
         let mut report = TickReport::default();
-        let caught_up = self.discover(host, &mut report)?;
-        // Erst alte Core-Ereignisse übernehmen. Bei voller Queue keine neuen ACKs.
+        let caught_up = self.discover(host, &mut report, now_unix_ms)?;
+        // Erst alte Core-Ereignisse übernehmen. Normale Inputs nur bei freier Queue.
         if caught_up
             && !report.backpressure
-            && self.journal.pending()? < self.config.max_pending_jobs
+            && self
+                .journal
+                .capacity(self.config.max_concurrent_reasoning == 1)?
+                < self.config.max_pending_jobs
         {
             host.poll_event_tick()?;
-            self.discover(host, &mut report)?;
-        } else if self.config.routes.iter().any(|route| route.goal.is_some()) {
-            // Eine volle Aufgabenqueue darf Wirkungsbeobachtungen nicht anhalten.
-            host.poll_round()?;
+            self.discover(host, &mut report, now_unix_ms)?;
+        } else {
+            // Ein voller Aufgabenpuffer darf seine eigenen Weckereignisse nicht
+            // aussperren. Nur beteiligte Input-Adapter werden weiter abgefragt.
+            let wake_sources = self.journal.waiting_input_adapters()?;
+            if !wake_sources.is_empty() {
+                host.poll_wake_inputs(&wake_sources)?;
+            }
+            if !wake_sources.is_empty()
+                || self.config.routes.iter().any(|route| {
+                    route.goal.is_some()
+                        || route.plan.as_ref().is_some_and(|plan| {
+                            plan.templates
+                                .iter()
+                                .any(|template| template.route.goal.is_some())
+                        })
+                })
+            {
+                host.poll_round()?;
+            }
         }
+        self.activate_scheduled(host, now_unix_ms)?;
+        self.advance_dependencies(host)?;
         let mut visited = std::collections::HashSet::new();
         for _ in 0..self.config.max_jobs_per_tick {
-            let Some((sequence, route_id, input_version_id)) =
-                self.journal.next(self.scheduling_cursor)?
+            let Some((sequence, route_id, input_version_id)) = self.journal.next(
+                self.scheduling_cursor,
+                self.config.max_concurrent_reasoning == 1,
+            )?
             else {
                 break;
             };
@@ -101,80 +156,33 @@ impl TaskRuntime {
                 break;
             }
             self.scheduling_cursor = sequence;
-            let route = self
-                .config
-                .routes
-                .iter()
-                .find(|route| route.id == route_id)
-                .ok_or_else(|| invalid("unknown saved route"))?;
+            let route = self.route_for_job(host, sequence, &route_id)?;
             let input = host
                 .store()
                 .get(&input_version_id)
                 .map_err(HostError::Store)?
                 .ok_or_else(|| invalid("saved task input is missing"))?;
-            if !matches_source(route, &input) {
+            if !matches_source(&route, &input) {
                 return Err(invalid("saved task no longer matches source"));
             }
-            if let Some(goal) = &route.goal {
-                let route = route.clone();
-                let goal = goal.clone();
-                if let Err(error) = self.advance_goal(host, sequence, &route, &goal, &input) {
-                    self.journal.fail(sequence, &error)?;
-                    return Err(error);
+            match self.advance_job(host, sequence, &route, &input, now_unix_ms) {
+                Ok(Some(completed)) => {
+                    self.journal.complete(&completed)?;
+                    report.ready_for_review.push(completed);
                 }
-                continue;
+                Ok(None) => {}
+                Err(error) => self.record_job_failure(sequence, &route, error, &mut report)?,
             }
-            self.journal.start(sequence)?;
-            let request = ReasoningRequestV2 {
-                request_id: deterministic_invocation_id(
-                    InvocationKind::Reasoning,
-                    &[
-                        "task-runtime",
-                        &self.config.runtime_id,
-                        &route.id,
-                        &input_version_id.0,
-                    ],
-                ),
-                capability: route.reasoner.clone(),
-                method: route.method,
-                objective: route.objective.clone(),
-                context: vec![ContextSelection {
-                    version_id: input_version_id.clone(),
-                    payload_fields: route.payload_fields.clone(),
-                }],
-                target_schema_id: route.target_schema_id.clone(),
-                allowed_capabilities: route.allowed_capabilities.clone(),
-                constraints: route.constraints.clone(),
-                budget: route.budget.clone(),
-            };
-            let result = match host.reason(request) {
-                Ok(result) => result,
-                Err(error) => {
-                    self.journal.fail(sequence, &error)?;
-                    return Err(error);
-                }
-            };
-            let completed = CompletedTask {
-                sequence,
-                route_id,
-                input_version_id,
-                reasoning_status: result.status,
-                request_version_id: result.request_version_id,
-                result_version_id: result.result_version_id,
-                candidate_version_ids: result
-                    .candidates
-                    .into_iter()
-                    .map(|artifact| artifact.version_id)
-                    .collect(),
-            };
-            // If this write is interrupted, the Core/adapter journal replays the same request.
-            self.journal.complete(&completed)?;
-            report.ready_for_review.push(completed);
         }
         Ok(report)
     }
 
-    fn discover(&mut self, host: &Host, report: &mut TickReport) -> Result<bool, HostError> {
+    fn discover(
+        &mut self,
+        host: &Host,
+        report: &mut TickReport,
+        now: u64,
+    ) -> Result<bool, HostError> {
         let cursor: u64 = self
             .journal
             .connection
@@ -192,7 +200,11 @@ impl TaskRuntime {
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(db)?;
         let mut pending: usize = transaction
-            .query_row(journal::PENDING_COUNT, [], |row| row.get::<_, i64>(0))
+            .query_row(
+                &journal::capacity_query(self.config.max_concurrent_reasoning == 1),
+                [],
+                |row| row.get::<_, i64>(0),
+            )
             .map(|value| value as usize)
             .map_err(db)?;
         for event in &page {
@@ -215,15 +227,22 @@ impl TaskRuntime {
                     routes.push(route);
                 }
             }
-            if pending + routes.len() > self.config.max_pending_jobs {
+            let slots: usize = routes.iter().map(|route| route.queue_slots()).sum();
+            if pending + slots > self.config.max_pending_jobs {
                 report.backpressure = true;
                 break;
             }
-            for route in routes {
+            for route in &routes {
                 transaction.execute("INSERT INTO runtime_jobs(route_id,input_version,source_sequence,state) VALUES(?1,?2,?3,'pending')",params![route.id,event.artifact.version_id.0,event.sequence as i64]).map_err(db)?;
-                pending += 1;
+                let sequence = transaction.last_insert_rowid() as u64;
+                Journal::reserve_plan(&transaction, sequence, route.queue_slots())?;
+                if let Some(activation) = &route.activation {
+                    Journal::schedule(&transaction, sequence, event.sequence, activation, now)?;
+                }
+                pending += route.queue_slots();
                 report.discovered_jobs += 1;
             }
+            Journal::bind_dependencies(&transaction, &routes, &event.artifact.version_id)?;
             // The cursor moves in the same transaction as every matching route job.
             transaction
                 .execute(
@@ -259,6 +278,9 @@ impl TaskRuntime {
         .collect()
     }
     pub fn report(&self, ticks: u64) -> Result<RuntimeReport, HostError> {
+        let (waiting_time, waiting_event, next_wake_unix_ms) = self.journal.schedule_summary()?;
+        let (waiting_dependency, blocked_dependencies) = self.journal.dependency_summary()?;
+        let (running_plans, stopped_plans, review_plans) = self.journal.plan_summary()?;
         let count = |state: &str| {
             self.journal
                 .connection
@@ -269,12 +291,19 @@ impl TaskRuntime {
                 )
                 .map_err(db)
         };
+        let cancelled_goals: u64 = self.journal.connection.query_row(
+            "SELECT COUNT(*) FROM runtime_jobs WHERE state='cancelled' AND goal_json IS NOT NULL",
+            [], |row| row.get::<_, i64>(0).map(|n| n as u64),
+        ).map_err(db)?;
         Ok(RuntimeReport {
             runtime_id: self.config.runtime_id.clone(),
             ticks,
-            pending_jobs: self.journal.pending()?,
+            pending_jobs: self
+                .journal
+                .pending(self.config.max_concurrent_reasoning == 1)?,
             ready_for_review: count("ready_for_review")?,
             failed_jobs: count("failed")?,
+            cancelled_jobs: count("cancelled")?,
             source_cursor: self
                 .journal
                 .connection
@@ -283,16 +312,30 @@ impl TaskRuntime {
                 })
                 .map_err(db)?,
             completed_goals: count("completed")?,
-            blocked_goals: count("blocked")?
+            blocked_goals: self.journal.blocked_goal_count()?
                 + count("rejected")?
                 + count("budget_exhausted")?
-                + count("cancelled")?,
+                + cancelled_goals,
             awaiting_approval: count("awaiting_approval")?,
+            waiting_time,
+            waiting_event,
+            next_wake_unix_ms,
+            waiting_dependency,
+            blocked_dependencies,
+            capacity_used: self
+                .journal
+                .capacity(self.config.max_concurrent_reasoning == 1)?,
+            plans: self.journal.plans_for_report()?,
+            planning_jobs: self.journal.planning_jobs_after(0, 50)?,
+            running_plans,
+            stopped_plans,
+            review_plans,
             goals: self.goals_for_report()?,
         })
     }
-    /// Stop wird zwischen Runden und während Wartepausen geprüft. Ein laufender
-    /// stdio-Dialog bleibt durch seine konfigurierte Deadline begrenzt.
+    /// Stop wird zwischen Runden und während Wartepausen geprüft. Paralleles
+    /// Reasoning wartet dabei nicht auf Antworten; aktive Worker werden beim
+    /// Host-Shutdown abgebrochen. Andere synchrone Ports behalten ihre Deadline.
     pub fn run(
         &mut self,
         host: &mut Host,
@@ -325,9 +368,34 @@ impl TaskRuntime {
     }
 }
 fn matches_source(route: &ReasoningRoute, artifact: &Artifact) -> bool {
-    artifact.created_by.id == route.source.adapter_id.0
-        && artifact.schema_id == route.input_schema_id
+    matches_capability(&route.source, &route.input_schema_id, artifact)
+}
+fn matches_capability(
+    source: &arcs::adapters::CapabilityRef,
+    schema: &arcs::core::SchemaId,
+    artifact: &Artifact,
+) -> bool {
+    artifact.created_by.id == source.adapter_id.0
+        && &artifact.schema_id == schema
         && artifact
             .tags
-            .contains(&format!("capability:{}", route.source.capability_id.0))
+            .contains(&format!("capability:{}", source.capability_id.0))
+}
+
+// Persistence/identity failures remain fatal. Isolating a component failure
+// must never hide a broken Core store or a changed topology.
+fn is_core_failure(error: &HostError) -> bool {
+    matches!(
+        error,
+        HostError::Store(_)
+            | HostError::Reduction(_)
+            | HostError::Reasoning(arcs::reasoning::ReasoningError::Store(_))
+            | HostError::Reasoning(arcs::reasoning::ReasoningError::Invocation(_))
+            | HostError::Reasoning(arcs::reasoning::ReasoningError::Retrieval(
+                arcs::store::retrieval::RetrievalError::Store(_)
+            ))
+            | HostError::Reasoning(arcs::reasoning::ReasoningError::InputData(
+                arcs::adapters::input_data::InputDataError::Store(_)
+            ))
+    )
 }

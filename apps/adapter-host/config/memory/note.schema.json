@@ -1,0 +1,17 @@
+{
+  "$id": "arcs.note.project_memory.v1",
+  "type": "object",
+  "required": [
+    "body",
+    "private_note"
+  ],
+  "properties": {
+    "body": {
+      "type": "string"
+    },
+    "private_note": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false
+}

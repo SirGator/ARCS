@@ -1,0 +1,13 @@
+{
+  "id": "task-live-1",
+  "subject": "task-live-1",
+  "reference": "task:live:1",
+  "payload": {
+    "values": [
+      3,
+      7,
+      12
+    ],
+    "target": 6.5
+  }
+}

@@ -9,6 +9,10 @@ use serde_json::{Value, json};
 
 use crate::{Host, HostError};
 
+fn concurrency() -> usize {
+    1
+}
+
 fn interval() -> u64 {
     100
 }
@@ -34,6 +38,9 @@ pub struct RuntimeConfig {
     pub max_events_per_tick: usize,
     #[serde(default = "batch")]
     pub max_jobs_per_tick: usize,
+    /// 1 erhält den synchronen Betrieb; 2..32 aktivieren begrenzte Worker.
+    #[serde(default = "concurrency")]
+    pub max_concurrent_reasoning: usize,
     #[serde(default = "capacity")]
     pub max_pending_jobs: usize,
     pub routes: Vec<ReasoningRoute>,
@@ -54,15 +61,26 @@ pub struct ReasoningRoute {
     pub allowed_capabilities: Vec<CapabilityRef>,
     pub constraints: Value,
     pub budget: ReasoningResources,
+    /// Voraussetzungen derselben unveränderlichen Eingabe; leere Listen bleiben
+    /// für vorhandene Routen auch in der gespeicherten Identität unsichtbar.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dependencies: Vec<super::dependencies::TaskDependency>,
+    /// Optionale, dauerhafte Aktivierungsbedingung vor dem ersten Schritt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub activation: Option<super::scheduler::Activation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory: Option<arcs::reasoning::context::MemoryPolicy>,
     /// Ohne diese Option bleibt die Route eine reine Reasoning-/Review-Route.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub goal: Option<super::goal::GoalConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plan: Option<super::planning::PlanningConfig>,
 }
 
 pub(super) fn invalid(message: impl Into<String>) -> HostError {
     HostError::InvalidConfig(format!("task runtime: {}", message.into()))
 }
-fn identifier(value: &str) -> bool {
+pub(super) fn identifier(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 64
         && value
@@ -100,6 +118,7 @@ impl RuntimeConfig {
             || !(1..=60_000).contains(&self.interval_ms)
             || !(1..=10_000).contains(&self.max_events_per_tick)
             || !(1..=1000).contains(&self.max_jobs_per_tick)
+            || !(1..=32).contains(&self.max_concurrent_reasoning)
             || !(1..=32).contains(&self.routes.len())
             || !(self.routes.len()..=100_000).contains(&self.max_pending_jobs)
         {
@@ -110,85 +129,117 @@ impl RuntimeConfig {
         let mut ids = HashSet::new();
         let mut manifests: BTreeMap<String, AdapterManifest> = BTreeMap::new();
         for route in &self.routes {
-            let mut fields = HashSet::new();
-            if !identifier(&route.id)
-                || !ids.insert(&route.id)
-                || route.objective.trim().is_empty()
-                || route.objective.len() > 4096
-                || route.payload_fields.is_empty()
-                || route
-                    .payload_fields
-                    .iter()
-                    .any(|field| field.trim().is_empty() || !fields.insert(field))
-                || !route.budget.supports(route.method)
-            {
-                return Err(invalid(format!("invalid route {}", route.id)));
+            if !ids.insert(&route.id) {
+                return Err(invalid("duplicate route ID"));
             }
-            let (source, descriptor) = host
-                .registry()
-                .authorized_capability(&route.source.adapter_id, &route.source.capability_id)
-                .map_err(HostError::Registration)?;
-            if !matches!(&descriptor.contract, CapabilityContract::Input {emits} | CapabilityContract::Observe {emits}
-                if emits.as_slice() == std::slice::from_ref(&route.input_schema_id))
-            {
-                return Err(invalid(
-                    "source must Input or Observe exactly the configured schema",
-                ));
-            }
-            manifests.insert(route.source.adapter_id.0.clone(), source.manifest().clone());
-            let (reasoner, descriptor) = host
-                .registry()
-                .authorized_capability(&route.reasoner.adapter_id, &route.reasoner.capability_id)
-                .map_err(HostError::Registration)?;
-            if !descriptor.contract.is_reasoning()
-                || !descriptor
-                    .contract
-                    .emitted_schemas()
-                    .contains(&route.target_schema_id)
-            {
-                return Err(invalid("reasoner contract does not match target schema"));
-            }
-            let limits = reasoner
-                .grant()
-                .reasoning_limits_v2
-                .as_ref()
-                .ok_or_else(|| invalid("reasoner needs V2 limits"))?;
-            if !limits.methods.contains(&route.method)
-                || !route.budget.fits_within(&limits.resources)
-            {
-                return Err(invalid("route method or budget exceeds reasoning grant"));
-            }
-            let schema = host
-                .schemas()
-                .get(&route.target_schema_id)
-                .ok_or_else(|| invalid("unknown target schema"))?;
-            if schema.artifact_type != "candidate" && !schema.artifact_type.ends_with("_candidate")
-            {
-                return Err(invalid("target schema must describe candidates"));
-            }
-            manifests.insert(
-                route.reasoner.adapter_id.0.clone(),
-                reasoner.manifest().clone(),
-            );
-            let mut allowed = HashSet::new();
-            for capability in &route.allowed_capabilities {
-                if !allowed.insert(capability) {
-                    return Err(invalid("duplicate allowed capability"));
-                }
-                let (registered, _) = host
-                    .registry()
-                    .authorized_capability(&capability.adapter_id, &capability.capability_id)
-                    .map_err(HostError::Registration)?;
-                manifests.insert(
-                    capability.adapter_id.0.clone(),
-                    registered.manifest().clone(),
-                );
-            }
-            if let Some(goal) = &route.goal {
-                goal.validate(host, route, &mut manifests)?;
+            validate_route_contract(host, route, &mut manifests)?;
+            if let Some(plan) = &route.plan {
+                plan.validate(host, route, &mut manifests)?;
             }
         }
+        let required: usize = self.routes.iter().map(ReasoningRoute::queue_slots).sum();
+        if self.max_pending_jobs < required {
+            return Err(invalid(
+                "queue capacity must cover route jobs and their maximum plan expansions",
+            ));
+        }
+        super::dependencies::validate_routes(&self.routes)?;
         // Polling budgets may change. Task semantics and actual manifests may not.
         Ok(json!({"runtime_id":self.runtime_id,"routes":self.routes,"manifests":manifests}))
+    }
+}
+
+/// Gemeinsame Vertragsprüfung für feste Routen und freigegebene Schrittvorlagen.
+pub(super) fn validate_route_contract(
+    host: &Host,
+    route: &ReasoningRoute,
+    manifests: &mut BTreeMap<String, AdapterManifest>,
+) -> Result<(), HostError> {
+    if let Some(activation) = &route.activation {
+        activation.validate(host, manifests)?;
+    }
+    let mut fields = HashSet::new();
+    if !identifier(&route.id)
+        || route.objective.trim().is_empty()
+        || route.objective.len() > 4096
+        || route.payload_fields.is_empty()
+        || route
+            .payload_fields
+            .iter()
+            .any(|field| field.trim().is_empty() || !fields.insert(field))
+        || !route.budget.supports(route.method)
+    {
+        return Err(invalid(format!("invalid route {}", route.id)));
+    }
+    let (source, descriptor) = host
+        .registry()
+        .authorized_capability(&route.source.adapter_id, &route.source.capability_id)
+        .map_err(HostError::Registration)?;
+    if !matches!(&descriptor.contract, CapabilityContract::Input {emits} | CapabilityContract::Observe {emits}
+        if emits.as_slice() == std::slice::from_ref(&route.input_schema_id))
+    {
+        return Err(invalid(
+            "source must Input or Observe exactly the configured schema",
+        ));
+    }
+    manifests.insert(route.source.adapter_id.0.clone(), source.manifest().clone());
+    let (reasoner, descriptor) = host
+        .registry()
+        .authorized_capability(&route.reasoner.adapter_id, &route.reasoner.capability_id)
+        .map_err(HostError::Registration)?;
+    if !descriptor.contract.is_reasoning()
+        || !descriptor
+            .contract
+            .emitted_schemas()
+            .contains(&route.target_schema_id)
+    {
+        return Err(invalid("reasoner contract does not match target schema"));
+    }
+    let limits = reasoner
+        .grant()
+        .reasoning_limits_v2
+        .as_ref()
+        .ok_or_else(|| invalid("reasoner needs V2 limits"))?;
+    if !limits.methods.contains(&route.method) || !route.budget.fits_within(&limits.resources) {
+        return Err(invalid("route method or budget exceeds reasoning grant"));
+    }
+    let schema = host
+        .schemas()
+        .get(&route.target_schema_id)
+        .ok_or_else(|| invalid("unknown target schema"))?;
+    if schema.artifact_type != "candidate" && !schema.artifact_type.ends_with("_candidate") {
+        return Err(invalid("target schema must describe candidates"));
+    }
+    manifests.insert(
+        route.reasoner.adapter_id.0.clone(),
+        reasoner.manifest().clone(),
+    );
+    let mut allowed = HashSet::new();
+    for capability in &route.allowed_capabilities {
+        if !allowed.insert(capability) {
+            return Err(invalid("duplicate allowed capability"));
+        }
+        let (registered, _) = host
+            .registry()
+            .authorized_capability(&capability.adapter_id, &capability.capability_id)
+            .map_err(HostError::Registration)?;
+        manifests.insert(
+            capability.adapter_id.0.clone(),
+            registered.manifest().clone(),
+        );
+    }
+    if let Some(policy) = &route.memory {
+        policy
+            .validate(host.schemas())
+            .map_err(HostError::Reasoning)?;
+    }
+    if let Some(goal) = &route.goal {
+        goal.validate(host, route, manifests)?;
+    }
+    Ok(())
+}
+impl ReasoningRoute {
+    pub(super) fn queue_slots(&self) -> usize {
+        self.plan.as_ref().map_or(1, |plan| 1 + plan.max_steps)
     }
 }

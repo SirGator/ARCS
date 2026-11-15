@@ -7,18 +7,23 @@ use super::{
     ReasoningContextItem, ReasoningError, ReasoningInvocationV2, ReasoningRequestV2,
     ReasoningResponseV2, ReasoningStatus,
 };
-use crate::adapters::{AdapterCallError, AdapterManifest, AdapterRegistry, ProducerClass};
+use crate::adapters::{
+    AdapterCallError, AdapterGrant, AdapterManifest, AdapterRegistry, ProducerClass,
+};
 use crate::core::{
     Actor, ActorType, Artifact, ArtifactIdGenerator, Clock, Provenance, SchemaId, SchemaRegistry,
     Source, SourceClass, SourceKind, Trust, TrustLevel, VersionId, validate_artifact,
 };
 use crate::runtime::{
-    InvocationKind, InvocationService, InvocationSpec, InvocationStatus,
+    InvocationKind, InvocationService, InvocationSpec, InvocationState, InvocationStatus,
     deterministic_invocation_id,
 };
 use crate::store::{SqliteArtifactStore, relation_kinds};
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
+
+#[cfg(test)]
+mod tests;
 
 pub trait GeneralReasoningAdapter: Send + Sync {
     fn propose_with_data(
@@ -46,6 +51,28 @@ pub struct ReasoningResult {
     pub request_version_id: VersionId,
     pub result_version_id: VersionId,
     pub candidates: Vec<Artifact>,
+}
+
+/// Vorbereiteter Auftrag ohne Store-Zugriff für den externen Worker.
+/// Die Felder bleiben privat: Nur der Core darf einen Dispatch erzeugen.
+pub struct PreparedReasoning {
+    invocation: ReasoningInvocationV2,
+    state: InvocationState,
+    trust: Trust,
+    actor: ActorType,
+    manifest: AdapterManifest,
+    grant: AdapterGrant,
+}
+impl PreparedReasoning {
+    pub fn invocation(&self) -> &ReasoningInvocationV2 {
+        &self.invocation
+    }
+}
+
+/// Replay benötigt keinen erneuten externen Aufruf.
+pub enum ReasoningPreparation {
+    Complete(ReasoningResult),
+    Dispatch(Box<PreparedReasoning>),
 }
 
 pub struct GeneralReasoningService<'a> {
@@ -84,6 +111,36 @@ impl GeneralReasoningService<'_> {
         selections: &[arcs_adapter_protocol::InputDataSelection],
         sources: &[&dyn crate::adapters::data::DataAdapter],
     ) -> Result<ReasoningResult, ReasoningError> {
+        let prepared = match self.prepare(endpoint, request, selections)? {
+            ReasoningPreparation::Complete(result) => return Ok(result),
+            ReasoningPreparation::Dispatch(prepared) => *prepared,
+        };
+        let response = (|| {
+            let inputs = crate::adapters::input_data::InputDataService::new(
+                self.registry,
+                self.schemas,
+                self.store,
+            )
+            .read(&prepared.invocation.input_data, sources)?;
+            let started = Instant::now();
+            let response = endpoint.propose_with_data(&prepared.invocation, &inputs)?;
+            if started.elapsed() > Duration::from_millis(prepared.invocation.budget.max_runtime_ms)
+            {
+                return Err(ReasoningError::AdapterCall(AdapterCallError::Timeout));
+            }
+            Ok(response)
+        })();
+        self.finish(prepared, response)
+    }
+
+    /// Prüft Kontext und Grants und persistiert den Dispatch vor externer I/O.
+    /// Darf keine Adapteroperation ausführen und hält keine DB-Transaktion offen.
+    pub fn prepare(
+        &mut self,
+        endpoint: &dyn GeneralReasoningAdapter,
+        request: ReasoningRequestV2,
+        selections: &[arcs_adapter_protocol::InputDataSelection],
+    ) -> Result<ReasoningPreparation, ReasoningError> {
         for schema in ["arcs.reasoning_request.v2", "arcs.reasoning_result.v2"] {
             if self.schemas.get(&SchemaId(schema.into())).is_none() {
                 return Err(ReasoningError::MissingRegisteredSchema(SchemaId(
@@ -111,7 +168,7 @@ impl GeneralReasoningService<'_> {
         if !descriptor.contract.is_reasoning() {
             return Err(invalid("capability is not Reason"));
         }
-        let grant = registered.grant();
+        let grant = registered.grant().clone();
         let limits = grant
             .reasoning_limits_v2
             .as_ref()
@@ -250,6 +307,57 @@ impl GeneralReasoningService<'_> {
                 &audit,
             )?
         };
+        let cached = prepared.status == InvocationStatus::Succeeded;
+        let state = if cached {
+            prepared
+        } else {
+            let service = InvocationService::new(self.store, self.schemas, self.clock);
+            service.dispatch(&service.recover(&prepared)?)?
+        };
+        let prepared = PreparedReasoning {
+            invocation,
+            state,
+            trust,
+            actor,
+            manifest: endpoint.manifest().clone(),
+            grant: grant.clone(),
+        };
+        if cached {
+            Ok(ReasoningPreparation::Complete(
+                self.finish_inner(prepared, None)?,
+            ))
+        } else {
+            Ok(ReasoningPreparation::Dispatch(Box::new(prepared)))
+        }
+    }
+
+    /// Validiert und persistiert eine Worker-Antwort im Core. Der Worker darf
+    /// weder Artefakte schreiben noch einen Auftrag freigeben.
+    pub fn finish(
+        &mut self,
+        prepared: PreparedReasoning,
+        response: Result<ReasoningResponseV2, ReasoningError>,
+    ) -> Result<ReasoningResult, ReasoningError> {
+        self.finish_inner(prepared, Some(response))
+    }
+
+    fn finish_inner(
+        &mut self,
+        prepared: PreparedReasoning,
+        response: Option<Result<ReasoningResponseV2, ReasoningError>>,
+    ) -> Result<ReasoningResult, ReasoningError> {
+        let PreparedReasoning {
+            invocation,
+            state: prepared,
+            trust,
+            actor,
+            manifest,
+            grant,
+        } = prepared;
+        let invocations = InvocationService::new(self.store, self.schemas, self.clock);
+        if invocations.lookup(&invocation.invocation_id)?.as_ref() != Some(&prepared) {
+            return Err(invalid("stale reasoning completion"));
+        }
         let result = if prepared.status == InvocationStatus::Succeeded {
             self.store
                 .get(
@@ -260,30 +368,31 @@ impl GeneralReasoningService<'_> {
                 )?
                 .ok_or(crate::runtime::InvocationError::MissingResult)?
         } else {
-            let invocations = InvocationService::new(self.store, self.schemas, self.clock);
-            let dispatched = invocations.dispatch(&invocations.recover(&prepared)?)?;
             let outcome = (|| {
-                let inputs = crate::adapters::input_data::InputDataService::new(
-                    self.registry,
-                    self.schemas,
-                    self.store,
-                )
-                .read(&invocation.input_data, sources)?;
-                let started = Instant::now();
-                let response = endpoint.propose_with_data(&invocation, &inputs)?;
-                if started.elapsed() > Duration::from_millis(invocation.budget.max_runtime_ms) {
-                    return Err(ReasoningError::AdapterCall(AdapterCallError::Timeout));
+                let (registered, _) = self.registry.authorized_capability(
+                    &invocation.capability.adapter_id,
+                    &invocation.capability.capability_id,
+                )?;
+                if registered.manifest() != &manifest || registered.grant() != &grant {
+                    return Err(invalid("reasoning grant changed during dispatch"));
                 }
+                validate_allowed_capabilities(self.registry, &invocation.allowed_capabilities)?;
+                for input in &invocation.input_data {
+                    crate::adapters::data::DataService::new(self.registry)
+                        .authorize(&input.selection.source, &input.reference)
+                        .map_err(crate::adapters::input_data::InputDataError::from)?;
+                }
+                let response = response.ok_or_else(|| invalid("missing reasoning response"))??;
                 self.validate(&invocation, &response)?;
                 let result = self.artifact(
                     "arcs.reasoning_result.v2",
                     serde_json::json!({"response":response}),
-                    &invocation_id,
+                    &invocation.invocation_id,
                     vec![prepared.input_version.clone()],
                     None,
                 );
                 InvocationService::new(self.store, self.schemas, self.clock).succeed_with_event(
-                    &dispatched,
+                    &prepared,
                     &result,
                     &[(prepared.input_version.clone(), relation_kinds::result_of())],
                 )?;
@@ -305,7 +414,7 @@ impl GeneralReasoningService<'_> {
                         )
                     );
                     InvocationService::new(self.store, self.schemas, self.clock).fail(
-                        &dispatched,
+                        &prepared,
                         format!("{error:?}"),
                         retryable,
                     )?;

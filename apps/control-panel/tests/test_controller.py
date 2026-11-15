@@ -13,10 +13,11 @@ from arcs_panel.controller import Configuration, SessionController, read_configu
 
 
 FAKE_HOST = '''#!/usr/bin/python3
-import json,pathlib,subprocess,sys,time
+import json,os,pathlib,subprocess,sys,time
 arguments=sys.argv[1:]
 stop=pathlib.Path(arguments[arguments.index('--stop-file')+1])
 config=pathlib.Path(arguments[arguments.index('--config')+1])
+config.with_suffix('.environment').write_text(json.dumps({'session':os.environ.get('ARCS_TEST_KEY_A')=='provided-by-session','configured':os.environ.get('ARCS_TEST_CONFIG')=='configured-value','other':'ARCS_TEST_UNRELATED' in os.environ,'other_key':'ARCS_TEST_KEY_B' in os.environ,'path':'PATH' in os.environ}))
 child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(120)'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
 config.with_suffix('.child').write_text(str(child.pid))
 print(json.dumps({'event':'ready','catalog':[],'has_runtime':False}),flush=True)
@@ -89,6 +90,33 @@ class ControllerTests(unittest.TestCase):
             self.assertFalse(controller.busy)
             self.assertFalse(is_running(child))
             self.assertFalse((self.root/'unwanted').exists())
+
+    def test_host_receives_only_declared_ambient_variables_and_selected_credentials(self):
+        self.document['adapters'][0]['inherit_env'] = ['ARCS_TEST_CONFIG', 'ARCS_TEST_KEY_A']
+        self.host.write_text(json.dumps(self.document))
+        controller = self.controller()
+        with patch.dict(os.environ, {'ARCS_TEST_CONFIG': 'configured-value', 'ARCS_TEST_KEY_A': 'ambient-old-value',
+                'ARCS_TEST_KEY_B': 'other-model-secret', 'ARCS_TEST_UNRELATED': 'unrelated-secret'}):
+            controller.start(self.configuration, credentials=lambda _configuration: {'ARCS_TEST_KEY_A': 'provided-by-session'})
+            next_event(controller, 'ready')
+            self.assertEqual(json.loads(self.host.with_suffix('.environment').read_text()),
+                {'session': True, 'configured': True, 'other': False, 'other_key': False, 'path': True})
+            controller.request_stop()
+            self.assertEqual(next_event(controller, 'finished')['code'], 0)
+
+    def test_environment_limits_apply_per_adapter_in_a_multi_adapter_host(self):
+        (self.root / 'second-grant.json').write_text(json.dumps({'adapter_id': 'source.right'}))
+        self.document['adapters'][0]['inherit_env'] = [f'ARCS_LEFT_{i}' for i in range(40)]
+        self.document['adapters'].append({'grant_file': 'second-grant.json',
+            'program': str(self.root / 'target/debug/arcs-host'),
+            'inherit_env': [f'ARCS_RIGHT_{i}' for i in range(40)]})
+        self.host.write_text(json.dumps(self.document))
+        self.assertEqual(len(read_configuration(self.configuration)['inherit_env']), 80)
+        controller = self.controller()
+        controller.start(self.configuration)
+        next_event(controller, 'ready')
+        controller.request_stop()
+        self.assertEqual(next_event(controller, 'finished')['code'], 0)
 
     def test_database_lock_does_not_stop_the_existing_session(self):
         first, second = self.controller(), self.controller()

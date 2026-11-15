@@ -4,6 +4,7 @@ pub mod config;
 mod error;
 pub mod monitor;
 pub mod pipeline;
+mod process_environment;
 mod runtime;
 pub mod task_runtime;
 

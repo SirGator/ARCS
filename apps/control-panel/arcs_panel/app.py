@@ -572,6 +572,15 @@ class ControlWindow(Gtk.ApplicationWindow):
                         if self._last_goals.get(key) != progress:
                             self._log(f"Ziel {goal['sequence']} · {goal['state']} · Schritt {goal['round']}" + (f" · {goal['detail']}" if goal['detail'] else ""))
                             self._last_goals[key] = progress
+                waiting = runtime.get("waiting_time", 0) + runtime.get("waiting_event", 0) if runtime else 0
+                if waiting:
+                    self.metrics["review"][1].set_text(self.metrics["review"][1].get_text() + f" · {waiting} warten auf Termin/Ereignis")
+                if runtime and runtime.get("waiting_dependency", 0):
+                    self.metrics["review"][1].set_text(self.metrics["review"][1].get_text() + f" · {runtime['waiting_dependency']} warten auf Voraussetzungen")
+                if runtime and runtime.get("blocked_dependencies", 0):
+                    self.metrics["review"][1].set_text(self.metrics["review"][1].get_text() + f" · {runtime['blocked_dependencies']} wegen Voraussetzungen blockiert")
+                if runtime and (runtime.get("running_plans", 0) or runtime.get("stopped_plans", 0)):
+                    self.metrics["review"][1].set_text(self.metrics["review"][1].get_text() + f" · Teilpläne: {runtime.get('running_plans', 0)} aktiv, {runtime.get('stopped_plans', 0)} angehalten")
                 seconds = int(event["uptime_ms"] / 1000)
                 self.uptime_label.set_text(f"Laufzeit {seconds // 3600:02}:{seconds // 60 % 60:02}:{seconds % 60:02}  ·  Runde {event['ticks']}")
                 if self._last_artifacts != event["stored_artifacts"]:

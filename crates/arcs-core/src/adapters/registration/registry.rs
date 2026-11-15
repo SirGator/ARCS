@@ -42,6 +42,7 @@ pub enum AdapterRegistryError {
 }
 
 /// Validierte Kombination aus Adapterbehauptungen und Betreiberrechten.
+#[derive(Clone)]
 pub struct RegisteredAdapter {
     manifest: AdapterManifest,
     grant: AdapterGrant,
@@ -62,7 +63,7 @@ impl RegisteredAdapter {
 /// Die Registry speichert keine Netzwerkverbindungen oder Geheimnisse. Ein
 /// späterer HTTP-/stdio-Transport authentifiziert eine Verbindung und bindet
 /// sie an den vom Gateway erzeugten opaken `AdapterSession`-Handle.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct AdapterRegistry {
     adapters: HashMap<AdapterId, RegisteredAdapter>,
 }

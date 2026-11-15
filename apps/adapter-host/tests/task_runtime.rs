@@ -1,3 +1,5 @@
+#[path = "support/memory.rs"]
+mod memory;
 mod support;
 use arcs_host::Host;
 use arcs_host::task_runtime::{RuntimeConfig, TaskRuntime};
@@ -517,7 +519,20 @@ fn a_legacy_review_journal_is_migrated_without_recomputing_or_changing_completed
     host.shutdown().unwrap();
     drop(runtime);
     drop(host);
+    // A real pre-goal journal has none of these later child tables. Remove
+    // them before rebuilding its jobs table, so SQLite does not retarget their
+    // foreign keys to the temporary downgrade table.
     fixture.db("runtime").execute_batch("BEGIN IMMEDIATE;
+        DROP TABLE runtime_reasoning_requests;
+        DROP TABLE runtime_plan_cancellations;
+        DROP TABLE runtime_plan_steps;
+        DROP TABLE runtime_plans;
+        DROP TABLE runtime_job_reservations;
+        DROP TABLE runtime_job_dependencies;
+        DROP TABLE runtime_job_joins;
+        DROP TABLE runtime_dependency_scheduler;
+        DROP TABLE runtime_job_schedules;
+        DROP TABLE runtime_scheduler;
         DROP INDEX runtime_pending;
         ALTER TABLE runtime_jobs RENAME TO new_jobs;
         CREATE TABLE runtime_jobs(sequence INTEGER PRIMARY KEY AUTOINCREMENT,route_id TEXT NOT NULL,input_version TEXT NOT NULL,source_sequence INTEGER NOT NULL,state TEXT NOT NULL CHECK(state IN ('pending','running','failed','ready_for_review')),error TEXT,result_json TEXT,UNIQUE(route_id,input_version));
@@ -531,5 +546,71 @@ fn a_legacy_review_journal_is_migrated_without_recomputing_or_changing_completed
     assert!(runtime.tick(&mut host).unwrap().ready_for_review.is_empty());
     assert_eq!(host.report().unwrap().stored_artifacts, artifacts);
     assert_eq!(runtime.report(0).unwrap().completed_goals, 0);
+    host.shutdown().unwrap();
+}
+
+#[test]
+fn recalled_context_survives_lost_completion_and_later_memories() {
+    let fixture = Fixture::new();
+    let mut config = fixture.read("runtime.json");
+    config["routes"][0]["memory"] = memory::policy("project:nearest");
+    config["routes"][0]["budget"]["max_context_items"] = json!(3);
+    fixture.write("runtime.json", config);
+    let mut host = fixture.host();
+    let original = memory::append(&host, "original-memory", "project:nearest");
+    memory::append(&host, "unrelated-memory", "project:other");
+    let mut runtime = fixture.runtime(&host);
+    let done = runtime.tick(&mut host).unwrap().ready_for_review.remove(0);
+    let audit = host.store().get(&done.request_version_id).unwrap().unwrap();
+    let items = audit.payload["invocation"]["context"].as_array().unwrap();
+    assert_eq!(items.len(), 2);
+    assert!(
+        items
+            .iter()
+            .any(|item| item["version_id"] == original.version_id.0)
+    );
+    assert_eq!(memory::snapshots(&host).len(), 1);
+    host.shutdown().unwrap();
+    drop(runtime);
+    drop(host);
+    fixture
+        .db("runtime")
+        .execute(
+            "UPDATE runtime_jobs SET state='running',result_json=NULL",
+            [],
+        )
+        .unwrap();
+    let mut host = fixture.host();
+    memory::append(&host, "later-memory", "project:nearest");
+    let mut runtime = fixture.runtime(&host);
+    let count = host.store().len().unwrap();
+    let replay = runtime.tick(&mut host).unwrap().ready_for_review.remove(0);
+    assert_eq!(replay, done);
+    assert_eq!(host.store().len().unwrap(), count);
+    assert_eq!(memory::snapshots(&host).len(), 1);
+    assert_eq!(
+        scalar(&fixture.db("solver"), "SELECT COUNT(*) FROM invocations"),
+        1
+    );
+    host.shutdown().unwrap();
+}
+
+#[test]
+fn invalid_memory_policy_is_rejected_before_ingress() {
+    let fixture = Fixture::new();
+    let mut config = fixture.read("runtime.json");
+    config["routes"][0]["memory"] = memory::policy("project:nearest");
+    config["routes"][0]["memory"]["scopes"][0]["payload_fields"] = json!(["raw_text", "raw_text"]);
+    fixture.write("runtime.json", config);
+    let mut host = fixture.host();
+    assert!(TaskRuntime::open(&host, fixture.config()).is_err());
+    assert_eq!(
+        scalar(
+            &fixture.db("input"),
+            "SELECT COUNT(*) FROM events WHERE ack=1"
+        ),
+        0
+    );
+    assert!(memory::snapshots(&host).is_empty());
     host.shutdown().unwrap();
 }

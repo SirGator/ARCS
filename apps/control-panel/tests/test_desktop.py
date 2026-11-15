@@ -125,6 +125,23 @@ class DesktopTests(unittest.TestCase):
         self.window.stop_button.emit('clicked')
         pump_until(lambda:not self.window.controller.busy and self.window.state=='idle')
 
+    def test_scheduled_tasks_are_visible_and_still_wait_after_restart(self):
+        runtime=json.loads((PROJECT_ROOT/'apps/adapter-host/config/roles/runtime.json').read_text())
+        runtime.update(runtime_id='desktop-scheduled',journal='state/scheduled.sqlite')
+        runtime['routes'][0]['source']['adapter_id']='multi.input.left'
+        runtime['routes'][0]['reasoner']['adapter_id']='multi.reasoner.solver'
+        runtime['routes'][0]['activation']={'kind':'at_time','unix_ms':4102444800000}
+        path=self.directory/'scheduled.json'
+        path.write_text(json.dumps(runtime))
+        self.window.select_configuration(Configuration(self.host,path))
+        for _ in range(2):
+            self.window.start_button.emit('clicked')
+            pump_until(lambda:self.window.state=='running' and self.window.snapshot.get('runtime',{}).get('waiting_time')==1)
+            self.assertEqual(self.window.metrics['review'][0].get_text(),'0')
+            self.assertIn('1 warten auf Termin/Ereignis',self.window.metrics['review'][1].get_text())
+            self.window.stop_button.emit('clicked')
+            pump_until(lambda:not self.window.controller.busy and self.window.state=='idle')
+
     def test_goal_loop_completion_and_progress_are_displayed_from_real_backend(self):
         host=real_configuration(PROJECT_ROOT,self.directory,'goals')
         runtime=json.loads((self.directory/'runtime.json').read_text())

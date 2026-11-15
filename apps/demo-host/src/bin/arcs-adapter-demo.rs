@@ -43,7 +43,7 @@ fn run() -> Result<(), String> {
     if let Some(profile) = args.get(2) {
         command.arg(profile);
     }
-    let mut adapter = StdioAdapter::connect(
+    let adapter = StdioAdapter::connect(
         &mut command,
         Duration::from_secs(5),
         grant,

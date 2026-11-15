@@ -10,6 +10,9 @@ use serde_json::json;
 const TASK: &str = "arcs.task.nearest.v1";
 const CANDIDATE: &str = "arcs.solution_candidate.nearest.v1";
 mod goal_fan;
+mod plan_fan;
+mod plan_nearest;
+mod sum_candidates;
 mod text_fan;
 #[derive(Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -18,6 +21,9 @@ enum Scenario {
     Nearest,
     FanGoal,
     TextFanGoal,
+    SumCandidates,
+    PlanNearest,
+    PlanFan,
 }
 impl Scenario {
     fn is_nearest(&self) -> bool {
@@ -57,7 +63,14 @@ impl Adapter for Reasoner {
             capabilities: vec![CapabilityDescriptor {
                 id: CapabilityId("solution.propose".into()),
                 contract: CapabilityContract::Reason {
-                    emits: if self.profile.scenario.is_nearest() {
+                    emits: if matches!(
+                        self.profile.scenario,
+                        Scenario::PlanNearest | Scenario::PlanFan
+                    ) {
+                        vec![SchemaId(plan_nearest::CANDIDATE.into())]
+                    } else if matches!(self.profile.scenario, Scenario::SumCandidates) {
+                        vec![SchemaId(sum_candidates::CANDIDATE.into())]
+                    } else if self.profile.scenario.is_nearest() {
                         vec![SchemaId(CANDIDATE.into())]
                     } else {
                         vec![
@@ -96,7 +109,13 @@ impl Adapter for Reasoner {
             }
             return serde_json::from_str(&response).map_err(unavailable);
         }
-        let response = if matches!(self.profile.scenario, Scenario::TextFanGoal) {
+        let response = if matches!(self.profile.scenario, Scenario::PlanNearest) {
+            plan_nearest::reason(&invocation)?
+        } else if matches!(self.profile.scenario, Scenario::PlanFan) {
+            plan_fan::reason(&invocation)?
+        } else if matches!(self.profile.scenario, Scenario::SumCandidates) {
+            sum_candidates::reason(&invocation)?
+        } else if matches!(self.profile.scenario, Scenario::TextFanGoal) {
             text_fan::reason(&invocation)?
         } else if matches!(self.profile.scenario, Scenario::FanGoal) {
             goal_fan::reason(&invocation)?
@@ -206,7 +225,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         ))
         || (!profile.scenario.is_nearest() && profile.method != ReasoningMethod::Rules)
     {
-        return Err("nearest supports solver/learned; fan_goal supports rules".into());
+        return Err(
+            "nearest supports solver/learned; the other example scenarios support rules".into(),
+        );
     }
     let identity = serde_json::to_string(&profile)?;
     let mut database = Connection::open(&args[1])?;

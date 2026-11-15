@@ -1,5 +1,10 @@
+mod input;
+mod reason;
+
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::process::Command;
+use std::sync::Arc;
 use std::time::Duration;
 
 use arcs::adapters::stdio::StdioAdapter;
@@ -77,7 +82,7 @@ pub struct HostReport {
 
 struct RunningAdapter {
     config: PreparedAdapter,
-    endpoint: StdioAdapter,
+    endpoint: Arc<StdioAdapter>,
     report: AdapterReport,
 }
 
@@ -90,6 +95,8 @@ pub struct Host {
     world: WorldState,
     adapters: Vec<RunningAdapter>,
     polling: PollingConfig,
+    reasoning_jobs: HashMap<String, reason::PendingReasoning>,
+    unavailable_adapters: HashSet<AdapterId>,
 }
 
 fn invalid(message: impl Into<String>) -> HostError {
@@ -236,85 +243,6 @@ impl Host {
             .collect()
     }
 
-    pub fn reason(
-        &mut self,
-        request: arcs::reasoning::ReasoningRequestV2,
-    ) -> Result<arcs::reasoning::general::ReasoningResult, HostError> {
-        self.reason_with_data(request, &[])
-    }
-    pub fn reason_with_data(
-        &mut self,
-        request: arcs::reasoning::ReasoningRequestV2,
-        inputs: &[arcs::adapters::input_data::InputDataSelection],
-    ) -> Result<arcs::reasoning::general::ReasoningResult, HostError> {
-        let adapter = self
-            .adapters
-            .iter()
-            .find(|adapter| adapter.config.grant.adapter_id == request.capability.adapter_id)
-            .ok_or_else(|| invalid("unknown reasoning adapter"))?;
-        let sources: Vec<&dyn arcs::adapters::data::DataAdapter> = self
-            .adapters
-            .iter()
-            .map(|adapter| &adapter.endpoint as &dyn arcs::adapters::data::DataAdapter)
-            .collect();
-        arcs::reasoning::general::GeneralReasoningService {
-            registry: &self.registry,
-            schemas: &self.schemas,
-            store: &self.store,
-            ids: &mut self.ids,
-            clock: &SystemClock,
-        }
-        .reason_with_data(&adapter.endpoint, request, inputs, &sources)
-        .map_err(HostError::Reasoning)
-    }
-
-    pub fn poll_inputs(&mut self) -> Result<Vec<Artifact>, HostError> {
-        let mut received = Vec::new();
-        for adapter in &mut self.adapters {
-            if !adapter.endpoint.manifest().capabilities.iter().any(|cap| {
-                cap.contract.is_input()
-                    && adapter.config.grant.enabled_capabilities.contains(&cap.id)
-            }) {
-                continue;
-            }
-            let mut idle = false;
-            let mut inputs = InputService::new(
-                &self.registry,
-                &self.schemas,
-                &self.store,
-                &mut self.ids,
-                &SystemClock,
-            );
-            for _ in 0..self.polling.max_inputs_per_adapter {
-                let Some(input) = adapter.endpoint.poll_input(&mut inputs).map_err(|source| {
-                    HostError::Adapter {
-                        adapter: adapter.config.grant.adapter_id.clone(),
-                        source,
-                    }
-                })?
-                else {
-                    idle = true;
-                    break;
-                };
-                adapter.report.inputs.push(input.clone());
-                received.push(input);
-            }
-            if !idle {
-                adapter.report.input_limit_hits += 1;
-            }
-        }
-        Ok(received)
-    }
-
-    /// Im Dauerbetrieb enthält der Bericht nur Inputs der aktuellen Runde.
-    pub(crate) fn poll_event_tick(&mut self) -> Result<(), HostError> {
-        for adapter in &mut self.adapters {
-            adapter.report.inputs.clear();
-        }
-        self.poll_inputs()?;
-        self.poll_round()
-    }
-
     pub fn prepare_output(
         &mut self,
         capability: &CapabilityRef,
@@ -341,6 +269,7 @@ impl Host {
         request: &VersionId,
         approval: &VersionId,
     ) -> Result<Artifact, HostError> {
+        self.ensure_adapter_available(adapter_id)?;
         let adapter = self
             .adapters
             .iter()
@@ -353,7 +282,7 @@ impl Host {
             &mut self.ids,
             &SystemClock,
         )
-        .deliver(&adapter.endpoint, request, approval)
+        .deliver(adapter.endpoint.as_ref(), request, approval)
         .map_err(|source| HostError::Output {
             adapter: adapter_id.clone(),
             source,
@@ -368,13 +297,14 @@ impl Host {
         reference: &arcs::adapters::data::DataReference,
         writer: &mut impl std::io::Write,
     ) -> Result<u64, HostError> {
+        self.ensure_adapter_available(&capability.adapter_id)?;
         let adapter = self
             .adapters
             .iter()
             .find(|adapter| adapter.config.grant.adapter_id == capability.adapter_id)
             .ok_or_else(|| invalid(format!("unknown adapter {}", capability.adapter_id.0)))?;
         arcs::adapters::data::DataService::new(&self.registry)
-            .copy(&adapter.endpoint, capability, reference, writer)
+            .copy(adapter.endpoint.as_ref(), capability, reference, writer)
             .map_err(HostError::Data)
     }
 
@@ -415,6 +345,7 @@ impl Host {
         let mut adapters = Vec::new();
         for prepared in config.adapters {
             let mut command = Command::new(&prepared.program);
+            crate::process_environment::configure(&mut command, &prepared.inherit_env);
             command
                 .args(&prepared.args)
                 .current_dir(&prepared.working_directory);
@@ -446,7 +377,7 @@ impl Host {
             };
             adapters.push(RunningAdapter {
                 config: prepared,
-                endpoint,
+                endpoint: Arc::new(endpoint),
                 report,
             });
         }
@@ -459,6 +390,8 @@ impl Host {
             world,
             adapters,
             polling: config.polling,
+            reasoning_jobs: HashMap::new(),
+            unavailable_adapters: HashSet::new(),
         })
     }
 
@@ -590,6 +523,7 @@ impl Host {
         input: &VersionId,
         response_schema: &SchemaId,
     ) -> Result<Artifact, HostError> {
+        self.ensure_adapter_available(&capability.adapter_id)?;
         let adapter = self
             .adapters
             .iter()
@@ -602,7 +536,12 @@ impl Host {
             &mut self.ids,
             &SystemClock,
         )
-        .execute(&adapter.endpoint, capability, input, response_schema)
+        .execute(
+            adapter.endpoint.as_ref(),
+            capability,
+            input,
+            response_schema,
+        )
         .map_err(|source| HostError::Request {
             request: input.0.clone(),
             source,
@@ -617,6 +556,7 @@ impl Host {
         input: &VersionId,
         output_schema: &SchemaId,
     ) -> Result<Artifact, HostError> {
+        self.ensure_adapter_available(&capability.adapter_id)?;
         let adapter = self
             .adapters
             .iter()
@@ -629,7 +569,7 @@ impl Host {
             &mut self.ids,
             &SystemClock,
         )
-        .execute(&adapter.endpoint, capability, input, output_schema)
+        .execute(adapter.endpoint.as_ref(), capability, input, output_schema)
         .map_err(|source| HostError::Transform {
             adapter: capability.adapter_id.clone(),
             source,
@@ -711,6 +651,7 @@ impl Host {
         adapter_id: &AdapterId,
         action: &VersionId,
     ) -> Result<Artifact, HostError> {
+        self.ensure_adapter_available(adapter_id)?;
         let adapter = self
             .adapters
             .iter()
@@ -723,7 +664,7 @@ impl Host {
             &mut self.ids,
             &SystemClock,
         )
-        .execute(&adapter.endpoint, action)
+        .execute(adapter.endpoint.as_ref(), action)
         .map_err(|source| HostError::Execution {
             adapter: adapter_id.clone(),
             source,
@@ -733,7 +674,15 @@ impl Host {
     /// Begrenzte Runde mit fairem Budget je Adapter. Ein erreichter Grenzwert
     /// ist sichtbar; weitere Daten bleiben beim Adapter für die nächste Runde.
     pub fn poll_round(&mut self) -> Result<(), HostError> {
+        let busy = self.busy_adapters();
         for adapter in &mut self.adapters {
+            if busy.contains(&adapter.config.grant.adapter_id)
+                || self
+                    .unavailable_adapters
+                    .contains(&adapter.config.grant.adapter_id)
+            {
+                continue;
+            }
             let observes = adapter
                 .endpoint
                 .manifest()
@@ -793,8 +742,16 @@ impl Host {
 
     /// Ein Fehler beim Beenden verhindert nicht das Beenden der übrigen Childs.
     pub fn shutdown(&mut self) -> Result<(), HostError> {
+        let cancelled = self.cancel_reasoning_jobs();
         let mut first_error = None;
         for adapter in &mut self.adapters {
+            if cancelled.contains(&adapter.config.grant.adapter_id)
+                || self
+                    .unavailable_adapters
+                    .contains(&adapter.config.grant.adapter_id)
+            {
+                continue;
+            }
             if let Err(source) = adapter.endpoint.shutdown()
                 && first_error.is_none()
             {

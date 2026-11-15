@@ -93,6 +93,7 @@ impl TaskRuntime {
         host.registry()
             .authorized_capability(&capability.adapter_id, &capability.capability_id)
             .map_err(HostError::Registration)?;
+        let dependency_context = self.journal.dependency_context(task.sequence)?;
         let parents = candidate.provenance.as_ref().map(|p| &p.parents);
         let passed = candidate.schema_id == route.target_schema_id
             && candidate.created_by.id == route.reasoner.adapter_id.0
@@ -103,6 +104,9 @@ impl TaskRuntime {
             && parents.is_some_and(|parents| {
                 parents.contains(&task.input_version_id.0)
                     && task.before.iter().all(|v| parents.contains(&v.0))
+                    && dependency_context
+                        .iter()
+                        .all(|selection| parents.contains(&selection.version_id.0))
             })
             && host
                 .schemas()
@@ -267,13 +271,7 @@ impl TaskRuntime {
         if task.state != GoalState::AwaitingApproval || task.candidate.as_ref() != Some(candidate) {
             return Err(invalid("goal is not waiting for this candidate's approval"));
         }
-        let route = self
-            .config
-            .routes
-            .iter()
-            .find(|r| r.id == task.route_id)
-            .ok_or_else(|| invalid("missing route"))?
-            .clone();
+        let route = self.route_for_job(host, sequence, &task.route_id)?;
         let config = route
             .goal
             .as_ref()

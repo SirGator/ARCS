@@ -1,0 +1,72 @@
+{
+  "config_version": 1,
+  "database": "../../../../var/goal-plans/core.sqlite",
+  "node_id": "goal-host",
+  "schemas": [
+    "../../../../adapters/simulated-fan/schemas/temperature.schema.json",
+    "../../../../adapters/simulated-fan/schemas/request-temperature.schema.json",
+    "../../../../adapters/simulated-fan/schemas/request-fan.schema.json",
+    "../../../../adapters/simulated-fan/schemas/fan-candidate.schema.json",
+    "../../../../adapters/simulated-fan/schemas/fan-state.schema.json",
+    "../../../../adapters/simulated-fan/schemas/fan-execution-result.schema.json",
+    "../goals/task.schema.json",
+    "../goals/policy.schema.json"
+  ],
+  "adapters": [
+    {
+      "program": "../../../../target/debug/arcs-json-input",
+      "profile": "input-profile.json",
+      "args": [
+        {
+          "path": "../../../../var/goal-plans/input.sqlite"
+        }
+      ],
+      "grant_file": "../goals/input-grant.json",
+      "timeout_ms": 15000
+    },
+    {
+      "program": "../../../../target/debug/arcs-simulated-fan",
+      "profile": "../goals/fan-profile.json",
+      "args": [
+        {
+          "path": "../../../../var/goal-plans/fan.sqlite"
+        }
+      ],
+      "grant_file": "../goals/fan-grant.json",
+      "timeout_ms": 15000
+    },
+    {
+      "program": "../../../../target/debug/arcs-example-reasoner",
+      "profile": "../goals/planner-profile.json",
+      "args": [
+        {
+          "path": "../../../../var/goal-plans/planner.sqlite"
+        }
+      ],
+      "grant_file": "../goals/planner-grant.json",
+      "timeout_ms": 15000
+    },
+    {
+      "program": "../../../../target/debug/arcs-example-reasoner",
+      "profile": "../goals/assessor-profile.json",
+      "args": [
+        {
+          "path": "../../../../var/goal-plans/assessor.sqlite"
+        }
+      ],
+      "grant_file": "../goals/assessor-grant.json",
+      "timeout_ms": 15000
+    },
+    {
+      "program": "../../../../target/debug/arcs-example-reasoner",
+      "profile": "root-planner-profile.json",
+      "args": [
+        {
+          "path": "../../../../var/goal-plans/root-planner.sqlite"
+        }
+      ],
+      "grant_file": "root-planner-grant.json",
+      "timeout_ms": 15000
+    }
+  ]
+}

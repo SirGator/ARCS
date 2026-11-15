@@ -1,0 +1,14 @@
+{
+  "$id": "arcs.context_selection.v1",
+  "type": "object",
+  "required": ["request", "policy", "inputs", "selected", "trace", "skipped"],
+  "properties": {
+    "request": {"type": "object"},
+    "policy": {"type": "object"},
+    "inputs": {"type": "array", "items": {"type": "object"}},
+    "selected": {"type": "array", "items": {"type": "object"}},
+    "trace": {"type": "object"},
+    "skipped": {"type": "integer", "minimum": 0}
+  },
+  "additionalProperties": false
+}

@@ -99,6 +99,35 @@ class ModelTests(unittest.TestCase):
         finally:
             restored.close()
 
+    def test_each_model_has_only_its_own_key_in_the_process_allowlist(self):
+        planner, assessor = connection("planner", True), connection("assessor", True)
+        for record in (planner, assessor):
+            self.store.save(record, "synthetic-key-" + record["name"])
+        self.store.assign(planner["id"], assessor["id"])
+        config = self.store.materialize()
+        host = json.loads(config.host.read_text())
+        for adapter in host["adapters"]:
+            profile = json.loads((config.host.parent / adapter["profile"]).read_text())
+            if adapter["profile"] in ("planner.json", "assessor.json"):
+                self.assertEqual(adapter["inherit_env"], [profile["api_key_env"]])
+            else:
+                self.assertEqual(adapter.get("inherit_env", []), [])
+        self.assertEqual(len(self.store.environment_for(config)), 2)
+
+    def test_legacy_generated_key_config_requires_regeneration_without_overwriting_it(self):
+        record = connection(requires_key=True)
+        self.store.save(record, "synthetic-key")
+        self.store.assign(record["id"], record["id"])
+        config = self.store.materialize()
+        host = json.loads(config.host.read_text())
+        for adapter in host["adapters"]:
+            adapter.pop("inherit_env", None)
+        config.host.write_text(json.dumps(host))
+        original = config.host.read_text()
+        with self.assertRaisesRegex(ValueError, "Für Aufgaben übernehmen"):
+            self.store.environment_for(config)
+        self.assertEqual(config.host.read_text(), original)
+
     def test_model_changes_create_separate_journals_while_key_rotation_and_names_preserve_them(self):
         record = connection(requires_key=True)
         self.store.save(record, "first-secret")

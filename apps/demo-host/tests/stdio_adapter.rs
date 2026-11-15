@@ -103,7 +103,7 @@ fn conflicting_replayed_sample_is_rejected_without_changing_history() {
     let store = SqliteArtifactStore::in_memory().unwrap();
     let mut ids = store.durable_id_generator("test").unwrap();
     let mut registry = AdapterRegistry::new();
-    let mut adapter = StdioAdapter::connect(
+    let adapter = StdioAdapter::connect(
         &mut sensor(&profile()),
         Duration::from_secs(3),
         grant(),
@@ -122,7 +122,7 @@ fn conflicting_replayed_sample_is_rejected_without_changing_history() {
     let mut config: Value = serde_json::from_slice(&std::fs::read(profile()).unwrap()).unwrap();
     config["samples"][0]["raw"]["temperature_raw"] = json!(999);
     std::fs::write(&modified.0, serde_json::to_vec(&config).unwrap()).unwrap();
-    let mut adapter = StdioAdapter::connect(
+    let adapter = StdioAdapter::connect(
         &mut sensor(&modified.0),
         Duration::from_secs(3),
         grant(),
@@ -151,7 +151,7 @@ fn replay_of_older_measurement_does_not_roll_back_current_state() {
     let store = SqliteArtifactStore::in_memory().unwrap();
     let mut ids = store.durable_id_generator("test").unwrap();
     let mut registry = AdapterRegistry::new();
-    let mut adapter = StdioAdapter::connect(
+    let adapter = StdioAdapter::connect(
         &mut sensor(&profile()),
         Duration::from_secs(3),
         grant(),
@@ -165,7 +165,7 @@ fn replay_of_older_measurement_does_not_roll_back_current_state() {
     let first = adapter.poll(&mut observations).unwrap().unwrap();
     let latest = adapter.poll(&mut observations).unwrap().unwrap();
     adapter.shutdown().unwrap();
-    let mut adapter = StdioAdapter::connect(
+    let adapter = StdioAdapter::connect(
         &mut sensor(&profile()),
         Duration::from_secs(3),
         grant(),
@@ -239,7 +239,7 @@ fn wrong_adapter_identity_and_invalid_measurement_never_commit() {
     let mut config: Value = serde_json::from_slice(&std::fs::read(profile()).unwrap()).unwrap();
     config["unit"] = json!("unconfirmed-unit");
     std::fs::write(&modified.0, serde_json::to_vec(&config).unwrap()).unwrap();
-    let mut adapter = StdioAdapter::connect(
+    let adapter = StdioAdapter::connect(
         &mut sensor(&modified.0),
         Duration::from_secs(3),
         grant(),
@@ -289,7 +289,7 @@ fn commit_survives_lost_ack_confirmation_and_reconnect_reuses_it() {
     let mut command = fixture(script, &manifest.to_string());
     command.arg(observation.to_string());
     let mut registry = AdapterRegistry::new();
-    let mut adapter = StdioAdapter::connect(
+    let adapter = StdioAdapter::connect(
         &mut command,
         Duration::from_secs(3),
         grant(),
@@ -307,7 +307,7 @@ fn commit_survives_lost_ack_confirmation_and_reconnect_reuses_it() {
     ));
     let committed = ObservationLog::new(&store).after(None).unwrap().remove(0);
     assert_eq!(store.len().unwrap(), 1);
-    let mut adapter = StdioAdapter::connect(
+    let adapter = StdioAdapter::connect(
         &mut sensor(&profile()),
         Duration::from_secs(3),
         grant(),
@@ -342,7 +342,12 @@ fn connection_rejects_wrong_correlation_version_and_disconnected_process() {
         let mut registry = AdapterRegistry::new();
         let store = SqliteArtifactStore::in_memory().unwrap();
         let result = StdioAdapter::connect(
-            &mut fixture("printf '%s\\n' \"$1\"", &response.to_string()),
+            // Consume Hello before replying, so an early child exit cannot turn
+            // this protocol assertion into an unrelated broken-pipe race.
+            &mut fixture(
+                "IFS= read -r request || exit 1\nprintf '%s\\n' \"$1\"",
+                &response.to_string(),
+            ),
             Duration::from_secs(3),
             grant(),
             &mut registry,
@@ -350,9 +355,17 @@ fn connection_rejects_wrong_correlation_version_and_disconnected_process() {
             &store,
         );
         if version == WIRE_VERSION {
-            assert!(matches!(result, Err(StdioError::CorrelationMismatch)));
+            assert!(
+                matches!(&result, Err(StdioError::CorrelationMismatch)),
+                "{:?}",
+                result.as_ref().err()
+            );
         } else {
-            assert!(matches!(result, Err(StdioError::UnsupportedVersion(99))));
+            assert!(
+                matches!(&result, Err(StdioError::UnsupportedVersion(99))),
+                "{:?}",
+                result.as_ref().err()
+            );
         }
         assert!(store.is_empty().unwrap());
         assert!(registry.get(&grant().adapter_id).is_none());

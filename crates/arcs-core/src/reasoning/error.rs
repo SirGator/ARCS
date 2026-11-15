@@ -8,6 +8,7 @@ use crate::store::StoreError;
 /// Fehler ausschließlich innerhalb des kuratierten Reasoning-Slices.
 #[derive(Debug)]
 pub enum ReasoningError {
+    Retrieval(crate::store::retrieval::RetrievalError),
     InputData(crate::adapters::input_data::InputDataError),
     InvalidResponse(String),
     Authorization(AdapterRegistryError),
@@ -53,6 +54,12 @@ pub enum ReasoningError {
     InvalidPayload(Vec<SchemaViolation>),
     ForbiddenCandidateCapability(CapabilityRef),
     CandidateReferenceOutsideContext(VersionId),
+}
+
+impl From<crate::store::retrieval::RetrievalError> for ReasoningError {
+    fn from(error: crate::store::retrieval::RetrievalError) -> Self {
+        Self::Retrieval(error)
+    }
 }
 
 impl From<AdapterRegistryError> for ReasoningError {

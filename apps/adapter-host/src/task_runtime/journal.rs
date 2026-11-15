@@ -1,3 +1,10 @@
+mod dependencies;
+mod planning;
+mod queries;
+mod reasoning;
+mod scheduling;
+pub(super) use planning::capacity_query;
+
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -11,7 +18,7 @@ use arcs::input::{InputMessage, InputService};
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use serde_json::{Value, json};
 
-use super::{CompletedTask, RuntimeConfig, config::invalid};
+use super::{CompletedTask, RuntimeConfig, config::invalid, goal::GoalTask};
 use crate::config::RUNTIME_ID;
 use crate::{Host, HostError};
 
@@ -32,7 +39,19 @@ pub(super) struct Journal {
     _lock: File,
 }
 pub(super) const ACTIVE: &str = "state IN ('pending','running','failed','awaiting_approval')";
-pub(super) const PENDING_COUNT: &str = "SELECT COUNT(*) FROM runtime_jobs WHERE state IN ('pending','running','failed','awaiting_approval')";
+pub(super) fn active(include_failed: bool) -> &'static str {
+    if include_failed {
+        ACTIVE
+    } else {
+        "state IN ('pending','running','awaiting_approval')"
+    }
+}
+pub(super) fn pending_query(include_failed: bool) -> String {
+    format!(
+        "SELECT COUNT(*) FROM runtime_jobs WHERE {}",
+        active(include_failed)
+    )
+}
 impl Journal {
     pub fn open(host: &Host, config: &RuntimeConfig, identity: Value) -> Result<Self, HostError> {
         let absolute = std::env::current_dir()
@@ -144,6 +163,10 @@ impl Journal {
                 CREATE INDEX runtime_pending ON runtime_jobs(state,sequence);
                 COMMIT;").map_err(db)?;
         }
+        scheduling::initialize(&connection)?;
+        dependencies::initialize(&connection)?;
+        planning::initialize(&connection)?;
+        reasoning::initialize(&connection)?;
         Ok(Self {
             connection,
             operator,
@@ -151,14 +174,20 @@ impl Journal {
             _lock: lock,
         })
     }
-    pub fn pending(&self) -> Result<usize, HostError> {
+    pub fn pending(&self, include_failed: bool) -> Result<usize, HostError> {
         self.connection
-            .query_row(PENDING_COUNT, [], |row| row.get::<_, i64>(0))
+            .query_row(&pending_query(include_failed), [], |row| {
+                row.get::<_, i64>(0)
+            })
             .map(|count| count as usize)
             .map_err(db)
     }
-    pub fn next(&self, cursor: u64) -> Result<Option<(u64, String, VersionId)>, HostError> {
-        self.connection.query_row(&format!("SELECT sequence,route_id,input_version FROM runtime_jobs WHERE {ACTIVE} ORDER BY (sequence<=?1),sequence LIMIT 1"),[cursor.min(i64::MAX as u64) as i64],|row| Ok((row.get::<_,i64>(0)? as u64,row.get(1)?,VersionId(row.get(2)?)))).optional().map_err(db)
+    pub fn next(
+        &self,
+        cursor: u64,
+        include_failed: bool,
+    ) -> Result<Option<(u64, String, VersionId)>, HostError> {
+        self.connection.query_row(&format!("SELECT sequence,route_id,input_version FROM runtime_jobs j WHERE {} AND NOT EXISTS(SELECT 1 FROM runtime_job_schedules s WHERE s.sequence=j.sequence AND s.released_at IS NULL) AND NOT EXISTS(SELECT 1 FROM runtime_job_joins d WHERE d.sequence=j.sequence AND d.state!='ready') ORDER BY (sequence<=?1),sequence LIMIT 1", active(include_failed)),[cursor.min(i64::MAX as u64) as i64],|row| Ok((row.get::<_,i64>(0)? as u64,row.get(1)?,VersionId(row.get(2)?)))).optional().map_err(db)
     }
     pub fn start(&self, sequence: u64) -> Result<(), HostError> {
         self.connection
@@ -201,21 +230,7 @@ fn bind_definition(
         },
         required_permissions: vec![],
     }];
-    for route in &config.routes {
-        if let Some(goal) = &route.goal {
-            for source in &goal.sources {
-                if let Some(query) = &source.query {
-                    capabilities.push(CapabilityDescriptor {
-                        id: CapabilityId(format!("runtime.query.{}.{}", route.id, source.id)),
-                        contract: CapabilityContract::Input {
-                            emits: vec![query.schema_id.clone()],
-                        },
-                        required_permissions: vec![],
-                    });
-                }
-            }
-        }
-    }
+    capabilities.extend(queries::query_capabilities(config));
     let enabled_capabilities = capabilities.iter().map(|cap| cap.id.clone()).collect();
     registry
         .register(
@@ -268,4 +283,81 @@ fn bind_definition(
         source,
     })?;
     Ok((artifact.version_id, registry, ids))
+}
+
+// Goal checkpoint serialization belongs to the journal, not the goal engine.
+impl Journal {
+    pub(in crate::task_runtime) fn goals_for_report(&self) -> Result<Vec<GoalTask>, HostError> {
+        let mut query = self.connection.prepare("SELECT goal_json FROM runtime_jobs WHERE goal_json IS NOT NULL ORDER BY (state IN ('pending','running','failed','awaiting_approval')) DESC,sequence DESC LIMIT 50").map_err(db)?;
+        let rows = query
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(db)?;
+        rows.map(|row| {
+            serde_json::from_str(&row.map_err(db)?)
+                .map_err(|e| invalid(format!("invalid goal checkpoint: {e}")))
+        })
+        .collect()
+    }
+    pub fn goals_after(&self, sequence: u64, limit: usize) -> Result<Vec<GoalTask>, HostError> {
+        if !(1..=1000).contains(&limit) {
+            return Err(invalid("goal page size must be 1..1000"));
+        }
+        let mut query = self.connection.prepare("SELECT goal_json FROM runtime_jobs WHERE sequence>?1 AND goal_json IS NOT NULL ORDER BY sequence LIMIT ?2").map_err(db)?;
+        let rows = query
+            .query_map(
+                params![sequence.min(i64::MAX as u64) as i64, limit as i64],
+                |row| row.get::<_, String>(0),
+            )
+            .map_err(db)?;
+        rows.map(|row| {
+            serde_json::from_str(&row.map_err(db)?)
+                .map_err(|e| invalid(format!("invalid goal checkpoint: {e}")))
+        })
+        .collect()
+    }
+
+    pub(in crate::task_runtime) fn saved_goal(
+        &self,
+        sequence: u64,
+    ) -> Result<Option<GoalTask>, HostError> {
+        let value: Option<Option<String>> = self
+            .connection
+            .query_row(
+                "SELECT goal_json FROM runtime_jobs WHERE sequence=?1",
+                [sequence.min(i64::MAX as u64) as i64],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(db)?;
+        value
+            .flatten()
+            .map(|json| {
+                serde_json::from_str(&json)
+                    .map_err(|e| invalid(format!("invalid goal checkpoint: {e}")))
+            })
+            .transpose()
+    }
+
+    pub(in crate::task_runtime) fn save_goal(&self, task: &GoalTask) -> Result<(), HostError> {
+        let json = serde_json::to_string(task).map_err(|e| invalid(e.to_string()))?;
+        self.connection
+            .execute(
+                "UPDATE runtime_jobs SET state=?2,goal_json=?3,error=NULL WHERE sequence=?1",
+                params![task.sequence as i64, task.state.queue_state(), json],
+            )
+            .map_err(db)?;
+        Ok(())
+    }
+}
+
+impl Journal {
+    pub(super) fn source_sequence(&self, sequence: u64) -> Result<u64, HostError> {
+        self.connection
+            .query_row(
+                "SELECT source_sequence FROM runtime_jobs WHERE sequence=?1",
+                [sequence as i64],
+                |row| row.get::<_, i64>(0).map(|value| value as u64),
+            )
+            .map_err(db)
+    }
 }

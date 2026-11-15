@@ -6,6 +6,7 @@ use crate::core::{Actor, ActorType, Source, SourceClass, SourceKind, Trust, Trus
 
 use super::*;
 use crate::core::ArtifactIdGenerator;
+use crate::store::NetworkEdge;
 
 struct TemporaryDatabase {
     path: PathBuf,

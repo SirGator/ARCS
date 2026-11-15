@@ -1,0 +1,154 @@
+{
+  "config_version": 1,
+  "runtime_id": "dynamic-nearest-plans",
+  "journal": "../../../../var/dynamic-plans/runtime.sqlite",
+  "interval_ms": 100,
+  "max_events_per_tick": 1000,
+  "max_jobs_per_tick": 10,
+  "max_pending_jobs": 4,
+  "routes": [
+    {
+      "id": "plan-nearest",
+      "source": {
+        "adapter_id": "example.input",
+        "capability_id": "task.submit"
+      },
+      "input_schema_id": "arcs.task.nearest.v1",
+      "payload_fields": [
+        "values",
+        "target"
+      ],
+      "reasoner": {
+        "adapter_id": "example.planner",
+        "capability_id": "solution.propose"
+      },
+      "method": "rules",
+      "objective": "Choose an authorized one-step or parallel comparison workflow for the input.",
+      "target_schema_id": "arcs.plan_candidate.v1",
+      "allowed_capabilities": [],
+      "constraints": {},
+      "budget": {
+        "max_context_items": 1,
+        "max_context_bytes": 32768,
+        "max_output_bytes": 4096,
+        "max_candidates": 1,
+        "max_runtime_ms": 1000,
+        "max_iterations": 4096,
+        "max_output_tokens": null
+      },
+      "plan": {
+        "max_steps": 3,
+        "max_total_runtime_ms": 3000,
+        "templates": [
+          {
+            "route": {
+              "id": "solver",
+              "source": {
+                "adapter_id": "example.input",
+                "capability_id": "task.submit"
+              },
+              "input_schema_id": "arcs.task.nearest.v1",
+              "payload_fields": [
+                "values",
+                "target"
+              ],
+              "reasoner": {
+                "adapter_id": "example.solver",
+                "capability_id": "solution.propose"
+              },
+              "method": "solver",
+              "objective": "Find the nearest listed value to the target",
+              "target_schema_id": "arcs.solution_candidate.nearest.v1",
+              "allowed_capabilities": [],
+              "constraints": {},
+              "budget": {
+                "max_context_items": 1,
+                "max_context_bytes": 8192,
+                "max_output_bytes": 4096,
+                "max_candidates": 1,
+                "max_runtime_ms": 1000,
+                "max_iterations": 4096,
+                "max_output_tokens": null
+              }
+            },
+            "export_fields": [
+              "value"
+            ]
+          },
+          {
+            "route": {
+              "id": "model",
+              "source": {
+                "adapter_id": "example.input",
+                "capability_id": "task.submit"
+              },
+              "input_schema_id": "arcs.task.nearest.v1",
+              "payload_fields": [
+                "values",
+                "target"
+              ],
+              "reasoner": {
+                "adapter_id": "example.model-fixture",
+                "capability_id": "solution.propose"
+              },
+              "method": "learned",
+              "objective": "Find the nearest listed value to the target",
+              "target_schema_id": "arcs.solution_candidate.nearest.v1",
+              "allowed_capabilities": [],
+              "constraints": {},
+              "budget": {
+                "max_context_items": 1,
+                "max_context_bytes": 8192,
+                "max_output_bytes": 4096,
+                "max_candidates": 1,
+                "max_runtime_ms": 1000,
+                "max_iterations": null,
+                "max_output_tokens": null
+              }
+            },
+            "export_fields": [
+              "value"
+            ]
+          },
+          {
+            "route": {
+              "id": "sum",
+              "source": {
+                "adapter_id": "example.input",
+                "capability_id": "task.submit"
+              },
+              "input_schema_id": "arcs.task.nearest.v1",
+              "payload_fields": [
+                "values",
+                "target"
+              ],
+              "reasoner": {
+                "adapter_id": "example.sum",
+                "capability_id": "solution.propose"
+              },
+              "method": "rules",
+              "objective": "Sum the values from both prerequisite proposals.",
+              "target_schema_id": "arcs.solution_candidate.sum.v1",
+              "allowed_capabilities": [],
+              "constraints": {},
+              "budget": {
+                "max_context_items": 3,
+                "max_context_bytes": 8192,
+                "max_output_bytes": 4096,
+                "max_candidates": 1,
+                "max_runtime_ms": 1000,
+                "max_iterations": 4096,
+                "max_output_tokens": null
+              }
+            },
+            "export_fields": [
+              "sum",
+              "count"
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "max_concurrent_reasoning": 2
+}
