@@ -25,8 +25,10 @@ Parallelität, Artifact-Gedächtnis und mehrmonatige Aufgaben fest.
 Sie ist die maßgebliche Grundlage für die weitere Implementierung.
 Der [Implementierungsplan v2.0](docs/IMPLEMENTATION_PLAN.md)
 hält die weiteren Aufgaben und den aktuellen Implementierungsstand fest.
-Der [Zwischenbericht vom 16. November 2026](docs/ZWISCHENBERICHT_2026-11-16.md)
-fasst die bisherige Umsetzung, ihre Prüfergebnisse und die offenen Grenzen zusammen.
+Der [Zwischenbericht vom 17. November 2026](docs/ZWISCHENBERICHT_2026-11-17.md)
+hält den aktuellen Stand und die nächsten Prioritäten fest. Der
+[ausführliche Bericht vom 16. November](docs/ZWISCHENBERICHT_2026-11-16.md)
+beschreibt die bisherige Umsetzung, ihre Prüfergebnisse und die offenen Grenzen.
 
 Der [Gedächtnisabruf](apps/adapter-host/examples/artifact-memory.md) ergänzt
 Reasoning-Kontext aus dem gemeinsamen Artifact-Netz. Er begrenzt Suche und

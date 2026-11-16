@@ -43,6 +43,7 @@ phases/
 !/docs/IMPLEMENTATION_PLAN.md
 !/docs/TECHNICAL_ARCHITECTURE_V3.md
 !/docs/ZWISCHENBERICHT_2026-11-16.md
+!/docs/ZWISCHENBERICHT_2026-11-17.md
 /target/
 **/target/
 /target
