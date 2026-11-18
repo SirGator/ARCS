@@ -1,0 +1,30 @@
+{
+  "$id": "arcs.reasoning_recovery_step.v1",
+  "type": "object",
+  "required": [
+    "definition_version_id",
+    "index",
+    "not_before_unix_ms"
+  ],
+  "properties": {
+    "definition_version_id": {
+      "type": "string"
+    },
+    "index": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 7
+    },
+    "previous_step": {
+      "type": "string"
+    },
+    "failure_version_id": {
+      "type": "string"
+    },
+    "not_before_unix_ms": {
+      "type": "integer",
+      "minimum": 0
+    }
+  },
+  "additionalProperties": false
+}

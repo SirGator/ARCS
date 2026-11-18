@@ -34,7 +34,9 @@ ergänzt Slice 16; der
 [Bericht zu Aufgabenpausen](docs/ZWISCHENBERICHT_2026-11-18_PAUSES.md)
 dokumentiert Slice 17; der
 [Bericht zu Reasoning-Belegen](docs/ZWISCHENBERICHT_2026-11-18_ATTEMPTS.md)
-ergänzt Slice 18. Die Berichte vom
+ergänzt Slice 18. Der
+[Bericht zum begrenzten Fallback](docs/ZWISCHENBERICHT_2026-11-18_RECOVERY.md)
+dokumentiert Slice 19. Die Berichte vom
 [17. November](docs/ZWISCHENBERICHT_2026-11-17.md) und
 [16. November](docs/ZWISCHENBERICHT_2026-11-16.md) dokumentieren frühere
 Umsetzungsstände, Prüfergebnisse und offene Grenzen.
@@ -86,7 +88,11 @@ Aktion frische Vorbereitung und Freigabe.
 strukturierte Belege für gültige Antworten und technische Fehlschläge im
 Artifact-Netz. Eine begrenzte CLI-Historie zeigt ihre Herkunft, Host-Latenz und
 gemeldeten Verbrauch. Kandidatenqualität und tatsächlicher Aufgabenerfolg
-bleiben gesondert zu prüfen; automatische Fallbacks sind weitere Arbeit.
+bleiben gesondert zu prüfen.
+[Begrenzter Fallback](apps/adapter-host/examples/reasoning-recovery.md)
+wechselt nach belegten technischen Ausfällen zu ausdrücklich erlaubten
+Alternativen. Entscheidungen und Verzögerungen bleiben über Neustarts erhalten;
+Goals und Pläne prüfen den tatsächlichen Ergebnisproduzenten und ihre Budgets.
 
 ## Projektstruktur
 

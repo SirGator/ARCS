@@ -134,10 +134,15 @@ impl TaskRuntime {
                 {
                     return Ok(block("reasoning produced no solved candidates"));
                 }
+                let producer = self
+                    .completed_reasoner(host, &route, &saved)?
+                    .capability
+                    .adapter_id
+                    .0;
                 (
                     saved.result_version_id,
                     saved.candidate_version_ids,
-                    &route.reasoner.adapter_id.0,
+                    producer,
                     route.target_schema_id.clone(),
                 )
             }
@@ -162,14 +167,15 @@ impl TaskRuntime {
                 (
                     assessment.clone(),
                     vec![assessment],
-                    &route
+                    route
                         .goal
                         .as_ref()
                         .unwrap()
                         .assessment
                         .capability
                         .adapter_id
-                        .0,
+                        .0
+                        .clone(),
                     SchemaId(super::goal::ASSESSMENT_SCHEMA.into()),
                 )
             }
@@ -178,7 +184,7 @@ impl TaskRuntime {
         let mut context = Vec::new();
         for version in versions {
             let artifact = load(host, &version)?;
-            if artifact.schema_id != schema || artifact.created_by.id != *producer {
+            if artifact.schema_id != schema || artifact.created_by.id != producer {
                 return Err(invalid("dependency result schema or producer changed"));
             }
             if parent

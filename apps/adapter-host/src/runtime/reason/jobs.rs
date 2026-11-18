@@ -223,16 +223,11 @@ impl Host {
             .reasoning_jobs
             .remove(key)
             .expect("checked running job");
-        if matches!(response, Err(ReasoningError::AdapterCall(_))) {
-            self.unavailable_adapters
-                .insert(job.prepared.invocation().capability.adapter_id.clone());
-        }
-        if matches!(response, Err(ReasoningError::InputData(_))) {
-            self.unavailable_adapters.extend(
-                job.resources
-                    .iter()
-                    .filter(|id| **id != job.prepared.invocation().capability.adapter_id)
-                    .cloned(),
+        if let Err(error) = &response {
+            self.quarantine_reasoning_failure(
+                &job.prepared.invocation().capability.adapter_id,
+                &job.resources,
+                error,
             );
         }
         // An elapsed overall deadline aborts every session reserved for
@@ -288,5 +283,39 @@ impl Host {
 impl Drop for Host {
     fn drop(&mut self) {
         self.cancel_reasoning_jobs();
+    }
+}
+
+impl Host {
+    /// A known quarantined port rejects a new explicitly authorized recovery
+    /// request locally. This records an admission failure, without contacting
+    /// the old session, reading binary sources, or fabricating backend work.
+    pub(crate) fn reject_quarantined_recovery(
+        &mut self,
+        request: ReasoningRequestV2,
+        inputs: &[InputDataSelection],
+    ) -> Result<ReasoningResult, HostError> {
+        if request
+            .constraints
+            .get(arcs::reasoning::recovery::CONSTRAINT)
+            .is_none()
+            || !self
+                .unavailable_adapters
+                .contains(&request.capability.adapter_id)
+        {
+            return Err(invalid(
+                "local recovery rejection requires a quarantined recovery endpoint",
+            ));
+        }
+        let endpoint = self
+            .adapters
+            .iter()
+            .find(|adapter| adapter.config.grant.adapter_id == request.capability.adapter_id)
+            .map(|adapter| Arc::clone(&adapter.endpoint))
+            .ok_or_else(|| invalid("unknown recovery endpoint"))?;
+        match self.reasoning_service().prepare(endpoint.as_ref(),request,inputs).map_err(HostError::Reasoning)? {
+            ReasoningPreparation::Complete(result)=>Ok(result),
+            ReasoningPreparation::Dispatch(prepared)=>self.reasoning_service().finish(*prepared,Err(ReasoningError::AdapterCall(AdapterCallError::Unavailable("reasoning session is quarantined; request rejected locally before backend delivery".into())))).map_err(HostError::Reasoning),
+        }
     }
 }

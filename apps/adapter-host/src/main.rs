@@ -325,8 +325,15 @@ fn run() -> Result<(), String> {
         let selections = runtime
             .reasoner_selections(&host)
             .map_err(|e| e.to_string())?;
+        let recoveries = runtime
+            .reasoning_recoveries(&host)
+            .map_err(|e| e.to_string())?;
         host.shutdown().map_err(|e| e.to_string())?;
         serde_json::to_value(report).map(|mut value| {
+            if !recoveries.is_empty() {
+                value["reasoning_recoveries"] =
+                    serde_json::to_value(recoveries).expect("recovery report serialization");
+            }
             if !selections.is_empty() {
                 value["reasoner_selections"] =
                     serde_json::to_value(selections).expect("selection report serialization");

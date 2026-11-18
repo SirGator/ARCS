@@ -155,6 +155,12 @@ impl TaskRuntime {
             for (_, result) in host.collect_reasoning_requests(&requests) {
                 if let Err(error) = result {
                     let route = self.raw_route_for_job(host, sequence, &route)?;
+                    // An opted-in request is evaluated through its immutable
+                    // Core failure evidence after resume. Never dispatch or
+                    // choose an alternative while its owning task is paused.
+                    if route.reasoning_recovery.is_some() && !super::is_core_failure(&error) {
+                        continue;
+                    }
                     self.record_job_failure(sequence, &route, error, report)?;
                 }
             }

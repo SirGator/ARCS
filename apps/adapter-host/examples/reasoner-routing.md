@@ -107,9 +107,12 @@ gespeicherten Beleg. Ein verlorener Queue-Checkpoint kann ihn nicht ersetzen.
 Aktuelle Grants und die unveränderte Auswahlpolitik werden beim Laden geprüft.
 
 Nach dem Speichern bleibt die Auswahl über Neustarts und Goal-Runden fest.
-Ein inzwischen freier anderer Reasoner übernimmt nicht stillschweigend. Auch
-ein Ausfall des gewählten Adapters erzeugt keine neue Entscheidung. Eine
-allgemeine versionierte Neuplanung bleibt weitere Arbeit.
+Ein inzwischen freier anderer Reasoner übernimmt nicht stillschweigend.
+Ohne zusätzliche Policy verändert auch ein Ausfall diese Bindung nicht.
+Die optionale [begrenzte Recovery](reasoning-recovery.md) kann nach belegten
+technischen Fehlern einen neuen Request an eine erlaubte Alternative richten;
+die ursprüngliche Auswahl bleibt dabei erhalten. Allgemeine versionierte
+Neuplanung bleibt weitere Arbeit.
 
 Die Anfrage referenziert nur die Belegversion im reservierten Constraint
 `arcs_reasoner_selection`. Der Core prüft Capability, Methode, Budget,

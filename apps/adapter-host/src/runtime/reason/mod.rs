@@ -6,6 +6,30 @@ pub(super) use jobs::PendingReasoning;
 use super::*;
 
 impl Host {
+    pub(crate) fn recovery_adapter_unavailable(
+        &self,
+        request: &arcs::reasoning::ReasoningRequestV2,
+    ) -> Result<bool, HostError> {
+        Ok(!self.has_reasoning_result(&Self::reasoning_key(request))?
+            && self
+                .unavailable_adapters
+                .contains(&request.capability.adapter_id))
+    }
+    pub(super) fn quarantine_reasoning_failure(
+        &mut self,
+        reasoner: &AdapterId,
+        resources: &HashSet<AdapterId>,
+        error: &arcs::reasoning::ReasoningError,
+    ) {
+        if matches!(error, arcs::reasoning::ReasoningError::AdapterCall(_)) {
+            self.unavailable_adapters.insert(reasoner.clone());
+        }
+        if matches!(error, arcs::reasoning::ReasoningError::InputData(_)) {
+            self.unavailable_adapters
+                .extend(resources.iter().filter(|id| *id != reasoner).cloned());
+        }
+    }
+
     pub fn reasoning_attempts(
         &self,
         query: &arcs::reasoning::attempts::AttemptQuery,
@@ -109,15 +133,7 @@ impl Host {
     }
 
     fn reasoning_key(request: &arcs::reasoning::ReasoningRequestV2) -> String {
-        arcs::runtime::deterministic_invocation_id(
-            arcs::runtime::InvocationKind::Reasoning,
-            &[
-                "v2",
-                &request.capability.adapter_id.0,
-                &request.capability.capability_id.0,
-                &request.request_id,
-            ],
-        )
+        arcs::reasoning::general::reasoning_invocation_id(request)
     }
 
     fn has_reasoning_result(&self, key: &str) -> Result<bool, HostError> {
@@ -143,14 +159,14 @@ impl Host {
         inputs: &[arcs::adapters::input_data::InputDataSelection],
     ) -> Result<arcs::reasoning::general::ReasoningResult, HostError> {
         let cached = self.has_reasoning_result(&Self::reasoning_key(&request))?;
+        let resources: HashSet<_> = std::iter::once(request.capability.adapter_id.clone())
+            .chain(inputs.iter().map(|input| input.source.adapter_id.clone()))
+            .collect();
         if !cached {
             self.ensure_adapter_available(&request.capability.adapter_id)?;
             for input in inputs {
                 self.ensure_adapter_available(&input.source.adapter_id)?;
             }
-            let resources = std::iter::once(request.capability.adapter_id.clone())
-                .chain(inputs.iter().map(|input| input.source.adapter_id.clone()))
-                .collect();
             let claims = self.reasoning_claims(&resources)?;
             self.ensure_resources_available(&claims)?;
         }
@@ -182,9 +198,12 @@ impl Host {
                 }
             };
         }
-        service
-            .reason_with_data(adapter.endpoint.as_ref(), request, inputs, &sources)
-            .map_err(HostError::Reasoning)
+        let reasoner = request.capability.adapter_id.clone();
+        let result = service.reason_with_data(adapter.endpoint.as_ref(), request, inputs, &sources);
+        if let Err(error @ arcs::reasoning::ReasoningError::AdapterCall(_)) = &result {
+            self.quarantine_reasoning_failure(&reasoner, &resources, error);
+        }
+        result.map_err(HostError::Reasoning)
     }
 }
 
@@ -216,5 +235,23 @@ impl Host {
             },
             other => HostError::Reasoning(other),
         })
+    }
+}
+
+impl Host {
+    pub(crate) fn prepare_reasoning_recovery(
+        &mut self,
+        definition: &arcs::reasoning::recovery::RecoveryDefinition,
+        now: u64,
+    ) -> Result<arcs::reasoning::recovery::RecoveryPreparation, HostError> {
+        arcs::reasoning::recovery::RecoveryService {
+            registry: &self.registry,
+            schemas: &self.schemas,
+            store: &self.store,
+            ids: &mut self.ids,
+            clock: &SystemClock,
+        }
+        .prepare(definition, now)
+        .map_err(HostError::Reasoning)
     }
 }

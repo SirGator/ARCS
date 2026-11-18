@@ -21,7 +21,7 @@ impl PlanningConfig {
             || owner.goal.is_some()
             || owner.target_schema_id.0 != PLAN_CANDIDATE
             || owner
-                .reasoner_choices()
+                .permitted_reasoner_choices()
                 .iter()
                 .any(|choice| choice.budget.max_candidates != 1)
             || !owner.allowed_capabilities.is_empty()
@@ -128,6 +128,9 @@ impl PlanningConfig {
                         })
                         .collect::<Vec<_>>()
                 );
+            }
+            if let Some(policy) = &template.route.reasoning_recovery {
+                entry["reasoning_recovery"] = json!(policy);
             }
             if let Some(goal) = &template.route.goal {
                 let mut actions = Vec::new();

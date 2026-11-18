@@ -222,7 +222,7 @@ impl GoalConfig {
             || !(1..=16).contains(&self.sources.len())
             || !(1..=32).contains(&self.actions.len())
             || !fields(&self.execution_payload_fields)
-            || route.reasoner_choices().iter().any(|choice| {
+            || route.permitted_reasoner_choices().iter().any(|choice| {
                 choice.budget.max_candidates != 1
                     || choice.budget.max_context_items < 2 + self.sources.len()
             })
@@ -230,6 +230,11 @@ impl GoalConfig {
                 .assessment
                 .constraints
                 .get(arcs::reasoning::selection::CONSTRAINT)
+                .is_some()
+            || self
+                .assessment
+                .constraints
+                .get(arcs::reasoning::recovery::CONSTRAINT)
                 .is_some()
             || self.assessment.budget.max_context_items < 3 + 2 * self.sources.len()
         {
@@ -295,8 +300,10 @@ impl GoalConfig {
             .iter()
             .filter(|source| source.binary.is_some())
             .count();
-        if route.reasoner_selection.is_some() && binary_objects > 0 {
-            for choice in route.reasoner_choices() {
+        if (route.reasoner_selection.is_some() || route.reasoning_recovery.is_some())
+            && binary_objects > 0
+        {
+            for choice in route.permitted_reasoner_choices() {
                 let (adapter, _) = host
                     .registry()
                     .authorized_capability(

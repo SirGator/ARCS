@@ -94,9 +94,10 @@ impl TaskRuntime {
             .authorized_capability(&capability.adapter_id, &capability.capability_id)
             .map_err(HostError::Registration)?;
         let dependency_context = self.journal.dependency_context(task.sequence)?;
+        let planner = self.goal_candidate_reasoner(host, route, task, &candidate)?;
         let parents = candidate.provenance.as_ref().map(|p| &p.parents);
         let passed = candidate.schema_id == route.target_schema_id
-            && candidate.created_by.id == route.reasoner.adapter_id.0
+            && candidate.created_by.id == planner.capability.adapter_id.0
             && candidate.tags.contains(&format!(
                 "requires:{}:{}",
                 capability.adapter_id.0, capability.capability_id.0

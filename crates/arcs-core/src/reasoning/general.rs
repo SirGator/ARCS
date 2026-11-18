@@ -22,6 +22,19 @@ use crate::store::{SqliteArtifactStore, relation_kinds};
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
+/// Shared stable identity for a concrete V2 capability/request pair.
+pub fn reasoning_invocation_id(request: &ReasoningRequestV2) -> String {
+    deterministic_invocation_id(
+        InvocationKind::Reasoning,
+        &[
+            "v2",
+            &request.capability.adapter_id.0,
+            &request.capability.capability_id.0,
+            &request.request_id,
+        ],
+    )
+}
+
 #[cfg(test)]
 mod tests;
 
@@ -194,8 +207,23 @@ impl GeneralReasoningService<'_> {
         }
         ensure_candidate_schema(self.schemas, &request.target_schema_id)?;
         validate_allowed_capabilities(self.registry, &request.allowed_capabilities)?;
-        let reasoner_selection =
-            super::selection::request_selection(self.registry, self.schemas, self.store, &request)?;
+        let recovery = super::recovery::request_recovery(
+            self.registry,
+            self.schemas,
+            self.store,
+            &request,
+            selections,
+        )?;
+        let reasoner_selection = super::selection::request_selection(
+            self.registry,
+            self.schemas,
+            self.store,
+            recovery.as_ref().map_or(&request, |(_, base)| base),
+        )?;
+        let bindings = reasoner_selection
+            .into_iter()
+            .chain(recovery.map(|(version, _)| version))
+            .collect::<Vec<_>>();
         if request.context.len() > request.budget.max_context_items {
             return Err(invalid("context item limit exceeded"));
         }
@@ -239,7 +267,7 @@ impl GeneralReasoningService<'_> {
                 SourceClass::External
             },
         };
-        if let Some(version) = &reasoner_selection {
+        for version in &bindings {
             parents.push(version.clone());
         }
         let actor = match grant.producer_class {
@@ -248,15 +276,7 @@ impl GeneralReasoningService<'_> {
             _ => ActorType::Adapter,
         };
         context.sort_by(|a, b| a.version_id.0.cmp(&b.version_id.0));
-        let invocation_id = deterministic_invocation_id(
-            InvocationKind::Reasoning,
-            &[
-                "v2",
-                &request.capability.adapter_id.0,
-                &request.capability.capability_id.0,
-                &request.request_id,
-            ],
-        );
+        let invocation_id = reasoning_invocation_id(&request);
         let input_data = crate::adapters::input_data::InputDataService::new(
             self.registry,
             self.schemas,
@@ -333,7 +353,7 @@ impl GeneralReasoningService<'_> {
             grant: grant.clone(),
             prepared_at: (!cached).then(Instant::now),
         };
-        if let Some(version) = reasoner_selection {
+        for version in bindings {
             let relations = crate::store::ArtifactRelations::new(self.store);
             if !relations
                 .outgoing(&prepared.state.input_version)?

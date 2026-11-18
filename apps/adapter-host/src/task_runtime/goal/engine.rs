@@ -154,6 +154,7 @@ impl TaskRuntime {
                     },
                     &binary_inputs(config, &task.before),
                     route.memory.as_ref(),
+                    now_unix_ms,
                 )?
                 else {
                     return self.save_goal(&task);
@@ -212,6 +213,7 @@ impl TaskRuntime {
                     request,
                     &binary_inputs(config, &task.before),
                     route.memory.as_ref(),
+                    now_unix_ms,
                 )?
                 else {
                     return self.save_goal(&task);
@@ -322,6 +324,7 @@ impl TaskRuntime {
                     },
                     &binary_inputs(config, &task.after),
                     route.memory.as_ref(),
+                    now_unix_ms,
                 )?
                 else {
                     return self.save_goal(&task);
@@ -375,7 +378,7 @@ impl TaskRuntime {
         self.cleanup_control(host, sequence)
     }
 
-    fn goal_request_id(&self, task: &GoalTask, phase: &str) -> String {
+    pub(in crate::task_runtime) fn goal_request_id(&self, task: &GoalTask, phase: &str) -> String {
         deterministic_invocation_id(
             InvocationKind::Reasoning,
             &[

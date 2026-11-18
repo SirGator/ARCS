@@ -121,6 +121,8 @@ cargo test -p arcs-host --test reasoning_attempts --locked --offline
 
 Die Tests prüfen gültige Antworten, `no_solution`, technische und ungültige
 Antworten, explizite Wiederholung, Rollback, aktuelle Grants, Cursor, Neustarts,
-pausierte Worker und verlorene Queue-Checkpoints. Automatischer Fallback,
-allgemeine Neuplanung, gemessene Aufgabenqualität und Kostenoptimierung bleiben
-weitere Arbeit. Die vorhandene dauerhafte Reasoner-Auswahl bleibt verbindlich.
+pausierte Worker und verlorene Queue-Checkpoints. Die optionale
+[begrenzte Recovery](reasoning-recovery.md) verwendet diese Fehlerbelege für
+ausdrücklich erlaubte Alternativen. Allgemeine Neuplanung, gemessene
+Aufgabenqualität und Kostenoptimierung bleiben weitere Arbeit. Die dauerhafte
+Reasoner-Auswahl bleibt als ursprüngliche Bindung erhalten.

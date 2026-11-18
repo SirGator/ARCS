@@ -1,5 +1,5 @@
 //! Durable choice of a permitted Reason endpoint, with no execution authority.
-mod records;
+pub(super) mod records;
 #[cfg(test)]
 mod tests;
 

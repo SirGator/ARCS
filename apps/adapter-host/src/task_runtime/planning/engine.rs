@@ -52,9 +52,29 @@ impl TaskRuntime {
             .get(&plan.proposal_version_id)
             .map_err(HostError::Store)?
             .ok_or_else(|| invalid("plan proposal artifact is missing"))?;
-        if candidate.schema_id.0 != PLAN_CANDIDATE
-            || candidate.created_by.id != owner.reasoner.adapter_id.0
-        {
+        let producer = if owner.reasoning_recovery.is_some() {
+            let saved = self
+                .journal
+                .saved_plan(parent)?
+                .ok_or_else(|| invalid("missing planner completion for recovery"))?;
+            if saved.completion.sequence != parent
+                || saved.completion.route_id != owner.id
+                || saved.completion.input_version_id != plan.input_version_id
+                || !saved
+                    .completion
+                    .candidate_version_ids
+                    .contains(&plan.proposal_version_id)
+            {
+                return Err(invalid("planner recovery completion changed"));
+            }
+            self.completed_reasoner(host, &owner, &saved.completion)?
+                .capability
+                .adapter_id
+                .0
+        } else {
+            owner.reasoner.adapter_id.0.clone()
+        };
+        if candidate.schema_id.0 != PLAN_CANDIDATE || candidate.created_by.id != producer {
             return Err(invalid("plan proposal origin changed"));
         }
         let proposal: PlanProposal =
@@ -152,7 +172,7 @@ impl TaskRuntime {
             budget: route.budget.clone(),
         };
         let Some(result) =
-            self.reason_for_task(host, sequence, request, &[], route.memory.as_ref())?
+            self.reason_for_task(host, sequence, request, &[], route.memory.as_ref(), now)?
         else {
             return Ok(());
         };

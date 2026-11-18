@@ -1,0 +1,25 @@
+{
+  "$id": "arcs.reasoning_recovery.v1",
+  "type": "object",
+  "required": [
+    "owner",
+    "base_request",
+    "inputs",
+    "policy"
+  ],
+  "properties": {
+    "owner": {
+      "type": "object"
+    },
+    "base_request": {
+      "type": "object"
+    },
+    "inputs": {
+      "type": "array"
+    },
+    "policy": {
+      "type": "object"
+    }
+  },
+  "additionalProperties": false
+}

@@ -69,6 +69,9 @@ pub struct ReasoningRoute {
     pub budget: ReasoningResources,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoner_selection: Option<super::reasoner_selection::ReasonerRouting>,
+    /// Ordered, bounded alternatives after evidenced transient adapter failure.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_recovery: Option<arcs::reasoning::recovery::RecoveryPolicy>,
     /// Voraussetzungen derselben unveränderlichen Eingabe; leere Listen bleiben
     /// für vorhandene Routen auch in der gespeicherten Identität unsichtbar.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -205,6 +208,10 @@ pub(super) fn validate_route_contract(
             .constraints
             .get(arcs::reasoning::selection::CONSTRAINT)
             .is_some()
+        || route
+            .constraints
+            .get(arcs::reasoning::recovery::CONSTRAINT)
+            .is_some()
     {
         return Err(invalid(format!("invalid route {}", route.id)));
     }
@@ -253,6 +260,24 @@ pub(super) fn validate_route_contract(
     );
     if let Some(routing) = &route.reasoner_selection {
         routing.validate(host, route, manifests)?;
+    }
+    if let Some(recovery) = &route.reasoning_recovery {
+        recovery
+            .validate(host.registry(), host.schemas(), &route.target_schema_id)
+            .map_err(HostError::Reasoning)?;
+        for choice in &recovery.alternatives {
+            let (adapter, _) = host
+                .registry()
+                .authorized_capability(
+                    &choice.capability.adapter_id,
+                    &choice.capability.capability_id,
+                )
+                .map_err(HostError::Registration)?;
+            manifests.insert(
+                adapter.manifest().adapter_id.0.clone(),
+                adapter.manifest().clone(),
+            );
+        }
     }
     let mut allowed = HashSet::new();
     for capability in &route.allowed_capabilities {

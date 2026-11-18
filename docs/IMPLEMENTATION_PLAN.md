@@ -243,6 +243,25 @@
 > und verlorene Queue-Checkpoints ab. Automatischer Fallback, allgemeine
 > Neuplanung, Qualitäts-/Kostenoptimierung und die Phasenabnahmen bleiben offen.
 
+> Neunzehnter Slice gemäß v3 §9.2/§9.3, §7.2 PAR-05/PAR-07/PAR-10 und v2
+> RSN-06 teilweise: Eine ausdrückliche Recovery-Policy erlaubt nach belegtem
+> Timeout oder Nichterreichbarkeit höchstens sieben geordnete Alternativen.
+> Core-Definition und Schrittbelege binden die ursprüngliche Anfrage,
+> Vorgänger, Fehler und dauerhafte Fälligkeit. Neue Requests ändern keine
+> Kontextauswahl oder Action-Rechte; gleiche abgeschlossene Fehlversuche
+> werden nicht erneut gestartet. Quarantänisierte Sessions können neue
+> Requests lokal ablehnen, ohne Backend-Arbeit oder Binärabruf zu behaupten.
+> Die ursprüngliche Reasoner-Auswahl bleibt erhalten. Joins, erzeugte Pläne
+> und Goal-Verification prüfen den tatsächlich belegten Produzenten und die
+> genaue Goal-Runde. Gesamtbudgets berücksichtigen alle Alternativen pro Runde;
+> Pause, Abbruch und Fristen bleiben wirksam. CLI und Monitor zeigen eine
+> begrenzte Recovery-Ansicht. Sechs Core- und dreizehn Prozess-Tests prüfen
+> positive/negative Fälle, konkurrierende Schreiber, verlorene Checkpoints,
+> Fälligkeiten, tatsächliche Produzenten und zwei manuell freigegebene
+> Gerätewirkungen über aufeinanderfolgende Goal-Runden. Automatische
+> Wiederverbindung, gelernte Auswahl, Modellvergleich, semantischer Fallback,
+> allgemeine Neuplanung und die vollständigen Phasenabnahmen bleiben offen.
+
 **Leitbild:** ARCS ist ein universeller Agent. Es soll sich einfach bedienen lassen, beliebige kompatible Systeme verbinden, eigenständig Probleme lösen und langfristige Aufgaben über Monate verfolgen.
 
 ## 1. Verbindliche Architekturregeln

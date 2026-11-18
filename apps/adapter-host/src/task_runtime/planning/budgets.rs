@@ -25,6 +25,18 @@ impl PlanBudget {
             maximum_runtime = maximum_runtime.max(option.runtime);
             maximum_tokens = maximum_tokens.max(option.tokens);
         }
+        if let Some(policy) = &route.reasoning_recovery {
+            for choice in &policy.alternatives {
+                let mut option = Self::default();
+                option.reasoning(&choice.budget, choice.method, rounds, bounded_tokens)?;
+                maximum_runtime = maximum_runtime
+                    .checked_add(option.runtime)
+                    .ok_or_else(|| invalid("plan recovery runtime budget overflow"))?;
+                maximum_tokens = maximum_tokens
+                    .checked_add(option.tokens)
+                    .ok_or_else(|| invalid("plan recovery token budget overflow"))?;
+            }
+        }
         self.runtime = self
             .runtime
             .checked_add(maximum_runtime)

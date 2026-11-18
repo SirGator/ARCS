@@ -58,8 +58,14 @@ impl TaskRuntime {
             constraints: route.constraints.clone(),
             budget: route.budget.clone(),
         };
-        let Some(result) =
-            self.reason_for_task(host, sequence, request, &[], route.memory.as_ref())?
+        let Some(result) = self.reason_for_task(
+            host,
+            sequence,
+            request,
+            &[],
+            route.memory.as_ref(),
+            now_unix_ms,
+        )?
         else {
             return Ok(None);
         };
@@ -128,6 +134,7 @@ impl TaskRuntime {
         mut request: ReasoningRequestV2,
         inputs: &[arcs::adapters::input_data::InputDataSelection],
         memory: Option<&arcs::reasoning::context::MemoryPolicy>,
+        now_unix_ms: u64,
     ) -> Result<Option<arcs::reasoning::general::ReasoningResult>, HostError> {
         if let Some(selection) = self.saved_reasoner_for_task(host, sequence)? {
             let choice = selection.choice();
@@ -165,16 +172,48 @@ impl TaskRuntime {
             Some(policy) => host.recall_context(request, policy, inputs)?,
             None => request,
         };
+        let recovery = self.recovery_definition(host, sequence, &request, inputs)?;
+        let decision_now = self.recovery_now(now_unix_ms)?;
+        let call = recovery
+            .as_ref()
+            .map(|definition| Self::prepare_recovery(host, definition, decision_now))
+            .transpose()?;
+        let recovery_index = call.as_ref().map(|call| call.index);
+        if let Some(call) = &call {
+            self.journal
+                .bind_recovery(sequence, &call.definition_version_id)?;
+        }
+        let request = call.map_or(request, |call| call.request);
         if self.journal.captured_reasoning(&request.request_id)?
             && let Some(error) = host.saved_reasoning_failure(&request)?
         {
             return Err(invalid(error));
         }
         self.journal.bind_reasoning(sequence, &request.request_id)?;
-        if self.config.max_concurrent_reasoning == 1 {
+        let unavailable = recovery.is_some() && host.recovery_adapter_unavailable(&request)?;
+        let result = if unavailable {
+            host.reject_quarantined_recovery(request, inputs).map(Some)
+        } else if self.config.max_concurrent_reasoning == 1 {
             host.reason_with_data(request, inputs).map(Some)
         } else {
             host.poll_reason_with_data(request, inputs, self.config.max_concurrent_reasoning)
+        };
+        match result {
+            Err(error) if recovery.is_some() && !is_core_failure(&error) => {
+                let definition = recovery.as_ref().unwrap();
+                match host
+                    .prepare_reasoning_recovery(definition, self.recovery_now(now_unix_ms)?)?
+                {
+                    arcs::reasoning::recovery::RecoveryPreparation::Ready(next)
+                        if Some(next.index) != recovery_index =>
+                    {
+                        Ok(None)
+                    }
+                    arcs::reasoning::recovery::RecoveryPreparation::Waiting { .. } => Ok(None),
+                    _ => Err(error),
+                }
+            }
+            other => other,
         }
     }
 }

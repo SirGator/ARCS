@@ -69,6 +69,16 @@ impl ReasonerRouting {
 }
 
 impl ReasoningRoute {
+    pub(in crate::task_runtime) fn permitted_reasoner_choices(&self) -> Vec<ReasonerChoice> {
+        self.reasoner_choices()
+            .into_iter()
+            .chain(
+                self.reasoning_recovery
+                    .iter()
+                    .flat_map(|policy| policy.alternatives.iter().cloned()),
+            )
+            .collect()
+    }
     pub(in crate::task_runtime) fn reasoner_choices(&self) -> Vec<ReasonerChoice> {
         std::iter::once(ReasonerChoice {
             capability: self.reasoner.clone(),
@@ -94,7 +104,7 @@ pub struct ReasonerSelectionReport {
 }
 
 impl TaskRuntime {
-    fn selection_owner(
+    pub(super) fn selection_owner(
         &self,
         sequence: u64,
         input_version: VersionId,

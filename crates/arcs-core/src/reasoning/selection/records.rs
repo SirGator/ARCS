@@ -20,7 +20,7 @@ pub(super) fn stream(owner: &SelectionOwner) -> String {
     )
 }
 
-pub(super) fn validate_owner(
+pub(in crate::reasoning) fn validate_owner(
     store: &SqliteArtifactStore,
     owner: &SelectionOwner,
 ) -> Result<(), ReasoningError> {

@@ -8,6 +8,7 @@ mod journal;
 pub mod planning;
 pub mod reasoner_selection;
 mod reasoning;
+pub mod recovery;
 pub mod scheduler;
 pub mod suspension;
 pub use config::{ReasoningRoute, RuntimeConfig};
@@ -100,6 +101,8 @@ pub struct TaskRuntime {
     journal: Journal,
     control_cursor: u64,
     has_reasoner_selection: bool,
+    has_reasoning_recovery: bool,
+    live_clock: bool,
 }
 impl TaskRuntime {
     pub fn open(host: &Host, config: RuntimeConfig) -> Result<Self, HostError> {
@@ -113,6 +116,14 @@ impl TaskRuntime {
                         .any(|template| template.route.reasoner_selection.is_some())
                 })
         });
+        let has_reasoning_recovery = config.routes.iter().any(|route| {
+            route.reasoning_recovery.is_some()
+                || route.plan.as_ref().is_some_and(|plan| {
+                    plan.templates
+                        .iter()
+                        .any(|template| template.route.reasoning_recovery.is_some())
+                })
+        });
         Ok(Self {
             config,
             identity,
@@ -120,10 +131,12 @@ impl TaskRuntime {
             journal,
             control_cursor: 0,
             has_reasoner_selection,
+            has_reasoning_recovery,
+            live_clock: true,
         })
     }
 
-    /// Pro Runde begrenzte Logseiten und Reasoning-Aufrufe; kein automatischer Retry.
+    /// Pro Runde begrenzte Logseiten und Aufrufe; Recovery nur nach Betreiberpolicy.
     pub fn tick(&mut self, host: &mut Host) -> Result<TickReport, HostError> {
         self.tick_with_time(host, scheduler::now_unix_ms()?, true)
     }
@@ -148,6 +161,7 @@ impl TaskRuntime {
         {
             return Err(invalid("runtime topology changed"));
         }
+        self.live_clock = live_clock;
         let has_deadlines = self.config.routes.iter().any(|route| {
             route.max_lifetime_ms.is_some()
                 || route.plan.as_ref().is_some_and(|plan| {

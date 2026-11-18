@@ -6,7 +6,8 @@ use std::collections::HashSet;
 
 pub(super) fn initialize(connection: &Connection) -> Result<(), HostError> {
     connection.execute_batch("CREATE TABLE IF NOT EXISTS runtime_reasoning_requests(request_id TEXT PRIMARY KEY,sequence INTEGER NOT NULL REFERENCES runtime_jobs(sequence));
-        CREATE INDEX IF NOT EXISTS runtime_task_reasoning ON runtime_reasoning_requests(sequence);").map_err(db)
+        CREATE INDEX IF NOT EXISTS runtime_task_reasoning ON runtime_reasoning_requests(sequence);
+        CREATE TABLE IF NOT EXISTS runtime_recovery_bindings(sequence INTEGER PRIMARY KEY REFERENCES runtime_jobs(sequence),definition_version TEXT NOT NULL);").map_err(db)
 }
 impl Journal {
     pub(in crate::task_runtime) fn selection_job(
@@ -75,5 +76,32 @@ impl Journal {
             }
         }
         Ok(cancelled)
+    }
+}
+
+impl Journal {
+    pub(in crate::task_runtime) fn bind_recovery(
+        &self,
+        sequence: u64,
+        definition: &arcs::core::VersionId,
+    ) -> Result<(), HostError> {
+        self.connection.execute("INSERT INTO runtime_recovery_bindings(sequence,definition_version) VALUES(?1,?2) ON CONFLICT(sequence) DO UPDATE SET definition_version=excluded.definition_version WHERE definition_version<>excluded.definition_version",params![sequence as i64,definition.0]).map_err(db)?;
+        Ok(())
+    }
+    pub(in crate::task_runtime) fn recovery_report_jobs(
+        &self,
+    ) -> Result<Vec<(u64, String, arcs::core::VersionId)>, HostError> {
+        let mut statement=self.connection.prepare("SELECT b.sequence,j.route_id,b.definition_version FROM runtime_recovery_bindings b JOIN runtime_jobs j ON j.sequence=b.sequence ORDER BY b.sequence DESC LIMIT 50").map_err(db)?;
+        statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, i64>(0)? as u64,
+                    row.get(1)?,
+                    arcs::core::VersionId(row.get(2)?),
+                ))
+            })
+            .map_err(db)?
+            .map(|row| row.map_err(db))
+            .collect()
     }
 }
