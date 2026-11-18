@@ -4,11 +4,13 @@
 //! Manifestbehauptung wird niemals ohne den getrennten Grant wirksam.
 
 mod catalog;
+mod discovery;
 mod grant;
 mod manifest;
 mod registry;
 
 pub use catalog::*;
+pub use discovery::*;
 pub use grant::*;
 
 #[cfg(test)]

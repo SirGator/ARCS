@@ -44,6 +44,7 @@ fn schemas() -> SchemaRegistry {
 
 fn input_capability(id: &str, schemas: &[&str]) -> CapabilityDescriptor {
     CapabilityDescriptor {
+        description: None,
         id: CapabilityId(id.into()),
         contract: CapabilityContract::Input {
             emits: schemas
@@ -57,6 +58,7 @@ fn input_capability(id: &str, schemas: &[&str]) -> CapabilityDescriptor {
 
 fn observe_capability(id: &str, schemas: &[&str]) -> CapabilityDescriptor {
     CapabilityDescriptor {
+        description: None,
         id: CapabilityId(id.into()),
         contract: CapabilityContract::Observe {
             emits: schemas

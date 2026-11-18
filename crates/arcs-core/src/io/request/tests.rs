@@ -96,6 +96,7 @@ fn manifest() -> AdapterManifest {
         adapter_id: AdapterId("metrics.request-test".into()),
         adapter_version: "1.0.0".into(),
         capabilities: vec![CapabilityDescriptor {
+            description: None,
             id: CapabilityId("metrics.fetch".into()),
             contract: CapabilityContract::Request {
                 accepts: vec![SchemaId("arcs.request.slice_test.v1".into())],

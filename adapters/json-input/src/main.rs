@@ -125,6 +125,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         adapter_id: profile.adapter_id.clone(),
         adapter_version: env!("CARGO_PKG_VERSION").into(),
         capabilities: vec![CapabilityDescriptor {
+            description: None,
             id: profile.capability_id.clone(),
             contract: CapabilityContract::Input {
                 emits: vec![profile.schema_id.clone()],

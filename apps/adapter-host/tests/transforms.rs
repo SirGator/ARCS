@@ -88,6 +88,7 @@ fn register_source(
                 adapter_id: AdapterId("other.source".into()),
                 adapter_version: "1".into(),
                 capabilities: vec![CapabilityDescriptor {
+                    description: None,
                     id: CapabilityId("value.input".into()),
                     contract: CapabilityContract::Input {
                         emits: vec![SchemaId(schema.into())],

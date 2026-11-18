@@ -98,6 +98,7 @@ fn input_manifest() -> AdapterManifest {
         adapter_id: AdapterId(INPUT_ADAPTER.into()),
         adapter_version: "1.0.0".into(),
         capabilities: vec![CapabilityDescriptor {
+            description: None,
             id: CapabilityId(INPUT_CAPABILITY.into()),
             contract: CapabilityContract::Input {
                 emits: vec![SchemaId("arcs.input.v1".into())],
@@ -130,6 +131,7 @@ fn reasoning_manifest() -> AdapterManifest {
         adapter_id: AdapterId(REASONING_ADAPTER.into()),
         adapter_version: "1.0.0".into(),
         capabilities: vec![CapabilityDescriptor {
+            description: None,
             id: CapabilityId(REASONING_CAPABILITY.into()),
             contract: CapabilityContract::Reason {
                 emits: vec![SchemaId(CANDIDATE_SCHEMA_ID.into())],

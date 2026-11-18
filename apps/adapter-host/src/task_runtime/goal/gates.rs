@@ -282,7 +282,8 @@ impl TaskRuntime {
             return Err(invalid("current action verification failed"));
         }
         self.decide_goal(host, &mut task, decision, actor, reason)?;
-        self.save_goal(&task)
+        self.save_goal(&task)?;
+        self.cleanup_control(host, sequence)
     }
 
     pub fn cancel_goal(&self, host: &Host, sequence: u64, reason: String) -> Result<(), HostError> {
@@ -300,7 +301,8 @@ impl TaskRuntime {
         // Cancellation stops further work; it never claims to roll back an effect.
         task.state = GoalState::Cancelled;
         task.detail = reason;
-        self.save_goal(&task)
+        self.save_goal(&task)?;
+        self.cleanup_control(host, sequence)
     }
 
     fn check_goal_host(&self, host: &Host) -> Result<(), HostError> {
@@ -321,6 +323,7 @@ impl TaskRuntime {
     ) -> Result<(), HostError> {
         // Revalidate policy on resume as well. Core independently checks approval,
         // schema, capability grant and idempotent execution before dispatch.
+        self.verify_goal_control(host, task.sequence, config)?;
         if self.gate(host, route, config, task)?.result.verdict != VerificationVerdict::Pass {
             return Err(invalid("action no longer passes verification"));
         }

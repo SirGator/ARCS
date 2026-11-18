@@ -87,6 +87,7 @@ pub fn manifest() -> AdapterManifest {
 /// Installationen anbieten; ihre Adapter-ID unterscheidet die Ziele.
 pub fn manifest_with_id(adapter_id: AdapterId) -> AdapterManifest {
     let descriptor = |id: &str, contract, permission: &str| CapabilityDescriptor {
+        description: None,
         id: CapabilityId(id.into()),
         contract,
         required_permissions: vec![permission.into()],

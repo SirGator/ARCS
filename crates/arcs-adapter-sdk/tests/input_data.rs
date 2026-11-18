@@ -13,6 +13,7 @@ impl Adapter for Receiver {
             adapter_id: AdapterId("receiver".into()),
             adapter_version: "1".into(),
             capabilities: vec![CapabilityDescriptor {
+                description: None,
                 id: CapabilityId("reason".into()),
                 contract: CapabilityContract::Reason {
                     emits: vec![SchemaId("arcs.result_candidate.v1".into())],

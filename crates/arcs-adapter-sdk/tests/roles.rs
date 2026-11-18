@@ -20,6 +20,7 @@ impl Adapter for Dual {
             adapter_version: "1".into(),
             capabilities: vec![
                 CapabilityDescriptor {
+                    description: None,
                     id: CapabilityId("input".into()),
                     contract: CapabilityContract::Input {
                         emits: vec![SchemaId("arcs.input.sample.v1".into())],
@@ -27,6 +28,7 @@ impl Adapter for Dual {
                     required_permissions: vec![],
                 },
                 CapabilityDescriptor {
+                    description: None,
                     id: CapabilityId("reason".into()),
                     contract: CapabilityContract::Reason {
                         emits: vec![SchemaId("arcs.sample_candidate.v1".into())],

@@ -9,6 +9,11 @@ Ein Profil nennt Adapter-ID und `method`:
 - `learned`: Ein ausdrücklich gekennzeichneter Testadapter liefert den
   ersten Wert. Er führt keine echte Modellinferenz aus.
 
+Optional kann das Profil eine strukturierte `description` seiner Capability
+enthalten. Der [Suchvertrag](../../apps/adapter-host/examples/capability-discovery.md)
+beschreibt Felder, Größenlimits und die Kennzeichnung als ungeprüfte Angabe.
+Ohne diese Option bleibt die gespeicherte Profilidentität unverändert.
+
 Beide Varianten verwenden dieselben V2-Nachrichten und Task-/Candidate-
 Schemas. Der Solver benötigt ein Iterationsbudget und keine Tokens, Prompts
 oder Temperaturen. Leere Wertelisten ergeben `no_solution`; ein zu kleines

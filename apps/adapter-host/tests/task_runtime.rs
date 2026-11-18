@@ -524,6 +524,12 @@ fn a_legacy_review_journal_is_migrated_without_recomputing_or_changing_completed
     // foreign keys to the temporary downgrade table.
     fixture.db("runtime").execute_batch("BEGIN IMMEDIATE;
         DROP TABLE runtime_reasoning_requests;
+        DROP TABLE runtime_control_sessions;
+        DROP TABLE runtime_task_deadlines;
+        DROP TABLE runtime_deadline_clock;
+        DROP TABLE runtime_job_priorities;
+        DROP TABLE runtime_dispatch_classes;
+        DROP TABLE runtime_dispatch_state;
         DROP TABLE runtime_plan_cancellations;
         DROP TABLE runtime_plan_steps;
         DROP TABLE runtime_plans;

@@ -103,6 +103,7 @@ fn reasoning_manifest() -> AdapterManifest {
         adapter_id: AdapterId("reasoning.test".into()),
         adapter_version: "1.0.0".into(),
         capabilities: vec![CapabilityDescriptor {
+            description: None,
             id: CapabilityId("reasoning.propose".into()),
             contract: CapabilityContract::Reason {
                 emits: vec![SchemaId(
@@ -143,6 +144,7 @@ fn action_manifest() -> AdapterManifest {
         adapter_id: AdapterId("action.test".into()),
         adapter_version: "1.0.0".into(),
         capabilities: vec![CapabilityDescriptor {
+            description: None,
             id: CapabilityId("device.set".into()),
             contract: CapabilityContract::Act {
                 accepts: vec![SchemaId(

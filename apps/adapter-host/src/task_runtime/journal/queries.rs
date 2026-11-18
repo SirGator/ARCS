@@ -20,6 +20,7 @@ pub(super) fn query_capabilities(config: &RuntimeConfig) -> Vec<CapabilityDescri
         for source in &goal.sources {
             if let Some(query) = &source.query {
                 capabilities.push(CapabilityDescriptor {
+                    description: None,
                     id: id(&source.id),
                     contract: CapabilityContract::Input {
                         emits: vec![query.schema_id.clone()],

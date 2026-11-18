@@ -36,13 +36,16 @@ impl TaskRuntime {
         input: &Artifact,
         now_unix_ms: u64,
     ) -> Result<(), HostError> {
+        self.acquire_control(host, sequence, config, &input.version_id)?;
         let mut task = match self.saved_goal(sequence)? {
             Some(task) => task,
             None => {
                 // A generated goal may start long after its original input or
                 // plan admission. Begin its freshness window at acquisition,
                 // not at the old input cursor; persist it before any query.
-                let input_cursor = if self.journal.dynamic_origin(sequence)?.is_some() {
+                let input_cursor = if !config.exclusive_resources.is_empty()
+                    || self.journal.dynamic_origin(sequence)?.is_some()
+                {
                     host.store().latest_sequence().map_err(HostError::Store)?
                 } else {
                     self.journal.source_sequence(sequence)?
@@ -348,7 +351,8 @@ impl TaskRuntime {
             }
             _ => return Ok(()),
         }
-        self.persist_goal_step(host, config, &task, now_unix_ms)
+        self.persist_goal_step(host, config, &task, now_unix_ms)?;
+        self.cleanup_control(host, sequence)
     }
 
     fn goal_request_id(&self, task: &GoalTask, phase: &str) -> String {

@@ -128,6 +128,7 @@ fn act_manifest() -> AdapterManifest {
         adapter_version: "1.0.0".into(),
         capabilities: vec![
             CapabilityDescriptor {
+                description: None,
                 id: CapabilityId("device.set".into()),
                 contract: CapabilityContract::Act {
                     accepts: vec![SchemaId("arcs.route_candidate.execution_test.v1".into())],
@@ -137,6 +138,7 @@ fn act_manifest() -> AdapterManifest {
                 required_permissions: vec!["device.write".into()],
             },
             CapabilityDescriptor {
+                description: None,
                 id: CapabilityId("device.transform".into()),
                 contract: CapabilityContract::Transform {
                     accepts: vec![SchemaId("arcs.route_candidate.execution_test.v1".into())],

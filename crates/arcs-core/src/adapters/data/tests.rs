@@ -41,6 +41,7 @@ impl DataAdapter for Endpoint {
 
 fn fixture(limits: Option<DataLimits>) -> (AdapterRegistry, Endpoint, AdapterGrant) {
     let descriptor = |id: &str| CapabilityDescriptor {
+        description: None,
         id: CapabilityId(id.into()),
         contract: CapabilityContract::Observe {
             emits: vec![SchemaId(DATA_REFERENCE_SCHEMA.into())],

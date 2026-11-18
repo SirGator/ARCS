@@ -6,6 +6,32 @@ pub(super) use jobs::PendingReasoning;
 use super::*;
 
 impl Host {
+    fn reasoning_key(request: &arcs::reasoning::ReasoningRequestV2) -> String {
+        arcs::runtime::deterministic_invocation_id(
+            arcs::runtime::InvocationKind::Reasoning,
+            &[
+                "v2",
+                &request.capability.adapter_id.0,
+                &request.capability.capability_id.0,
+                &request.request_id,
+            ],
+        )
+    }
+
+    fn has_reasoning_result(&self, key: &str) -> Result<bool, HostError> {
+        // Admission hint only. The Core still validates the complete request,
+        // current grants, input fingerprint and cached artifacts before reuse.
+        if self.resource_pools.is_empty() {
+            return Ok(false);
+        }
+        arcs::runtime::InvocationService::new(&self.store, &self.schemas, &SystemClock)
+            .lookup(key)
+            .map(|state| {
+                state
+                    .is_some_and(|state| state.status == arcs::runtime::InvocationStatus::Succeeded)
+            })
+            .map_err(|e| HostError::Reasoning(arcs::reasoning::ReasoningError::Invocation(e)))
+    }
     pub fn reason(
         &mut self,
         request: arcs::reasoning::ReasoningRequestV2,
@@ -17,9 +43,17 @@ impl Host {
         request: arcs::reasoning::ReasoningRequestV2,
         inputs: &[arcs::adapters::input_data::InputDataSelection],
     ) -> Result<arcs::reasoning::general::ReasoningResult, HostError> {
-        self.ensure_adapter_available(&request.capability.adapter_id)?;
-        for input in inputs {
-            self.ensure_adapter_available(&input.source.adapter_id)?;
+        let cached = self.has_reasoning_result(&Self::reasoning_key(&request))?;
+        if !cached {
+            self.ensure_adapter_available(&request.capability.adapter_id)?;
+            for input in inputs {
+                self.ensure_adapter_available(&input.source.adapter_id)?;
+            }
+            let resources = std::iter::once(request.capability.adapter_id.clone())
+                .chain(inputs.iter().map(|input| input.source.adapter_id.clone()))
+                .collect();
+            let claims = self.reasoning_claims(&resources)?;
+            self.ensure_resources_available(&claims)?;
         }
         let adapter = self
             .adapters
@@ -31,15 +65,27 @@ impl Host {
             .iter()
             .map(|adapter| adapter.endpoint.as_ref() as &dyn arcs::adapters::data::DataAdapter)
             .collect();
-        arcs::reasoning::general::GeneralReasoningService {
+        let mut service = arcs::reasoning::general::GeneralReasoningService {
             registry: &self.registry,
             schemas: &self.schemas,
             store: &self.store,
             ids: &mut self.ids,
             clock: &SystemClock,
+        };
+        if cached {
+            return match service
+                .prepare(adapter.endpoint.as_ref(), request, inputs)
+                .map_err(HostError::Reasoning)?
+            {
+                arcs::reasoning::general::ReasoningPreparation::Complete(result) => Ok(result),
+                arcs::reasoning::general::ReasoningPreparation::Dispatch(_) => {
+                    Err(invalid("cached reasoning state changed during admission"))
+                }
+            };
         }
-        .reason_with_data(adapter.endpoint.as_ref(), request, inputs, &sources)
-        .map_err(HostError::Reasoning)
+        service
+            .reason_with_data(adapter.endpoint.as_ref(), request, inputs, &sources)
+            .map_err(HostError::Reasoning)
     }
 }
 

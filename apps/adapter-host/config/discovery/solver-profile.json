@@ -1,0 +1,24 @@
+{
+  "adapter_id": "example.solver",
+  "method": "solver",
+  "description": {
+    "purpose": "Find the nearest listed numerical value",
+    "tags": [
+      "nearest",
+      "numeric",
+      "solver"
+    ],
+    "preconditions": [
+      "A finite list of values and a target are provided"
+    ],
+    "effects": [
+      "Returns a candidate; no external action"
+    ],
+    "constraints": [
+      "At most 4096 values"
+    ],
+    "resources": [
+      "Local CPU; see operator grants and host resource policy"
+    ]
+  }
+}

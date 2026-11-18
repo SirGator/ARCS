@@ -1,0 +1,53 @@
+{
+  "config_version": 1,
+  "database": "../../../../var/priorities/core.sqlite",
+  "node_id": "priority-host",
+  "schemas": [
+    "../../../../adapters/example-reasoner/schemas/task.schema.json",
+    "../../../../adapters/example-reasoner/schemas/candidate.schema.json"
+  ],
+  "adapters": [
+    {
+      "program": "../../../../target/debug/arcs-json-input",
+      "profile": "../parallel/input-profile.json",
+      "args": [
+        {
+          "path": "../../../../var/priorities/input.sqlite"
+        }
+      ],
+      "grant_file": "../parallel/input-grant.json"
+    },
+    {
+      "program": "../../../../target/debug/arcs-example-reasoner",
+      "profile": "../parallel/solver-profile.json",
+      "args": [
+        {
+          "path": "../../../../var/priorities/solver.sqlite"
+        }
+      ],
+      "grant_file": "../parallel/solver-grant.json",
+      "reasoning_resources": {
+        "analysis_slots": 1,
+        "ram_mb": 256
+      }
+    },
+    {
+      "program": "../../../../target/debug/arcs-example-reasoner",
+      "profile": "../parallel/model-profile.json",
+      "args": [
+        {
+          "path": "../../../../var/priorities/model.sqlite"
+        }
+      ],
+      "grant_file": "../parallel/model-grant.json",
+      "reasoning_resources": {
+        "analysis_slots": 1,
+        "ram_mb": 512
+      }
+    }
+  ],
+  "resource_pools": {
+    "analysis_slots": 1,
+    "ram_mb": 768
+  }
+}

@@ -136,6 +136,11 @@ fn snapshot(
     let adapters=report.adapters.into_iter().map(|adapter|json!({"adapter_id":adapter.adapter_id,
         "observations_received":adapter.observations_received,"observations_committed":adapter.observations_committed,
         "requests":adapter.requests.len(),"transforms":adapter.transforms.len()})).collect::<Vec<_>>();
+    let reservations = runtime
+        .map(|runtime| runtime.exclusive_resources(host))
+        .transpose()
+        .map_err(fail)?
+        .unwrap_or_default();
     let runtime = runtime
         .map(|runtime| runtime.report(ticks))
         .transpose()
@@ -168,6 +173,6 @@ fn snapshot(
         writer,
         json!({"event":"snapshot","ticks":ticks,"uptime_ms":started.elapsed().as_millis(),
         "stored_artifacts":report.stored_artifacts,"world_revision":report.world_revision,
-        "adapters":adapters,"runtime":runtime,"recent_artifacts":recent}),
+        "adapters":adapters,"runtime":runtime,"recent_artifacts":recent,"resource_pools":report.resource_pools,"resource_reservations":reservations}),
     )
 }

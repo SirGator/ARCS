@@ -1,0 +1,32 @@
+{
+  "$id": "arcs.resource_reservation.v1",
+  "type": "object",
+  "required": ["resource", "owner", "state", "decision_by", "reason", "evidence"],
+  "properties": {
+    "resource": {"type": "string", "minLength": 1},
+    "owner": {
+      "type": "object",
+      "required": ["definition_version", "input_version", "task_sequence", "session"],
+      "properties": {
+        "definition_version": {"type": "string", "minLength": 1},
+        "input_version": {"type": "string", "minLength": 1},
+        "task_sequence": {"type": "integer", "minimum": 1},
+        "session": {"type": "integer", "minimum": 1}
+      },
+      "additionalProperties": false
+    },
+    "state": {"type": "string", "enum": ["held", "released"]},
+    "decision_by": {
+      "type": "object",
+      "required": ["actor_type", "id"],
+      "properties": {
+        "actor_type": {"type": "string", "enum": ["system", "human"]},
+        "id": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    },
+    "reason": {"type": "string", "minLength": 1},
+    "evidence": {"type": "array", "items": {"type": "string", "minLength": 1}}
+  },
+  "additionalProperties": false
+}

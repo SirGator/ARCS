@@ -83,6 +83,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 adapter_id: AdapterId(SOURCE.into()),
                 adapter_version: "1".into(),
                 capabilities: vec![CapabilityDescriptor {
+                    description: None,
                     id: CapabilityId("report.input".into()),
                     contract: CapabilityContract::Input {
                         emits: vec![SchemaId(REPORT.into())],

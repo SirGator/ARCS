@@ -41,6 +41,8 @@ pub struct HostConfig {
     pub adapters: Vec<AdapterConfig>,
     #[serde(default)]
     pub polling: PollingConfig,
+    #[serde(default)]
+    pub resource_pools: crate::resource_policy::ResourceQuantities,
 }
 
 #[derive(Debug, Deserialize)]
@@ -52,6 +54,9 @@ pub struct AdapterConfig {
     /// Namen freigegebener Variablen; Werte werden niemals gespeichert.
     #[serde(default)]
     pub inherit_env: Vec<String>,
+    /// Logical capacities used by this adapter while participating in Reason V2.
+    #[serde(default)]
+    pub reasoning_resources: crate::resource_policy::ResourceQuantities,
     pub profile: Option<PathBuf>,
     pub working_directory: Option<PathBuf>,
     pub grant_file: PathBuf,
@@ -128,12 +133,14 @@ pub(crate) struct PreparedConfig {
     pub schemas: SchemaRegistry,
     pub adapters: Vec<PreparedAdapter>,
     pub polling: PollingConfig,
+    pub resource_pools: crate::resource_policy::ResourceQuantities,
 }
 
 pub(crate) struct PreparedAdapter {
     pub program: PathBuf,
     pub args: Vec<OsString>,
     pub inherit_env: Vec<String>,
+    pub reasoning_resources: crate::resource_policy::ResourceQuantities,
     pub working_directory: PathBuf,
     pub grant: AdapterGrant,
     pub timeout_ms: u64,
@@ -191,6 +198,7 @@ impl PreparedConfig {
         })?;
         let base = path.parent().expect("canonical config has a parent");
         let config: HostConfig = read_json(&path)?;
+        crate::resource_policy::validate(&config.resource_pools, None)?;
         if config.config_version != 1 {
             return Err(invalid("supported config_version is 1"));
         }
@@ -261,6 +269,10 @@ impl PreparedConfig {
         let mut request_ids = HashSet::new();
         let mut adapters = Vec::new();
         for adapter in config.adapters {
+            crate::resource_policy::validate(
+                &config.resource_pools,
+                Some(&adapter.reasoning_resources),
+            )?;
             crate::process_environment::validate(&adapter.inherit_env)?;
             if !(1..=3_600_000).contains(&adapter.timeout_ms) {
                 return Err(invalid("timeout_ms must be 1..3600000"));
@@ -293,7 +305,14 @@ impl PreparedConfig {
                 });
             }
             let grant: AdapterGrant = read_json(&resolve(base, &adapter.grant_file)?)?;
-            if [HOST_ID, PIPELINE_ID, RUNTIME_ID, PLAN_ID].contains(&grant.adapter_id.0.as_str())
+            if [
+                HOST_ID,
+                PIPELINE_ID,
+                RUNTIME_ID,
+                PLAN_ID,
+                arcs::runtime::reservations::PUBLISHER,
+            ]
+            .contains(&grant.adapter_id.0.as_str())
                 || !adapter_ids.insert(grant.adapter_id.clone())
             {
                 return Err(invalid(format!(
@@ -430,6 +449,7 @@ impl PreparedConfig {
                 program,
                 args,
                 inherit_env: adapter.inherit_env,
+                reasoning_resources: adapter.reasoning_resources,
                 working_directory,
                 grant,
                 timeout_ms: adapter.timeout_ms,
@@ -443,6 +463,7 @@ impl PreparedConfig {
             schemas,
             adapters,
             polling: config.polling,
+            resource_pools: config.resource_pools,
         })
     }
 }

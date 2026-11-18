@@ -65,6 +65,7 @@ fn registry(schemas: &SchemaRegistry, trust: TrustLevel) -> AdapterRegistry {
         adapter_id: AdapterId(ADAPTER_ID.into()),
         adapter_version: "1.0.0".into(),
         capabilities: vec![CapabilityDescriptor {
+            description: None,
             id: CapabilityId(CAPABILITY_ID.into()),
             contract: CapabilityContract::Observe {
                 emits: vec![SchemaId(SENSOR_SCHEMA_ID.into())],

@@ -60,6 +60,7 @@ impl Adapter for Driver {
             adapter_id: AdapterId("example.device".into()),
             adapter_version: "1.0.0".into(),
             capabilities: vec![CapabilityDescriptor {
+                description: None,
                 id: CapabilityId("state.observe".into()),
                 contract: CapabilityContract::Observe {
                     emits: vec![SchemaId("example.state.v1".into())],

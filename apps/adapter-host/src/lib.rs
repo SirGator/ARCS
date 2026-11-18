@@ -5,10 +5,12 @@ mod error;
 pub mod monitor;
 pub mod pipeline;
 mod process_environment;
+pub mod resource_policy;
 mod runtime;
 pub mod task_runtime;
 
 pub use error::HostError;
 pub use runtime::{
-    AdapterReport, EstimateReport, Host, HostReport, RequestReport, TransformReport,
+    AdapterReport, EstimateReport, Host, HostReport, RequestReport, ResourcePoolReport,
+    TransformReport,
 };

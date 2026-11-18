@@ -21,6 +21,8 @@ pub const ASSESSMENT_SCHEMA: &str = "arcs.goal_assessment_candidate.v1";
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GoalConfig {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exclusive_resources: Vec<String>,
     #[serde(default, skip_serializing_if = "is_false")]
     pub initial_assessment: bool,
     /// Betreiberdefinierte Wartebedingung nach einer abgeschlossenen Runde.
@@ -209,6 +211,10 @@ impl GoalConfig {
         route: &ReasoningRoute,
         manifests: &mut BTreeMap<String, AdapterManifest>,
     ) -> Result<(), HostError> {
+        if !self.exclusive_resources.is_empty() {
+            arcs::runtime::reservations::validate_resources(&self.exclusive_resources)
+                .map_err(|e| invalid(format!("exclusive resources: {e:?}")))?;
+        }
         if !(1..=1000).contains(&self.max_rounds)
             || !(1..=10_000).contains(&self.max_wait_ticks)
             || !(1..=16).contains(&self.sources.len())

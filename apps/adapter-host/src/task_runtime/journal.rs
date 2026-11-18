@@ -1,4 +1,7 @@
+mod control;
+mod deadlines;
 mod dependencies;
+pub(super) mod dispatch;
 mod planning;
 mod queries;
 mod reasoning;
@@ -167,6 +170,9 @@ impl Journal {
         dependencies::initialize(&connection)?;
         planning::initialize(&connection)?;
         reasoning::initialize(&connection)?;
+        control::initialize(&connection)?;
+        dispatch::initialize(&connection, config)?;
+        deadlines::initialize(&connection)?;
         Ok(Self {
             connection,
             operator,
@@ -181,13 +187,6 @@ impl Journal {
             })
             .map(|count| count as usize)
             .map_err(db)
-    }
-    pub fn next(
-        &self,
-        cursor: u64,
-        include_failed: bool,
-    ) -> Result<Option<(u64, String, VersionId)>, HostError> {
-        self.connection.query_row(&format!("SELECT sequence,route_id,input_version FROM runtime_jobs j WHERE {} AND NOT EXISTS(SELECT 1 FROM runtime_job_schedules s WHERE s.sequence=j.sequence AND s.released_at IS NULL) AND NOT EXISTS(SELECT 1 FROM runtime_job_joins d WHERE d.sequence=j.sequence AND d.state!='ready') ORDER BY (sequence<=?1),sequence LIMIT 1", active(include_failed)),[cursor.min(i64::MAX as u64) as i64],|row| Ok((row.get::<_,i64>(0)? as u64,row.get(1)?,VersionId(row.get(2)?)))).optional().map_err(db)
     }
     pub fn start(&self, sequence: u64) -> Result<(), HostError> {
         self.connection
@@ -224,6 +223,7 @@ fn bind_definition(
     let adapter = AdapterId(RUNTIME_ID.into());
     let capability = CapabilityId("runtime.definition".into());
     let mut capabilities = vec![CapabilityDescriptor {
+        description: None,
         id: capability.clone(),
         contract: CapabilityContract::Input {
             emits: vec![SchemaId("arcs.input.host_runtime.v1".into())],

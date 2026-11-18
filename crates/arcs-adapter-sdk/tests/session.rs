@@ -23,6 +23,7 @@ fn manifest() -> AdapterManifest {
         adapter_version: "1.0.0".into(),
         capabilities: vec![
             CapabilityDescriptor {
+                description: None,
                 id: CapabilityId("deliver".into()),
                 contract: CapabilityContract::Output {
                     accepts: vec![schema("state")],
@@ -32,6 +33,7 @@ fn manifest() -> AdapterManifest {
                 required_permissions: vec!["output.write".into()],
             },
             CapabilityDescriptor {
+                description: None,
                 id: CapabilityId("normalize".into()),
                 contract: CapabilityContract::Transform {
                     accepts: vec![schema("query")],
@@ -40,6 +42,7 @@ fn manifest() -> AdapterManifest {
                 required_permissions: vec![],
             },
             CapabilityDescriptor {
+                description: None,
                 id: CapabilityId("observe".into()),
                 contract: CapabilityContract::Observe {
                     emits: vec![schema("state")],
@@ -47,6 +50,7 @@ fn manifest() -> AdapterManifest {
                 required_permissions: vec![],
             },
             CapabilityDescriptor {
+                description: None,
                 id: CapabilityId("read".into()),
                 contract: CapabilityContract::Request {
                     accepts: vec![schema("query")],
@@ -55,6 +59,7 @@ fn manifest() -> AdapterManifest {
                 required_permissions: vec![],
             },
             CapabilityDescriptor {
+                description: None,
                 id: CapabilityId("set".into()),
                 contract: CapabilityContract::Act {
                     accepts: vec![schema("command")],

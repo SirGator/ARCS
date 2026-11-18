@@ -61,6 +61,7 @@ impl FileOutput {
             adapter_id: profile.adapter_id,
             adapter_version: env!("CARGO_PKG_VERSION").into(),
             capabilities: vec![CapabilityDescriptor {
+                description: None,
                 id: CapabilityId(CAPABILITY.into()),
                 contract: CapabilityContract::Output {
                     accepts: vec![SchemaId(REPORT_SCHEMA.into())],

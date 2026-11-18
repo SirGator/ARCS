@@ -36,6 +36,7 @@ fn manifest(id: AdapterId) -> AdapterManifest {
         adapter_id: id,
         adapter_version: env!("CARGO_PKG_VERSION").into(),
         capabilities: vec![CapabilityDescriptor {
+            description: None,
             id: CapabilityId(CAPABILITY.into()),
             contract: CapabilityContract::Observe {
                 emits: vec![SchemaId(DATA_REFERENCE_SCHEMA.into())],

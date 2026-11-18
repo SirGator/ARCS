@@ -1,0 +1,7 @@
+{
+  "text": "nearest",
+  "role": "reason",
+  "emits_schema": "arcs.solution_candidate.nearest.v1",
+  "reasoning_method": "solver",
+  "limit": 5
+}

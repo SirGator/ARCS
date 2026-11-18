@@ -98,6 +98,7 @@ impl Fixture {
                 adapter_id: AdapterId(id.into()),
                 adapter_version: "1".into(),
                 capabilities: vec![CapabilityDescriptor {
+                    description: None,
                     id: CapabilityId("run".into()),
                     contract,
                     required_permissions: vec![],

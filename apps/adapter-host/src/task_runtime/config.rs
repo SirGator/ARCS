@@ -50,6 +50,12 @@ pub struct RuntimeConfig {
 #[serde(deny_unknown_fields)]
 pub struct ReasoningRoute {
     pub id: String,
+    /// Betreiberpriorität 0..3; 0 bleibt in bestehenden Definitionen unsichtbar.
+    #[serde(default, skip_serializing_if = "is_default_priority")]
+    pub priority: u8,
+    /// Gesamte Lebensdauer ab Aufnahme, einschließlich Wartephasen und Ausfällen.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_lifetime_ms: Option<u64>,
     pub source: CapabilityRef,
     pub input_schema_id: SchemaId,
     pub payload_fields: Vec<String>,
@@ -75,6 +81,10 @@ pub struct ReasoningRoute {
     pub goal: Option<super::goal::GoalConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plan: Option<super::planning::PlanningConfig>,
+}
+
+fn is_default_priority(priority: &u8) -> bool {
+    *priority == 0
 }
 
 pub(super) fn invalid(message: impl Into<String>) -> HostError {
@@ -144,6 +154,23 @@ impl RuntimeConfig {
             ));
         }
         super::dependencies::validate_routes(&self.routes)?;
+        let resources = self
+            .routes
+            .iter()
+            .flat_map(|r| {
+                r.goal.iter().chain(
+                    r.plan
+                        .iter()
+                        .flat_map(|p| p.templates.iter().filter_map(|t| t.route.goal.as_ref())),
+                )
+            })
+            .flat_map(|g| g.exclusive_resources.iter())
+            .collect::<HashSet<_>>();
+        if resources.len() > 256 {
+            return Err(invalid(
+                "at most 256 exclusive resource identifiers per runtime",
+            ));
+        }
         // Polling budgets may change. Task semantics and actual manifests may not.
         Ok(json!({"runtime_id":self.runtime_id,"routes":self.routes,"manifests":manifests}))
     }
@@ -160,6 +187,10 @@ pub(super) fn validate_route_contract(
     }
     let mut fields = HashSet::new();
     if !identifier(&route.id)
+        || route.priority > 3
+        || route
+            .max_lifetime_ms
+            .is_some_and(|ms| !(1..=315_576_000_000).contains(&ms))
         || route.objective.trim().is_empty()
         || route.objective.len() > 4096
         || route.payload_fields.is_empty()

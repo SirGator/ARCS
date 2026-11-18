@@ -1,5 +1,7 @@
 mod input;
 mod reason;
+mod resources;
+pub use resources::ResourcePoolReport;
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -78,6 +80,7 @@ pub struct HostReport {
     pub world_revision: u64,
     pub adapters: Vec<AdapterReport>,
     pub estimates: Vec<EstimateReport>,
+    pub resource_pools: Vec<ResourcePoolReport>,
 }
 
 struct RunningAdapter {
@@ -97,6 +100,7 @@ pub struct Host {
     polling: PollingConfig,
     reasoning_jobs: HashMap<String, reason::PendingReasoning>,
     unavailable_adapters: HashSet<AdapterId>,
+    resource_pools: crate::resource_policy::ResourceQuantities,
 }
 
 fn invalid(message: impl Into<String>) -> HostError {
@@ -110,6 +114,7 @@ fn register_host(
     adapters: &[PreparedAdapter],
 ) -> Result<(), HostError> {
     let mut capabilities = vec![CapabilityDescriptor {
+        description: None,
         id: CapabilityId("request.definition".into()),
         contract: CapabilityContract::Input {
             emits: vec![SchemaId(DEFINITION_SCHEMA.into())],
@@ -118,6 +123,7 @@ fn register_host(
     }];
     for request in adapters.iter().flat_map(|adapter| &adapter.requests) {
         capabilities.push(CapabilityDescriptor {
+            description: None,
             id: CapabilityId(format!("request.input.{}", request.id)),
             contract: CapabilityContract::Input {
                 emits: vec![request.input_schema_id.clone()],
@@ -126,6 +132,7 @@ fn register_host(
         });
     }
     capabilities.push(CapabilityDescriptor {
+        description: None,
         id: CapabilityId("transform.definition".into()),
         contract: CapabilityContract::Input {
             emits: vec![SchemaId(TRANSFORM_DEFINITION_SCHEMA.into())],
@@ -134,6 +141,7 @@ fn register_host(
     });
     for transform in adapters.iter().flat_map(|adapter| &adapter.transforms) {
         capabilities.push(CapabilityDescriptor {
+            description: None,
             id: CapabilityId(format!("transform.input.{}", transform.id)),
             contract: CapabilityContract::Input {
                 emits: vec![transform.input_schema_id.clone()],
@@ -241,6 +249,22 @@ impl Host {
                     .any(|adapter| adapter.config.grant.adapter_id == connection.adapter_id)
             })
             .collect()
+    }
+
+    /// Search only connected external installations not already quarantined.
+    /// A match is advisory; the actual manager must authorize every later call.
+    pub fn find_capabilities(
+        &self,
+        query: &arcs::adapters::CapabilityQuery,
+    ) -> Result<Vec<arcs::adapters::CapabilityMatch>, arcs::adapters::CapabilityDiscoveryError>
+    {
+        self.registry.find_capabilities_with(query, |capability| {
+            !self.unavailable_adapters.contains(&capability.adapter_id)
+                && self
+                    .adapters
+                    .iter()
+                    .any(|adapter| adapter.config.grant.adapter_id == capability.adapter_id)
+        })
     }
 
     pub fn prepare_output(
@@ -392,6 +416,7 @@ impl Host {
             polling: config.polling,
             reasoning_jobs: HashMap::new(),
             unavailable_adapters: HashSet::new(),
+            resource_pools: config.resource_pools,
         })
     }
 
@@ -766,6 +791,7 @@ impl Host {
 
     pub fn report(&self) -> Result<HostReport, HostError> {
         Ok(HostReport {
+            resource_pools: self.resource_usage(),
             stored_artifacts: self.store.len().map_err(HostError::Store)?,
             world_revision: self.world.revision().get(),
             adapters: self

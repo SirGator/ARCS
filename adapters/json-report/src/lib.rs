@@ -38,6 +38,7 @@ impl JsonReport {
             adapter_version: env!("CARGO_PKG_VERSION").into(),
             capabilities: vec![
                 CapabilityDescriptor {
+                    description: None,
                     id: CapabilityId(CAPABILITY.into()),
                     contract: CapabilityContract::Transform {
                         accepts: profile.accepts,
@@ -46,6 +47,7 @@ impl JsonReport {
                     required_permissions: vec!["data.transform".into()],
                 },
                 CapabilityDescriptor {
+                    description: None,
                     id: CapabilityId(COMPACT_CAPABILITY.into()),
                     contract: CapabilityContract::Transform {
                         accepts: vec![SchemaId(OUTPUT_SCHEMA.into())],

@@ -1,0 +1,23 @@
+{
+  "adapter_id": "example.model-fixture",
+  "method": "learned",
+  "description": {
+    "purpose": "Produce a recorded nearest-value fixture candidate",
+    "tags": [
+      "nearest",
+      "fixture"
+    ],
+    "preconditions": [
+      "A finite list of values and a target are provided"
+    ],
+    "effects": [
+      "Returns a candidate; no external action"
+    ],
+    "constraints": [
+      "Test fixture only; no actual model inference"
+    ],
+    "resources": [
+      "Local CPU; see operator grants and host resource policy"
+    ]
+  }
+}

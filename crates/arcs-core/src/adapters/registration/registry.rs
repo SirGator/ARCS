@@ -291,6 +291,10 @@ impl AdapterRegistry {
                             } else {
                                 vec![]
                             },
+                            description_claim: descriptor
+                                .description
+                                .clone()
+                                .map(super::CapabilityDescriptionClaim::new),
                         })
                     })
                     .collect::<Vec<_>>();
@@ -380,6 +384,7 @@ mod tests {
             adapter_id: AdapterId("sensor.demo".into()),
             adapter_version: "1.0.0".into(),
             capabilities: vec![CapabilityDescriptor {
+                description: None,
                 id: CapabilityId("sensor.observe".into()),
                 contract: CapabilityContract::Observe {
                     emits: vec![SchemaId("arcs.input.v1".into())],

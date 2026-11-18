@@ -37,6 +37,8 @@ struct Profile {
     method: ReasoningMethod,
     #[serde(default, skip_serializing_if = "Scenario::is_nearest")]
     scenario: Scenario,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    description: Option<arcs_adapter_protocol::CapabilityDescription>,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -61,6 +63,7 @@ impl Adapter for Reasoner {
             adapter_id: self.profile.adapter_id.clone(),
             adapter_version: env!("CARGO_PKG_VERSION").into(),
             capabilities: vec![CapabilityDescriptor {
+                description: self.profile.description.clone(),
                 id: CapabilityId("solution.propose".into()),
                 contract: CapabilityContract::Reason {
                     emits: if matches!(
@@ -218,6 +221,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Err("usage: arcs-example-reasoner <profile.json> <journal.sqlite>".into());
     }
     let profile: Profile = serde_json::from_slice(&std::fs::read(&args[0])?)?;
+    if profile
+        .description
+        .as_ref()
+        .is_some_and(|description| !description.is_valid())
+    {
+        return Err("invalid capability description".into());
+    }
     if (profile.scenario.is_nearest()
         && !matches!(
             profile.method,

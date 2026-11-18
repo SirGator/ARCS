@@ -26,6 +26,7 @@ fn main() {
         adapter_id: AdapterId("demo.chat".into()),
         adapter_version: "1.0.0".into(),
         capabilities: vec![CapabilityDescriptor {
+            description: None,
             id: CapabilityId("chat.observe".into()),
             contract: CapabilityContract::Observe {
                 emits: vec![SchemaId("arcs.input.v1".into())],

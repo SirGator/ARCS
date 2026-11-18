@@ -93,6 +93,7 @@ fn manifest(adapter_id: &str) -> AdapterManifest {
         adapter_id: AdapterId(adapter_id.into()),
         adapter_version: env!("CARGO_PKG_VERSION").into(),
         capabilities: vec![CapabilityDescriptor {
+            description: None,
             id: CapabilityId(CAPABILITY.into()),
             contract: CapabilityContract::Transform {
                 accepts: vec![SchemaId(INPUT_SCHEMA.into())],

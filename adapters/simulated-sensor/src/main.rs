@@ -68,6 +68,7 @@ fn run() -> Result<(), String> {
         adapter_id: profile.adapter_id.clone(),
         adapter_version: "1.0.0".into(),
         capabilities: vec![CapabilityDescriptor {
+            description: None,
             id: profile.capability_id.clone(),
             contract: CapabilityContract::Observe {
                 emits: vec![profile.schema_id.clone()],

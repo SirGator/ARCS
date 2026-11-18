@@ -93,6 +93,7 @@ fn manifest() -> AdapterManifest {
         adapter_version: "1.0.0".into(),
         capabilities: vec![
             CapabilityDescriptor {
+                description: None,
                 id: CapabilityId("device.set".into()),
                 contract: CapabilityContract::Act {
                     accepts: vec![SchemaId("arcs.route_candidate.action_test.v1".into())],
@@ -102,6 +103,7 @@ fn manifest() -> AdapterManifest {
                 required_permissions: vec!["device.write".into()],
             },
             CapabilityDescriptor {
+                description: None,
                 id: CapabilityId("device.incompatible".into()),
                 contract: CapabilityContract::Act {
                     accepts: vec![SchemaId("arcs.other_input.action_test.v1".into())],
@@ -111,6 +113,7 @@ fn manifest() -> AdapterManifest {
                 required_permissions: vec!["device.write".into()],
             },
             CapabilityDescriptor {
+                description: None,
                 id: CapabilityId("device.transform".into()),
                 contract: CapabilityContract::Transform {
                     accepts: vec![SchemaId("arcs.route_candidate.action_test.v1".into())],

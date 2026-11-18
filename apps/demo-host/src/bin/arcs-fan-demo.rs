@@ -81,6 +81,7 @@ fn register_host(
         ]
         .into_iter()
         .map(|(id, schema)| CapabilityDescriptor {
+            description: None,
             id: CapabilityId(id.into()),
             contract: CapabilityContract::Input {
                 emits: vec![SchemaId(schema.into())],

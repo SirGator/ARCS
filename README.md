@@ -25,10 +25,11 @@ Parallelität, Artifact-Gedächtnis und mehrmonatige Aufgaben fest.
 Sie ist die maßgebliche Grundlage für die weitere Implementierung.
 Der [Implementierungsplan v2.0](docs/IMPLEMENTATION_PLAN.md)
 hält die weiteren Aufgaben und den aktuellen Implementierungsstand fest.
-Der [Zwischenbericht vom 17. November 2026](docs/ZWISCHENBERICHT_2026-11-17.md)
-hält den aktuellen Stand und die nächsten Prioritäten fest. Der
-[ausführliche Bericht vom 16. November](docs/ZWISCHENBERICHT_2026-11-16.md)
-beschreibt die bisherige Umsetzung, ihre Prüfergebnisse und die offenen Grenzen.
+Der [Zwischenbericht vom 18. November 2026](docs/ZWISCHENBERICHT_2026-11-18.md)
+hält den aktuellen Stand und die nächsten Prioritäten fest. Die Berichte vom
+[17. November](docs/ZWISCHENBERICHT_2026-11-17.md) und
+[16. November](docs/ZWISCHENBERICHT_2026-11-16.md) dokumentieren frühere
+Umsetzungsstände, Prüfergebnisse und offene Grenzen.
 
 Der [Gedächtnisabruf](apps/adapter-host/examples/artifact-memory.md) ergänzt
 Reasoning-Kontext aus dem gemeinsamen Artifact-Netz. Er begrenzt Suche und
@@ -47,6 +48,21 @@ Ergebnisfelder im selben persistenten Ablauf.
 werden von einem externen Reasoner vorgeschlagen, gegen einen freigegebenen
 Vorlagenkatalog geprüft und als unveränderliche Artefakte ausgeführt.
 Sie unterstützen auch [Goal-Schritte mit manueller Freigabe](apps/adapter-host/examples/goal-plans.md).
+[Gemeinsame Kapazitätspools](apps/adapter-host/examples/resource-pools.md)
+begrenzen Reasoning-Aufrufe verschiedener Adapter innerhalb eines Hosts,
+beispielsweise nach gemeinsam genutzten Modell- oder GPU-Plätzen.
+[Dauerhafte exklusive Goal-Reservierungen](apps/adapter-host/examples/exclusive-goals.md)
+koordinieren kooperierende Geräteabläufe über denselben Core und behalten
+ungeklärte Reservierungen über Neustarts bei.
+[Dauerhafte Prioritäten](apps/adapter-host/examples/task-priorities.md)
+verteilen Aufgabenschritte gewichtet und erhalten den Umlauf über Neustarts,
+damit niedrige Prioritäten und ältere Aufgaben weiter berücksichtigt werden.
+[Dauerhafte Zeitbudgets](apps/adapter-host/examples/task-deadlines.md)
+begrenzen vollständige Aufgaben und Pläne einschließlich Wartephasen und
+Neustarts; abgelaufene Arbeit wird über die vorhandenen Abbruchpfade beendet.
+[Fähigkeitsbeschreibungen und Suche](apps/adapter-host/examples/capability-discovery.md)
+ergänzen den autorisierten Katalog um ausdrücklich ungeprüfte Adapterangaben
+und stellen sie auch dem vorhandenen Vorlagenplaner zur Verfügung.
 
 ## Projektstruktur
 

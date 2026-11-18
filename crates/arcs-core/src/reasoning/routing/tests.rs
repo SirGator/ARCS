@@ -137,6 +137,7 @@ fn manifest() -> AdapterManifest {
         adapter_id: AdapterId("reasoner".into()),
         adapter_version: "1".into(),
         capabilities: vec![CapabilityDescriptor {
+            description: None,
             id: CapabilityId("propose".into()),
             contract: CapabilityContract::Reason {
                 emits: vec![SchemaId("arcs.route_candidate.runtime_test.v1".into())],

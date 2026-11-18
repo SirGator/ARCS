@@ -78,6 +78,7 @@ impl Journal {
                     adapter_id: AdapterId(PIPELINE_ID.into()),
                     adapter_version: "1".into(),
                     capabilities: vec![CapabilityDescriptor {
+                        description: None,
                         id: CapabilityId(CAPABILITY.into()),
                         contract: CapabilityContract::Input {
                             emits: vec![SchemaId(SCHEMA.into())],

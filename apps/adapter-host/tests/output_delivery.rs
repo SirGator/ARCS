@@ -95,6 +95,7 @@ fn input(host: &Host, id: &str) -> Artifact {
                 adapter_id: AdapterId("test.operator".into()),
                 adapter_version: "1".into(),
                 capabilities: vec![CapabilityDescriptor {
+                    description: None,
                     id: CapabilityId("report.input".into()),
                     contract: CapabilityContract::Input {
                         emits: vec![SchemaId("arcs.report.v1".into())],

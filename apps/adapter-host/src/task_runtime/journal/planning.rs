@@ -113,6 +113,14 @@ impl Journal {
         for step in &plan.steps {
             transaction.execute("INSERT INTO runtime_jobs(route_id,input_version,source_sequence,state) VALUES(?1,?2,?3,'pending')",params![step.route.id,plan.input_version_id.0,source]).map_err(db)?;
             let sequence = transaction.last_insert_rowid();
+            Self::assign_priority(&transaction, sequence as u64, step.route.priority)?;
+            Self::assign_deadline(
+                &transaction,
+                sequence as u64,
+                step.route.max_lifetime_ms,
+                false,
+                Some(completion.sequence),
+            )?;
             transaction
                 .execute(
                     "INSERT INTO runtime_plan_steps VALUES(?1,?2,?3,?4)",

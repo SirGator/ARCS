@@ -113,6 +113,23 @@ fertige Ergebnisse bleiben erhalten.
 Erzeugte Pläne können auch [manuell freigegebene Goal-Schritte](examples/goal-plans.md)
 enthalten. Sie verwenden die bestehende Zielschleife und exportieren ihre
 Bewertung erst nach bestätigtem Abschluss.
+Mit [`resource_pools` und `reasoning_resources`](examples/resource-pools.md)
+begrenzt ein Host die gemeinsamen Kapazitäten seiner Reasoning-Aufrufe.
+Wartende Aufrufe halten keine Teilreservierungen; gespeicherte Ergebnisse
+bleiben ohne neue Rechenkapazität abrufbar.
+[`goal.exclusive_resources`](examples/exclusive-goals.md) reserviert Ressourcen
+für kooperierende Goal-Abläufe im gemeinsamen Core. Ein unklarer Aktionsausgang
+behält seine Reservierung bis zur bestätigten Klärung.
+[`priority`](examples/task-priorities.md) gewichtet die Aufgabenauswahl in vier
+Klassen. Persistente Umläufe schützen niedrige Prioritäten und laufende ältere
+Aufgaben vor dauerhaftem Verdrängen durch neue Eingaben.
+[`max_lifetime_ms`](examples/task-deadlines.md) begrenzt die gesamte Lebensdauer
+einer Aufgabe oder eines Plans. Die Frist wird dauerhaft festgeschrieben,
+an Planschritte weitergegeben und vor einem neuen Arbeitsschritt geprüft.
+[`--find-capabilities`](examples/capability-discovery.md) sucht freigeschaltete
+Fähigkeiten anhand von Beschreibung, Rolle, Schema und Reasoning-Methode.
+Selbstbeschreibungen sind als ungeprüfte Angaben gekennzeichnet und werden
+auch im autorisierten Vorlagenkatalog des Planers bereitgestellt.
 
 ## Schemas und Berechtigungen
 

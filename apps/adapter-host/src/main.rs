@@ -1,4 +1,5 @@
 use std::ffi::OsString;
+use std::io::Read;
 use std::path::PathBuf;
 
 use arcs::approval::ApprovalDecision;
@@ -7,7 +8,7 @@ use arcs_host::Host;
 use arcs_host::task_runtime::{RuntimeConfig, TaskRuntime};
 use serde::Deserialize;
 
-const USAGE: &str = "usage: arcs-host --config <host.json> [--list-adapters | [--monitor --stop-file <path>] [--runtime <runtime.json>] [--ticks <count>] [--stop-file <path>] | --runtime <runtime.json> [--goal-command <command.json> | --plan-command <command.json>]]";
+const USAGE: &str = "usage: arcs-host --config <host.json> [--list-adapters | --find-capabilities <query.json> | [--monitor --stop-file <path>] [--runtime <runtime.json>] [--ticks <count>] [--stop-file <path>] | --runtime <runtime.json> [--goal-command <command.json> | --plan-command <command.json>]]";
 
 #[derive(Deserialize)]
 #[serde(tag = "command", rename_all = "snake_case", deny_unknown_fields)]
@@ -18,6 +19,13 @@ enum PlanCommand {
 #[derive(Deserialize)]
 #[serde(tag = "command", rename_all = "snake_case", deny_unknown_fields)]
 enum GoalCommand {
+    ReleaseResources {
+        sequence: u64,
+        reservation_versions: Vec<VersionId>,
+        evidence_versions: Vec<VersionId>,
+        operator_id: String,
+        reason: String,
+    },
     Review {
         sequence: u64,
         candidate_version_id: VersionId,
@@ -71,6 +79,7 @@ fn run() -> Result<(), String> {
     let mut monitor = false;
     let mut goal_command = None;
     let mut plan_command = None;
+    let mut capability_query = None;
     let mut args = args.into_iter();
     while let Some(argument) = args.next() {
         if argument == "--list-adapters" && !list_adapters {
@@ -99,11 +108,41 @@ fn run() -> Result<(), String> {
             goal_command = Some(PathBuf::from(value));
         } else if argument == "--plan-command" && plan_command.is_none() {
             plan_command = Some(PathBuf::from(value));
+        } else if argument == "--find-capabilities" && capability_query.is_none() {
+            capability_query = Some(PathBuf::from(value));
         } else {
             return Err(USAGE.into());
         }
     }
     let config = config.ok_or(USAGE)?;
+    if capability_query.is_some()
+        && (list_adapters
+            || runtime.is_some()
+            || monitor
+            || ticks.is_some()
+            || stop_file.is_some()
+            || goal_command.is_some()
+            || plan_command.is_some())
+    {
+        return Err(USAGE.into());
+    }
+    let capability_query: Option<arcs::adapters::CapabilityQuery> = capability_query
+        .map(|path| -> Result<arcs::adapters::CapabilityQuery, String> {
+            let mut bytes = Vec::new();
+            std::fs::File::open(path)
+                .map_err(|e| e.to_string())?
+                .take(65537)
+                .read_to_end(&mut bytes)
+                .map_err(|e| e.to_string())?;
+            if bytes.len() > 65536 {
+                return Err("capability query exceeds 65536 bytes".into());
+            }
+            let query: arcs::adapters::CapabilityQuery =
+                serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+            query.validate().map_err(|e| format!("{e:?}"))?;
+            Ok(query)
+        })
+        .transpose()?;
     if (goal_command.is_some() && plan_command.is_some())
         || (goal_command.is_some() || plan_command.is_some())
             && (runtime.is_none()
@@ -152,7 +191,13 @@ fn run() -> Result<(), String> {
             &mut std::io::stdout().lock(),
         );
     }
-    let value = if list_adapters {
+    let value = if let Some(query) = capability_query {
+        let matches = host
+            .find_capabilities(&query)
+            .map_err(|e| format!("{e:?}"))?;
+        host.shutdown().map_err(|e| e.to_string())?;
+        serde_json::to_value(matches)
+    } else if list_adapters {
         let catalog = host.adapter_catalog();
         host.shutdown().map_err(|e| e.to_string())?;
         serde_json::to_value(catalog)
@@ -165,6 +210,23 @@ fn run() -> Result<(), String> {
             runtime.report(0).map_err(|e| e.to_string())?
         } else if let Some(command) = goal_command {
             match command {
+                GoalCommand::ReleaseResources {
+                    sequence,
+                    reservation_versions,
+                    evidence_versions,
+                    operator_id,
+                    reason,
+                } => runtime.reconcile_goal_resources(
+                    &host,
+                    sequence,
+                    &reservation_versions,
+                    &evidence_versions,
+                    Actor {
+                        actor_type: ActorType::Human,
+                        id: operator_id,
+                    },
+                    reason,
+                ),
                 GoalCommand::Review {
                     sequence,
                     candidate_version_id,
@@ -195,8 +257,17 @@ fn run() -> Result<(), String> {
                 })
                 .map_err(|e| e.to_string())?
         };
+        let reservations = runtime
+            .exclusive_resources(&host)
+            .map_err(|e| e.to_string())?;
         host.shutdown().map_err(|e| e.to_string())?;
-        serde_json::to_value(report)
+        serde_json::to_value(report).map(|mut value| {
+            if !reservations.is_empty() {
+                value["resource_reservations"] =
+                    serde_json::to_value(reservations).expect("reservation serialization");
+            }
+            value
+        })
     } else {
         serde_json::to_value(host.run().map_err(|e| e.to_string())?)
     }

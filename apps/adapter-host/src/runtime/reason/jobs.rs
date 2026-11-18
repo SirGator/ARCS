@@ -21,6 +21,7 @@ pub(in crate::runtime) struct PendingReasoning {
     pub(super) worker: JoinHandle<()>,
     pub(super) deadline: Instant,
     pub(super) discarded: bool,
+    pub(in crate::runtime) claims: crate::runtime::resources::ResourceClaims,
 }
 
 impl Host {
@@ -66,15 +67,7 @@ impl Host {
         limit: usize,
     ) -> Result<Option<ReasoningResult>, HostError> {
         self.reap_discarded_reasoning();
-        let key = arcs::runtime::deterministic_invocation_id(
-            arcs::runtime::InvocationKind::Reasoning,
-            &[
-                "v2",
-                &request.capability.adapter_id.0,
-                &request.capability.capability_id.0,
-                &request.request_id,
-            ],
-        );
+        let key = Self::reasoning_key(&request);
         let fingerprint = serde_json::to_string(&(&request, inputs))
             .map_err(|error| invalid(error.to_string()))?;
         if let Some(job) = self.reasoning_jobs.get(&key) {
@@ -136,17 +129,26 @@ impl Host {
                 .map(Some)
                 .map_err(HostError::Reasoning);
         }
-        if self.reasoning_jobs.len() >= limit {
+        let cached = self.has_reasoning_result(&key)?;
+        if !cached && self.reasoning_jobs.len() >= limit {
             return Ok(None);
         }
         let resources: HashSet<_> = std::iter::once(request.capability.adapter_id.clone())
             .chain(inputs.iter().map(|input| input.source.adapter_id.clone()))
             .collect();
-        for resource in &resources {
+        for resource in resources.iter().filter(|_| !cached) {
             match self.ensure_adapter_available(resource) {
                 Err(HostError::AdapterBusy(_)) => return Ok(None),
                 other => other?,
             }
+        }
+        let claims = if cached {
+            crate::runtime::resources::ResourceClaims::new()
+        } else {
+            self.reasoning_claims(&resources)?
+        };
+        if !cached {
+            self.ensure_resources_available(&claims)?;
         }
         let endpoint = self
             .adapters
@@ -162,6 +164,9 @@ impl Host {
             ReasoningPreparation::Complete(result) => return Ok(Some(result)),
             ReasoningPreparation::Dispatch(prepared) => *prepared,
         };
+        if cached {
+            return Err(invalid("cached reasoning state changed during admission"));
+        }
         let invocation = prepared.invocation().clone();
         let deadline = Instant::now() + Duration::from_millis(invocation.budget.max_runtime_ms);
         let registry = self.registry.clone();
@@ -216,6 +221,7 @@ impl Host {
                         worker,
                         deadline,
                         discarded: false,
+                        claims,
                     },
                 );
                 Ok(None)

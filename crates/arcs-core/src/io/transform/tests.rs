@@ -73,6 +73,7 @@ impl Fixture {
             adapter_id: AdapterId("transform.test".into()),
             adapter_version: "1.0.0".into(),
             capabilities: vec![CapabilityDescriptor {
+                description: None,
                 id: CapabilityId("double".into()),
                 contract: CapabilityContract::Transform {
                     accepts: vec![SchemaId(INPUT.into())],

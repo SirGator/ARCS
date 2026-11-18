@@ -1,6 +1,7 @@
 //! SQLite-Implementierung des unveränderlichen Artefakt-Stores.
 
 mod graph;
+mod reservations;
 mod retrieval;
 
 use rusqlite::{Connection, OptionalExtension, params};

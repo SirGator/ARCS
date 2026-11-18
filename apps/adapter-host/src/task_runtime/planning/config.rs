@@ -64,7 +64,7 @@ impl PlanningConfig {
         Ok(())
     }
 
-    pub(super) fn catalog(&self) -> Value {
+    pub(super) fn catalog(&self, host: &Host) -> Result<Value, HostError> {
         let mut catalog = json!({"max_steps":self.max_steps,"max_total_runtime_ms":self.max_total_runtime_ms,
             "max_total_output_tokens":self.max_total_output_tokens,
             "templates":self.templates.iter().map(|template| {
@@ -87,7 +87,44 @@ impl PlanningConfig {
         if let Some(limit) = self.max_total_actions {
             catalog["max_total_actions"] = json!(limit);
         }
-        catalog
+        // Claims are static catalog data, not live availability. Changing a
+        // running worker's health must never change a frozen planner request.
+        let capabilities = host
+            .registry()
+            .catalog()
+            .into_iter()
+            .flat_map(|connection| connection.capabilities)
+            .map(|cap| (cap.capability.clone(), cap))
+            .collect::<BTreeMap<_, _>>();
+        for (template, entry) in self.templates.iter().zip(
+            catalog["templates"]
+                .as_array_mut()
+                .expect("template catalog array"),
+        ) {
+            let capability = capabilities
+                .get(&template.route.reasoner)
+                .ok_or_else(|| invalid("template reasoner is no longer authorized"))?;
+            if let Some(claim) = &capability.description_claim {
+                entry["reasoner_description_claim"] = json!(claim);
+            }
+            if let Some(goal) = &template.route.goal {
+                let mut actions = Vec::new();
+                for action in &goal.actions {
+                    let capability = capabilities
+                        .get(&action.capability)
+                        .ok_or_else(|| invalid("template action is no longer authorized"))?;
+                    if let Some(claim) = &capability.description_claim {
+                        actions.push(
+                            json!({"capability":action.capability,"description_claim":claim}),
+                        );
+                    }
+                }
+                if !actions.is_empty() {
+                    entry["action_description_claims"] = json!(actions);
+                }
+            }
+        }
+        Ok(catalog)
     }
 
     pub(super) fn compile(

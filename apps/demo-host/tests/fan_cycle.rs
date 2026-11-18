@@ -103,6 +103,7 @@ impl Drop for Harness {
 
 fn manifest() -> AdapterManifest {
     let capability = |name: &str, contract, permission: &str| CapabilityDescriptor {
+        description: None,
         id: CapabilityId(name.into()),
         contract,
         required_permissions: vec![permission.into()],

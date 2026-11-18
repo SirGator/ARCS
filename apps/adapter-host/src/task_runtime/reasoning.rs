@@ -77,12 +77,27 @@ impl TaskRuntime {
         error: HostError,
         report: &mut TickReport,
     ) -> Result<(), HostError> {
-        if self.config.max_concurrent_reasoning == 1 || is_core_failure(&error) {
-            self.journal.fail(sequence, &error)?;
-            return Err(error);
+        if let HostError::ResourceBusy {
+            resource,
+            requested,
+            available,
+        } = error
+        {
+            report.waiting_resources.push(ResourceWait {
+                sequence,
+                route_id: route.id.clone(),
+                resource,
+                requested,
+                available,
+            });
+            return Ok(());
         }
         if matches!(error, HostError::AdapterBusy(_)) {
             return Ok(());
+        }
+        if self.config.max_concurrent_reasoning == 1 || is_core_failure(&error) {
+            self.journal.fail(sequence, &error)?;
+            return Err(error);
         }
         if let Some(mut task) = self.saved_goal(sequence)? {
             task.state = goal::GoalState::Failed;

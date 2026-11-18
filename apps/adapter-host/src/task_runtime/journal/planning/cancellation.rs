@@ -1,5 +1,5 @@
 //! Ein atomarer Abbruchbeleg für Planner, Kindaufträge und wartende Joins.
-use rusqlite::{OptionalExtension, params};
+use rusqlite::{OptionalExtension, Transaction, params};
 
 use super::{Journal, VersionId, db, invalid};
 use crate::HostError;
@@ -43,6 +43,16 @@ impl Journal {
         now: u64,
     ) -> Result<(), HostError> {
         let transaction = self.connection.transaction().map_err(db)?;
+        Self::cancel_plan_in(&transaction, sequence, reason, now)?;
+        transaction.commit().map_err(db)
+    }
+
+    pub(in crate::task_runtime::journal) fn cancel_plan_in(
+        transaction: &Transaction<'_>,
+        sequence: u64,
+        reason: &str,
+        now: u64,
+    ) -> Result<(), HostError> {
         let previous: Option<String> = transaction
             .query_row(
                 "SELECT reason FROM runtime_plan_cancellations WHERE sequence=?1",
@@ -78,35 +88,50 @@ impl Journal {
             transaction.execute("UPDATE runtime_jobs SET state='cancelled',error=?2 WHERE sequence=?1 OR (sequence IN (SELECT sequence FROM runtime_plan_steps WHERE parent_sequence=?1) AND state IN ('pending','running','failed','awaiting_approval'))",params![sequence as i64,reason]).map_err(db)?;
             transaction.execute("UPDATE runtime_job_joins SET state='blocked',error=?2 WHERE state='waiting' AND sequence IN (SELECT sequence FROM runtime_plan_steps WHERE parent_sequence=?1)",params![sequence as i64,reason]).map_err(db)?;
             let checkpoints = {
-                let mut query=transaction.prepare("SELECT sequence,goal_json FROM runtime_jobs WHERE state='cancelled' AND goal_json IS NOT NULL AND sequence IN (SELECT sequence FROM runtime_plan_steps WHERE parent_sequence=?1)").map_err(db)?;
+                let mut query=transaction.prepare("SELECT sequence FROM runtime_jobs WHERE state='cancelled' AND goal_json IS NOT NULL AND sequence IN (SELECT sequence FROM runtime_plan_steps WHERE parent_sequence=?1)").map_err(db)?;
                 let rows = query
-                    .query_map([sequence as i64], |row| {
-                        Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
-                    })
+                    .query_map([sequence as i64], |row| row.get::<_, i64>(0))
                     .map_err(db)?;
                 rows.map(|row| row.map_err(db))
                     .collect::<Result<Vec<_>, _>>()?
             };
-            for (child, json) in checkpoints {
-                let mut goal: crate::task_runtime::goal::GoalTask =
-                    serde_json::from_str(&json).map_err(|e| invalid(e.to_string()))?;
-                if goal.sequence != child as u64 {
-                    return Err(invalid("goal checkpoint identity changed"));
-                }
-                goal.state = crate::task_runtime::goal::GoalState::Cancelled;
-                goal.detail = reason.into();
-                transaction
-                    .execute(
-                        "UPDATE runtime_jobs SET goal_json=?2 WHERE sequence=?1",
-                        params![
-                            child,
-                            serde_json::to_string(&goal).map_err(|e| invalid(e.to_string()))?
-                        ],
-                    )
-                    .map_err(db)?;
+            for child in checkpoints {
+                Self::cancel_goal_checkpoint(transaction, child as u64, reason)?;
             }
         }
-        transaction.commit().map_err(db)?;
+        Ok(())
+    }
+
+    pub(in crate::task_runtime::journal) fn cancel_goal_checkpoint(
+        transaction: &Transaction<'_>,
+        sequence: u64,
+        reason: &str,
+    ) -> Result<(), HostError> {
+        let json: Option<String> = transaction
+            .query_row(
+                "SELECT goal_json FROM runtime_jobs WHERE sequence=?1",
+                [sequence as i64],
+                |row| row.get(0),
+            )
+            .map_err(db)?;
+        if let Some(json) = json {
+            let mut goal: crate::task_runtime::goal::GoalTask =
+                serde_json::from_str(&json).map_err(|e| invalid(e.to_string()))?;
+            if goal.sequence != sequence {
+                return Err(invalid("goal checkpoint identity changed"));
+            }
+            goal.state = crate::task_runtime::goal::GoalState::Cancelled;
+            goal.detail = reason.into();
+            transaction
+                .execute(
+                    "UPDATE runtime_jobs SET goal_json=?2 WHERE sequence=?1",
+                    params![
+                        sequence as i64,
+                        serde_json::to_string(&goal).map_err(|e| invalid(e.to_string()))?
+                    ],
+                )
+                .map_err(db)?;
+        }
         Ok(())
     }
 }

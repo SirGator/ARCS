@@ -3,6 +3,8 @@ use std::collections::HashSet;
 use serde::{Deserialize, Serialize};
 
 use crate::SchemaId;
+mod description;
+pub use description::CapabilityDescription;
 
 /// Version des universellen ARCS-Adapterprotokolls.
 pub const ADAPTER_PROTOCOL_VERSION: u32 = 1;
@@ -182,6 +184,9 @@ pub struct CapabilityDescriptor {
     /// Anforderungen des Adapters, ausdrücklich keine erteilten Rechte.
     #[serde(default)]
     pub required_permissions: Vec<String>,
+    /// Unverified adapter claims for discovery; no rights or proof of effect.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<CapabilityDescription>,
 }
 
 /// Vom Adapter gelieferte, aber vom Core validierte Selbstbeschreibung.
@@ -214,6 +219,7 @@ pub enum ManifestError {
         permission: String,
     },
     UnsafeExternalAction(CapabilityId),
+    InvalidCapabilityDescription(CapabilityId),
 }
 
 impl AdapterManifest {
@@ -256,6 +262,15 @@ impl AdapterManifest {
 }
 
 fn validate_capability(capability: &CapabilityDescriptor) -> Result<(), ManifestError> {
+    if capability
+        .description
+        .as_ref()
+        .is_some_and(|description| !description.is_valid())
+    {
+        return Err(ManifestError::InvalidCapabilityDescription(
+            capability.id.clone(),
+        ));
+    }
     let accepts = capability.contract.accepted_schemas();
     let emits = capability.contract.emitted_schemas();
     let needs_accepts = matches!(
@@ -345,6 +360,7 @@ mod tests {
             adapter_id: AdapterId("chat.input".into()),
             adapter_version: "1.0.0".into(),
             capabilities: vec![CapabilityDescriptor {
+                description: None,
                 id: CapabilityId("chat.receive".into()),
                 contract: CapabilityContract::Input { emits: vec![] },
                 required_permissions: vec![],
@@ -364,6 +380,7 @@ mod tests {
             adapter_id: AdapterId("robot.arm".into()),
             adapter_version: "1.0.0".into(),
             capabilities: vec![CapabilityDescriptor {
+                description: None,
                 id: CapabilityId("robot.arm.move".into()),
                 contract: CapabilityContract::Act {
                     accepts: vec![SchemaId("arcs.action.robot_arm.v1".into())],
@@ -387,6 +404,7 @@ mod tests {
             adapter_id: AdapterId("chat.output".into()),
             adapter_version: "1.0.0".into(),
             capabilities: vec![CapabilityDescriptor {
+                description: None,
                 id: CapabilityId("chat.deliver".into()),
                 contract: CapabilityContract::Output {
                     accepts: vec![SchemaId("arcs.response_candidate.chat.v1".into())],

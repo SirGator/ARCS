@@ -100,6 +100,83 @@
 > Ein Rules-Beispiel verbindet die dynamische Auswahl mit einem simulierten
 > Gerät. Automatische Freigaben in erzeugten Plänen, direkte Act-Knoten,
 > freie Argumente, universelle Zielzerlegung und Neuplanung bleiben offen.
+>
+> Zehnter Slice gemäß v3 §7.2 PAR-04/PAR-11 und §7.3: Host-Konfigurationen
+> können gemeinsame benannte Kapazitätspools und Anforderungen pro beteiligtem
+> Reasoning-Adapter deklarieren. Zulassung berücksichtigt alle Kapazitäten
+> gemeinsam; wartende Aufrufe halten keine Teilreservierungen. Belegung wird
+> aus ausstehenden Worker-Aufrufen abgeleitet und über Fehler, Timeout und
+> Abbruch korrekt freigegeben. Zwei Runtimes desselben Hosts teilen die Grenzen;
+> auch synchrone Aufrufe beachten laufende Worker. Validiertes Cache-Replay
+> benötigt keine neuen Kapazitäten. Prozess-Tests prüfen neun Ressourcen-
+> Szenarien; Monitor und Host-Bericht zeigen die Belegung. Das ist eine
+> Zulassungskontrolle für Reason V2 innerhalb eines Host-Prozesses. Physische
+> Geräte-Leases, Koordination mehrerer Hosts, Controller-Fencing, harte GPU-/
+> RAM-Grenzen und die vollständige Abnahme von PAR-04 bleiben offen.
+>
+> Elfter Slice gemäß v3 §7.2 PAR-04/PAR-10 und §7.3: Goal-Routen und
+> freigegebene Goal-Vorlagen können exklusive Ressourcen für ihre Kontrollsitzung
+> deklarieren. Besitz und Freigabe liegen als versionierte Core-Artefakte mit
+> atomaren Mehrfachänderungen und Revisionsprüfung vor. Kooperierende Hosts
+> mit derselben Core-Datenbank teilen diese Reservierungen. Fortlaufende Runden
+> behalten sie, Rundenpausen geben sie nach einem passenden Abschluss frei.
+> Ungeklärte Dispatches bleiben auch nach Abbruch und Neustart reserviert;
+> terminale Goals können nach authentifizierter Klärung mit exakten Revisionen
+> und Belegreferenzen freigegeben werden. Vier Core- und neun Prozess-Tests
+> prüfen Konkurrenz, Rollback, Neustart, Monatswartephasen und Freigaben.
+> Automatischer Lease-Ablauf, sichere Controller-Übergabe/Fencing und die
+> Absicherung nicht kooperierender Act-Clients bleiben offen.
+
+> Zwölfter Slice gemäß v3 §7.2 PAR-05/PAR-10/PAR-12: Betreiber-Routen und
+> freigegebene Vorlagen können Prioritäten 0..3 festlegen. Ein gewichteter
+> Klassenumlauf mit 1:2:4:8 Plätzen und dauerhaften Aufgabenzeigern ersetzt den
+> flüchtigen Auswahlcursor. Eingefrorene Gruppengrenzen verhindern, dass stetige
+> neue Eingaben ältere laufende Aufgaben verdrängen. Termin-, Ereignis- und
+> Abhängigkeitswartephasen werden nicht ausgewählt; Freigaben werden weiterhin
+> gegen den Core abgeglichen. Pro Tick bleibt jeder Auftrag auf einen Versuch begrenzt.
+> Auswahlmetadaten werden vor I/O atomar im vorhandenen Journal gespeichert;
+> CLI und Monitor zeigen dauerhafte Zähler je Klasse. Bestehende Jobs erhalten
+> ihre Prioritäten additiv aus festen Routen oder autorisierten Vorlagen, ohne
+> Core-Ergebnisse neu zu erzeugen. Vier Scheduler- und fünf Prozess-Tests prüfen
+> Gewichte, fortlaufende Eingaben, Rollback, Neustarts, Migration und Modellgrenzen.
+> Die Zusage betrifft Auswahlversuche innerhalb einer Runtime; Ressourcenfairness
+> über Runtimes/Hosts, Preemption und vollständige Latenz-/Durchsatzmessungen bleiben
+> offen. PAR-05 und PAR-12 sind damit teilweise umgesetzt, nicht abgenommen.
+
+> Dreizehnter Slice gemäß v3 §7.2 PAR-07/PAR-10 und §8.2 LNG-01/LNG-06:
+> Feste Routen und autorisierte Vorlagen können mit `max_lifetime_ms` eine
+> gesamte Lebensdauer einschließlich Wartephasen und Ausfällen begrenzen.
+> Annahme- und Ablaufzeiten werden atomar mit dem Auftrag gespeichert;
+> Planschritte übernehmen die frühere eigene oder elterliche Frist. Ein
+> dauerhafter höchster Zeitstand verhindert eine Verlängerung durch rückwärts
+> gestellte Uhren. Begrenzte Vorprüfung und zusätzliche Schrittprüfung stoppen
+> fällige Arbeit über die vorhandenen Abbruchpfade. Plan-/Goal-Checkpoints,
+> wartende Joins und Ablaufbelege committen gemeinsam; erst danach werden
+> Worker-Antworten verworfen. Fertige Ergebnisse und ungeklärte Gerätebesitzstände
+> bleiben erhalten. CLI und Monitor zeigen Fristen, Belege und Ablaufzähler.
+> Elf Prozess-Tests prüfen Monats-Recovery, Live-Zeit nach langsamer Beobachtung,
+> Vererbung, kürzere Teilbudgets,
+> blockierte Pläne, Rollback, Kapazitäten, Freigaben und Gerätewirkung.
+> Harte Echtzeitunterbrechung, Pause/Resume, Token-/Geldbudgets und die vollständige
+> Abnahme von PAR-07 und LNG-06 bleiben offen.
+
+> Vierzehnter Slice gemäß v3 §9.1/§9.2 und v2 CAP-01/CAP-02: Optionale,
+> begrenzte Capability-Beschreibungen erweitern den gemeinsamen Adaptervertrag.
+> Katalog und Planungskontext kennzeichnen diese Angaben unabhängig vom
+> Installationstrust als ungeprüfte Adapterbehauptungen. Die vorhandene Registry
+> bietet lexikalische Suche mit harten Rollen-, Schema-, Methoden- und Scope-
+> Filtern. Der Host schließt interne und bekannte ausgefallene Installationen
+> vor der Ergebnisbegrenzung aus. Die CLI validiert Suchanfragen vor dem
+> Verbindungsaufbau und führt keine Task-Operationen aus. Autorisierte Vorlagen
+> erhalten statische Beschreibungsangaben im bestehenden Planer-Kontext;
+> gebundene Manifestidentitäten sichern Replay und Drift-Erkennung ab.
+> Zwei Protokoll-, vier Core- und sechs Prozess-Tests prüfen Grenzen,
+> Ranking/Grants, bekannte Ausfälle, CLI, beschreibungsabhängige Auswahl,
+> Wiederaufnahme und feindselige Angaben. Kompatible Defaults für vorhandene
+> JSON-Manifeste sowie angepasste Rust-Literale erhalten die lokalen Anbindungen.
+> Semantische Suche, autonome Auswahl mit gemessener Zuverlässigkeit/Kosten,
+> automatische Fähigkeitsprüfung und allgemeine freie Werkzeugkomposition
+> bleiben offen; CAP-01/CAP-02 sind teilweise umgesetzt, nicht abgenommen.
 
 **Leitbild:** ARCS ist ein universeller Agent. Es soll sich einfach bedienen lassen, beliebige kompatible Systeme verbinden, eigenständig Probleme lösen und langfristige Aufgaben über Monate verfolgen.
 

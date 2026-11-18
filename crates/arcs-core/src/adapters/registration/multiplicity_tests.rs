@@ -45,6 +45,7 @@ fn all_seven_roles_support_multiple_installations_with_equal_local_names() {
         for suffix in ["b", "a"] {
             let id = AdapterId(format!("role-{index}-{suffix}"));
             let cap = CapabilityDescriptor {
+                description: None,
                 id: CapabilityId("same.name".into()),
                 contract: contract.clone(),
                 required_permissions: vec!["use.adapter".into()],
@@ -123,6 +124,7 @@ fn catalog_contains_only_enabled_capabilities_and_keeps_both_multi_role_connecti
     let mut registry = AdapterRegistry::new();
     for id in ["second", "first"] {
         let input = CapabilityDescriptor {
+            description: None,
             id: CapabilityId("receive".into()),
             contract: CapabilityContract::Input {
                 emits: vec![SchemaId("arcs.input.v1".into())],
@@ -132,6 +134,7 @@ fn catalog_contains_only_enabled_capabilities_and_keeps_both_multi_role_connecti
         let mut disabled = input.clone();
         disabled.id = CapabilityId("disabled".into());
         let observe = CapabilityDescriptor {
+            description: None,
             id: CapabilityId("observe".into()),
             contract: CapabilityContract::Observe {
                 emits: vec![SchemaId("arcs.input.v1".into())],

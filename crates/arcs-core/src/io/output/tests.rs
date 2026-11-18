@@ -78,6 +78,7 @@ impl Fixture {
         schemas.register_json(&json!({"$id":INPUT,"type":"object","required":["body"],"properties":{"body":{"type":"string"}},"additionalProperties":false}).to_string()).unwrap();
         schemas.register_json(&json!({"$id":RESULT,"type":"object","required":["status"],"properties":{"status":{"type":"string","enum":["delivered"]}},"additionalProperties":false}).to_string()).unwrap();
         let descriptor = |name: &str| CapabilityDescriptor {
+            description: None,
             id: CapabilityId(name.into()),
             contract: CapabilityContract::Output {
                 accepts: vec![SchemaId(INPUT.into())],

@@ -41,6 +41,7 @@ fn setup() -> (SchemaRegistry, SqliteArtifactStore, AdapterRegistry) {
         adapter_id: AdapterId("test.device".into()),
         adapter_version: "1.0.0".into(),
         capabilities: vec![CapabilityDescriptor {
+            description: None,
             id: CapabilityId("set".into()),
             contract: CapabilityContract::Act {
                 accepts: vec![SchemaId("arcs.rule_candidate.test.v1".into())],

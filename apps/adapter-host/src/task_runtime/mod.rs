@@ -1,5 +1,7 @@
 //! Persistente Reasoning-Routen und optionale, begrenzte Aufgabensteuerung.
 mod config;
+mod control;
+pub mod deadlines;
 pub mod dependencies;
 pub mod goal;
 mod journal;
@@ -7,6 +9,7 @@ pub mod planning;
 mod reasoning;
 pub mod scheduler;
 pub use config::{ReasoningRoute, RuntimeConfig};
+pub use journal::dispatch::{DispatchClassReport, DispatchReport};
 
 use std::time::{Duration, Instant};
 
@@ -39,6 +42,16 @@ pub struct TickReport {
     pub backpressure: bool,
     pub ready_for_review: Vec<CompletedTask>,
     pub failed: Vec<FailedTask>,
+    pub waiting_resources: Vec<ResourceWait>,
+    pub expired_tasks: Vec<u64>,
+}
+#[derive(Debug, Serialize)]
+pub struct ResourceWait {
+    pub sequence: u64,
+    pub route_id: String,
+    pub resource: String,
+    pub requested: u64,
+    pub available: u64,
 }
 #[derive(Debug, Serialize)]
 pub struct FailedTask {
@@ -70,6 +83,10 @@ pub struct RuntimeReport {
     pub stopped_plans: u64,
     pub review_plans: u64,
     pub goals: Vec<goal::GoalTask>,
+    pub dispatch: DispatchReport,
+    pub expired_jobs: u64,
+    pub next_deadline_unix_ms: Option<u64>,
+    pub task_deadlines: Vec<deadlines::TaskDeadline>,
 }
 
 pub struct TaskRuntime {
@@ -77,7 +94,7 @@ pub struct TaskRuntime {
     identity: Value,
     core_database: std::path::PathBuf,
     journal: Journal,
-    scheduling_cursor: u64,
+    control_cursor: u64,
 }
 impl TaskRuntime {
     pub fn open(host: &Host, config: RuntimeConfig) -> Result<Self, HostError> {
@@ -88,18 +105,27 @@ impl TaskRuntime {
             identity,
             core_database: host.database_path().into(),
             journal,
-            scheduling_cursor: 0,
+            control_cursor: 0,
         })
     }
 
     /// Pro Runde begrenzte Logseiten und Reasoning-Aufrufe; kein automatischer Retry.
     pub fn tick(&mut self, host: &mut Host) -> Result<TickReport, HostError> {
-        self.tick_at(host, scheduler::now_unix_ms()?)
+        self.tick_with_time(host, scheduler::now_unix_ms()?, true)
     }
 
     /// Vertrauenswürdige UTC-Zeit aus der Host-Anwendung; ermöglicht Simulationen
     /// langer Zeiträume ohne Änderungen an den Uhren externer Adapter.
     pub fn tick_at(&mut self, host: &mut Host, now_unix_ms: u64) -> Result<TickReport, HostError> {
+        self.tick_with_time(host, now_unix_ms, false)
+    }
+
+    fn tick_with_time(
+        &mut self,
+        host: &mut Host,
+        now_unix_ms: u64,
+        live_clock: bool,
+    ) -> Result<TickReport, HostError> {
         if now_unix_ms > i64::MAX as u64 {
             return Err(invalid("scheduler timestamp exceeds SQLite range"));
         }
@@ -108,8 +134,23 @@ impl TaskRuntime {
         {
             return Err(invalid("runtime topology changed"));
         }
-        self.reap_cancelled_task_reasoning(host)?;
+        let has_deadlines = self.config.routes.iter().any(|route| {
+            route.max_lifetime_ms.is_some()
+                || route.plan.as_ref().is_some_and(|plan| {
+                    plan.templates
+                        .iter()
+                        .any(|template| template.route.max_lifetime_ms.is_some())
+                })
+        });
+        if has_deadlines {
+            self.journal.advance_deadline_clock(now_unix_ms)?;
+        }
         let mut report = TickReport::default();
+        if has_deadlines {
+            self.expire_due_tasks(host, &mut report)?;
+        }
+        self.reap_cancelled_task_reasoning(host)?;
+        self.cleanup_control_sessions(host)?;
         let caught_up = self.discover(host, &mut report, now_unix_ms)?;
         // Erst alte Core-Ereignisse übernehmen. Normale Inputs nur bei freier Queue.
         if caught_up
@@ -120,6 +161,10 @@ impl TaskRuntime {
                 < self.config.max_pending_jobs
         {
             host.poll_event_tick()?;
+            if has_deadlines && live_clock {
+                self.journal
+                    .advance_deadline_clock(scheduler::now_unix_ms()?)?;
+            }
             self.discover(host, &mut report, now_unix_ms)?;
         } else {
             // Ein voller Aufgabenpuffer darf seine eigenen Weckereignisse nicht
@@ -143,20 +188,29 @@ impl TaskRuntime {
         }
         self.activate_scheduled(host, now_unix_ms)?;
         self.advance_dependencies(host)?;
-        let mut visited = std::collections::HashSet::new();
+        self.journal.begin_dispatch_tick()?;
         for _ in 0..self.config.max_jobs_per_tick {
-            let Some((sequence, route_id, input_version_id)) = self.journal.next(
-                self.scheduling_cursor,
-                self.config.max_concurrent_reasoning == 1,
-            )?
+            let Some((sequence, route_id, input_version_id, priority)) = self
+                .journal
+                .next(self.config.max_concurrent_reasoning == 1)?
             else {
                 break;
             };
-            if !visited.insert(sequence) {
-                break;
+            // The bounded expiry sweep may not have reached this job yet.
+            // Check again immediately before any per-task Core or adapter work.
+            if has_deadlines && live_clock {
+                self.journal
+                    .advance_deadline_clock(scheduler::now_unix_ms()?)?;
             }
-            self.scheduling_cursor = sequence;
+            if has_deadlines && self.expire_task(host, sequence, &mut report)? {
+                continue;
+            }
             let route = self.route_for_job(host, sequence, &route_id)?;
+            if route.priority != priority {
+                return Err(invalid(
+                    "saved task priority differs from its authorized route",
+                ));
+            }
             let input = host
                 .store()
                 .get(&input_version_id)
@@ -174,6 +228,7 @@ impl TaskRuntime {
                 Err(error) => self.record_job_failure(sequence, &route, error, &mut report)?,
             }
         }
+        self.cleanup_control_sessions(host)?;
         Ok(report)
     }
 
@@ -235,6 +290,14 @@ impl TaskRuntime {
             for route in &routes {
                 transaction.execute("INSERT INTO runtime_jobs(route_id,input_version,source_sequence,state) VALUES(?1,?2,?3,'pending')",params![route.id,event.artifact.version_id.0,event.sequence as i64]).map_err(db)?;
                 let sequence = transaction.last_insert_rowid() as u64;
+                Journal::assign_priority(&transaction, sequence, route.priority)?;
+                Journal::assign_deadline(
+                    &transaction,
+                    sequence,
+                    route.max_lifetime_ms,
+                    route.plan.is_some(),
+                    None,
+                )?;
                 Journal::reserve_plan(&transaction, sequence, route.queue_slots())?;
                 if let Some(activation) = &route.activation {
                     Journal::schedule(&transaction, sequence, event.sequence, activation, now)?;
@@ -281,6 +344,9 @@ impl TaskRuntime {
         let (waiting_time, waiting_event, next_wake_unix_ms) = self.journal.schedule_summary()?;
         let (waiting_dependency, blocked_dependencies) = self.journal.dependency_summary()?;
         let (running_plans, stopped_plans, review_plans) = self.journal.plan_summary()?;
+        let (expired_jobs, next_deadline_unix_ms) = self
+            .journal
+            .deadline_summary(self.config.max_concurrent_reasoning == 1)?;
         let count = |state: &str| {
             self.journal
                 .connection
@@ -331,6 +397,10 @@ impl TaskRuntime {
             stopped_plans,
             review_plans,
             goals: self.goals_for_report()?,
+            dispatch: self.journal.dispatch_report()?,
+            expired_jobs,
+            next_deadline_unix_ms,
+            task_deadlines: self.journal.deadlines_for_report()?,
         })
     }
     /// Stop wird zwischen Runden und während Wartepausen geprüft. Paralleles

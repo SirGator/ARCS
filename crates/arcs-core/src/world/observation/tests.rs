@@ -54,6 +54,7 @@ fn schemas() -> SchemaRegistry {
 
 fn observe_capability(id: &str, schemas: &[&str]) -> CapabilityDescriptor {
     CapabilityDescriptor {
+        description: None,
         id: CapabilityId(id.into()),
         contract: CapabilityContract::Observe {
             emits: schemas
@@ -269,6 +270,7 @@ fn act_capability_cannot_push_observation() {
         adapter_id: AdapterId("action.demo".into()),
         adapter_version: "1.0.0".into(),
         capabilities: vec![CapabilityDescriptor {
+            description: None,
             id: CapabilityId("device.set".into()),
             contract: CapabilityContract::Act {
                 accepts: vec![SchemaId("arcs.input.v1".into())],

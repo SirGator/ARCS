@@ -46,6 +46,7 @@ impl TaskRuntime {
         // Commit first. If the transaction fails, no live worker is discarded.
         self.journal
             .cancel_plan(sequence, &reason, now_unix_ms()?)?;
+        self.cleanup_control_sessions(host)?;
         self.reap_cancelled_task_reasoning(host)
     }
 }

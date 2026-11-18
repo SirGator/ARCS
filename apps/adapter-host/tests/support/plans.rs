@@ -51,7 +51,10 @@ pub fn fixture(a: &str, b: &str) -> Fixture {
 pub fn until(host: &mut Host, runtime: &mut TaskRuntime, condition: impl Fn(&TaskRuntime) -> bool) {
     let until = Instant::now() + Duration::from_secs(25);
     loop {
-        runtime.tick(host).unwrap();
+        let report = runtime.tick(host).unwrap();
+        if !report.failed.is_empty() {
+            eprintln!("plan fixture task failures: {:?}", report.failed);
+        }
         if condition(runtime) {
             return;
         }

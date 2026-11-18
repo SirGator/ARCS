@@ -114,9 +114,9 @@ impl TaskRuntime {
         self.journal.start(sequence)?;
         let mut constraints = route.constraints.clone();
         if let Some(object) = constraints.as_object_mut() {
-            object.insert("task_planning".into(), config.catalog());
+            object.insert("task_planning".into(), config.catalog(host)?);
         } else {
-            constraints = serde_json::json!({"operator_constraints":constraints,"task_planning":config.catalog()});
+            constraints = serde_json::json!({"operator_constraints":constraints,"task_planning":config.catalog(host)?});
         }
         let request = ReasoningRequestV2 {
             request_id: deterministic_invocation_id(
