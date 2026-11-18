@@ -1,0 +1,32 @@
+{
+  "$id": "arcs.adapter_reconnect.v1",
+  "type": "object",
+  "required": [
+    "node_id",
+    "manifest",
+    "grant",
+    "policy",
+    "capabilities_verified"
+  ],
+  "properties": {
+    "node_id": {
+      "type": "string"
+    },
+    "manifest": {
+      "type": "object"
+    },
+    "grant": {
+      "type": "object"
+    },
+    "policy": {
+      "type": "object"
+    },
+    "capabilities_verified": {
+      "type": "boolean",
+      "enum": [
+        false
+      ]
+    }
+  },
+  "additionalProperties": false
+}

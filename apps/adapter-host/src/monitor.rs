@@ -83,6 +83,7 @@ pub fn run(
                     .ready_for_review
                     .len()
             } else {
+                host.poll_reconnections().map_err(fail)?;
                 host.poll_event_tick().map_err(fail)?;
                 0
             };
@@ -133,6 +134,7 @@ fn snapshot(
         *cursor = event.sequence;
         recent.push(summary(event.artifact));
     }
+    let reconnects = host.adapter_reconnections().map_err(fail)?;
     let adapters=report.adapters.into_iter().map(|adapter|json!({"adapter_id":adapter.adapter_id,
         "observations_received":adapter.observations_received,"observations_committed":adapter.observations_committed,
         "requests":adapter.requests.len(),"transforms":adapter.transforms.len()})).collect::<Vec<_>>();
@@ -183,6 +185,6 @@ fn snapshot(
         writer,
         json!({"event":"snapshot","ticks":ticks,"uptime_ms":started.elapsed().as_millis(),
         "stored_artifacts":report.stored_artifacts,"world_revision":report.world_revision,
-        "adapters":adapters,"runtime":runtime,"recent_artifacts":recent,"resource_pools":report.resource_pools,"resource_reservations":reservations,"reasoner_selections":selections,"reasoning_recoveries":recoveries}),
+        "adapters":adapters,"runtime":runtime,"recent_artifacts":recent,"resource_pools":report.resource_pools,"resource_reservations":reservations,"reasoner_selections":selections,"reasoning_recoveries":recoveries,"adapter_reconnections":reconnects}),
     )
 }

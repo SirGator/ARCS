@@ -16,7 +16,7 @@ use super::*;
 pub(in crate::runtime) struct PendingReasoning {
     pub(super) prepared: PreparedReasoning,
     fingerprint: String,
-    pub(super) resources: HashSet<AdapterId>,
+    pub(in crate::runtime) resources: HashSet<AdapterId>,
     pub(super) response: Receiver<Result<ReasoningResponseV2, ReasoningError>>,
     pub(super) worker: JoinHandle<()>,
     pub(super) deadline: Instant,
@@ -39,6 +39,7 @@ impl Host {
         self.reasoning_jobs
             .values()
             .flat_map(|job| job.resources.iter().cloned())
+            .chain(self.reconnect_jobs.keys().cloned())
             .collect()
     }
 
@@ -50,6 +51,13 @@ impl Host {
             return Err(HostError::AdapterBusy(adapter.clone()));
         }
         if self.unavailable_adapters.contains(adapter) {
+            if self.reconnect_can_wait(adapter) {
+                return Err(HostError::ResourceBusy {
+                    resource: "reasoner-reconnect".into(),
+                    requested: 1,
+                    available: 0,
+                });
+            }
             return Err(HostError::Adapter {
                 adapter: adapter.clone(),
                 source: arcs::adapters::stdio::StdioError::Disconnected,
@@ -277,12 +285,6 @@ impl Host {
         }
         self.unavailable_adapters.extend(resources.iter().cloned());
         resources
-    }
-}
-
-impl Drop for Host {
-    fn drop(&mut self) {
-        self.cancel_reasoning_jobs();
     }
 }
 

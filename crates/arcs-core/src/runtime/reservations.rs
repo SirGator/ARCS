@@ -61,6 +61,27 @@ pub struct ReservationService<'a> {
     clock: &'a dyn Clock,
 }
 impl<'a> ReservationService<'a> {
+    fn commit(
+        &self,
+        artifacts: &[Artifact],
+        expected: &[(crate::core::SubjectId, Option<VersionId>)],
+    ) -> Result<(), StoreError> {
+        self.store.append_current_compared(
+            artifacts,
+            self.schemas,
+            &expected
+                .iter()
+                .map(|(subject, version)| {
+                    (
+                        subject.clone(),
+                        crate::core::SchemaId(SCHEMA.into()),
+                        version.clone(),
+                    )
+                })
+                .collect::<Vec<_>>(),
+        )
+    }
+
     pub fn new(
         store: &'a SqliteArtifactStore,
         schemas: &'a SchemaRegistry,
@@ -131,10 +152,7 @@ impl<'a> ReservationService<'a> {
             if artifacts.is_empty() {
                 return Ok(result);
             }
-            match self
-                .store
-                .append_reservations(&artifacts, self.schemas, &expected)
-            {
+            match self.commit(&artifacts, &expected) {
                 Ok(()) => return Ok(result),
                 Err(StoreError::VersionConflict { .. } | StoreError::IdempotencyConflict) => {
                     continue;
@@ -224,14 +242,12 @@ impl<'a> ReservationService<'a> {
         if artifacts.is_empty() {
             return Ok(());
         }
-        self.store
-            .append_reservations(&artifacts, self.schemas, &guards)
-            .map_err(|e| match e {
-                StoreError::VersionConflict { .. } | StoreError::IdempotencyConflict => {
-                    ReservationError::Conflict
-                }
-                e => e.into(),
-            })
+        self.commit(&artifacts, &guards).map_err(|e| match e {
+            StoreError::VersionConflict { .. } | StoreError::IdempotencyConflict => {
+                ReservationError::Conflict
+            }
+            e => e.into(),
+        })
     }
 
     fn validate_owner(&self, owner: &ReservationOwner) -> Result<(), ReservationError> {

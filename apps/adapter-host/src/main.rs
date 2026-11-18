@@ -328,8 +328,13 @@ fn run() -> Result<(), String> {
         let recoveries = runtime
             .reasoning_recoveries(&host)
             .map_err(|e| e.to_string())?;
+        let reconnects = host.adapter_reconnections().map_err(|e| e.to_string())?;
         host.shutdown().map_err(|e| e.to_string())?;
         serde_json::to_value(report).map(|mut value| {
+            if !reconnects.is_empty() {
+                value["adapter_reconnections"] =
+                    serde_json::to_value(reconnects).expect("reconnect report serialization");
+            }
             if !recoveries.is_empty() {
                 value["reasoning_recoveries"] =
                     serde_json::to_value(recoveries).expect("recovery report serialization");

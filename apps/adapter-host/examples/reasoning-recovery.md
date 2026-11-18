@@ -90,8 +90,10 @@ quarantänisiert, prüft der Core die neue Anfrage und dokumentiert ihre lokale
 Ablehnung als `adapter_unavailable`. Dabei werden weder Binärquellen gelesen
 noch Daten an die alte Session geschickt oder Workerplätze belegt. Anschließend
 kann die erlaubte Alternative übernehmen. Ein solcher Core-Aufrufversuch
-beweist keine Zustellung oder Modellberechnung beim Backend. Der Host startet
-quarantänisierte Prozesse dadurch nicht automatisch neu.
+beweist keine Zustellung oder Modellberechnung beim Backend. Die getrennte,
+optionale [Wiederverbindungs-Policy](reasoner-reconnect.md) kann reine Reason-
+Prozesse neu verbinden. Während ihrer begrenzten Versuche kann neue Arbeit
+warten; ohne diese Policy bleiben quarantänisierte Sessions lokal gesperrt.
 
 ## Persistenz und Zuständigkeiten
 
@@ -176,7 +178,7 @@ bei verlorenen Antworten hängt weiterhin von der Deduplizierung des Adapters
 ab. Die neue Grenze zählt logische Requests mit bekannten Abschlüssen,
 einschließlich lokaler Ablehnungen.
 
-Automatische Wiederverbindung, gelernte Auswahl nach Kosten oder Qualität,
+Allgemeine Wiederverbindung anderer Rollen, gelernte Auswahl nach Kosten oder Qualität,
 Modellvergleich, allgemeine Neuplanung und Fallback bei semantisch schlechten
 Kandidaten bleiben weitere Arbeit. Die universelle Architektur und ihre
 Phasenabnahmen sind damit weiterhin nicht vollständig umgesetzt.

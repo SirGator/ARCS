@@ -1,0 +1,48 @@
+{
+  "$id": "arcs.adapter_reconnect_state.v1",
+  "type": "object",
+  "required": [
+    "definition_version_id",
+    "generation",
+    "attempt",
+    "state"
+  ],
+  "properties": {
+    "definition_version_id": {
+      "type": "string"
+    },
+    "generation": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "attempt": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 8
+    },
+    "state": {
+      "type": "string",
+      "enum": [
+        "healthy",
+        "waiting",
+        "connecting",
+        "exhausted",
+        "rejected"
+      ]
+    },
+    "not_before_unix_ms": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "failure": {
+      "type": "string",
+      "enum": [
+        "interrupted",
+        "timeout",
+        "transport",
+        "contract"
+      ]
+    }
+  },
+  "additionalProperties": false
+}

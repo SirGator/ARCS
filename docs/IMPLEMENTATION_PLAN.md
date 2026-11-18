@@ -262,6 +262,26 @@
 > Wiederverbindung, gelernte Auswahl, Modellvergleich, semantischer Fallback,
 > allgemeine Neuplanung und die vollständigen Phasenabnahmen bleiben offen.
 
+> Zwanzigster Slice gemäß v3 §7.2 PAR-02/PAR-04/PAR-08/PAR-09/PAR-10/PAR-11,
+> §10.1 SEC-05 und v2 OPS-01 teilweise: Eine optionale Adapterpolicy verbindet
+> ausgefallene reine Reason-Installationen neu. Zwei begrenzte Handshake-Worker
+> greifen weder auf den Store zu noch führen sie Modell- oder Geräteaufträge
+> aus. Der Core beansprucht jeden Versuch vor Prozessstart und übernimmt erst
+> die passende, gespeicherte Session. Revisionierte Belege erhalten Fälligkeit,
+> Generation und Fehlerbudget. Aktuelle Grants, exakte Metadaten, alte Endpoint-
+> Nutzer, lokale Node-Besitzsperre und benannte Kapazitäten begrenzen die
+> Übernahme. Task-Recovery und Connection-Recovery bleiben getrennt; gescheiterte
+> Tasks werden nicht pauschal neu gestartet. Initialer Start und Reconnect
+> teilen Command-Builder und Umgebungsfreigaben; Shutdown und Drop schließen
+> alte Nutzer vor der Besitzfreigabe. Der Store besitzt nun einen gemeinsamen,
+> nach Subject und Schema geprüften CAS-Schreibpfad; Reservierungslogik bleibt
+> im zuständigen Dienst. Sechs Core- und dreizehn Prozess-Tests prüfen echte
+> Neustarts, Rollback, konkurrierende Claims, begrenzte Versuche, frische
+> wartende Arbeit, Isolation, Ressourcen, Umgebungswerte, Metadatenabweichung,
+> RPC-Timeouts und Abbruch. Wiederverbindung anderer Rollen, Start mit zunächst
+> unerreichbaren Installationen, Fähigkeitszertifizierung, Controller-Fencing
+> und die vollständigen Phasenabnahmen bleiben offen.
+
 **Leitbild:** ARCS ist ein universeller Agent. Es soll sich einfach bedienen lassen, beliebige kompatible Systeme verbinden, eigenständig Probleme lösen und langfristige Aufgaben über Monate verfolgen.
 
 ## 1. Verbindliche Architekturregeln

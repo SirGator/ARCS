@@ -161,6 +161,7 @@ impl TaskRuntime {
         {
             return Err(invalid("runtime topology changed"));
         }
+        host.poll_reconnections_at(now_unix_ms)?;
         self.live_clock = live_clock;
         let has_deadlines = self.config.routes.iter().any(|route| {
             route.max_lifetime_ms.is_some()

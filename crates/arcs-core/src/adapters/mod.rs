@@ -10,6 +10,7 @@ pub mod data;
 pub mod input_data;
 pub mod output;
 pub mod port;
+pub mod reconnect;
 pub mod registration;
 pub mod stdio;
 

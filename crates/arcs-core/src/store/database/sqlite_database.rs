@@ -1,8 +1,8 @@
 //! SQLite-Implementierung des unveränderlichen Artefakt-Stores.
 
+mod current_updates;
 mod graph;
 mod metadata;
-mod reservations;
 mod retrieval;
 mod scoped_pages;
 pub use metadata::{ArtifactMetadata, MetadataField, MetadataValue};
@@ -42,6 +42,7 @@ pub enum StoreError {
     InvalidIdNamespace,
     InvalidPageLimits,
     InvalidEventBatch,
+    InvalidCurrentBatch,
     ProjectionTooLarge,
 }
 

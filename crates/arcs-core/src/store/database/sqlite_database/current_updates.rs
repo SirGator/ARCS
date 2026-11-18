@@ -1,15 +1,29 @@
-//! One transaction for a bounded set of versioned reservation states.
+//! Bounded optimistic updates to current artifacts, with atomic provenance links.
 use super::*;
 use crate::store::relation_kinds;
 use rusqlite::{Transaction, TransactionBehavior};
 
 impl SqliteArtifactStore {
-    pub(crate) fn append_reservations(
+    pub(crate) fn append_current_compared(
         &self,
         artifacts: &[Artifact],
         schemas: &SchemaRegistry,
-        expected: &[(crate::core::SubjectId, Option<VersionId>)],
+        expected: &[(SubjectId, SchemaId, Option<VersionId>)],
     ) -> Result<(), StoreError> {
+        let mut seen = std::collections::HashSet::new();
+        if !(1..=16).contains(&artifacts.len())
+            || !(1..=16).contains(&expected.len())
+            || expected
+                .iter()
+                .any(|(subject, schema, _)| !seen.insert((subject, schema)))
+            || artifacts.iter().any(|artifact| {
+                !expected.iter().any(|(subject, schema, _)| {
+                    artifact.subject.as_ref() == Some(subject) && artifact.schema_id == *schema
+                })
+            })
+        {
+            return Err(StoreError::InvalidCurrentBatch);
+        }
         for artifact in artifacts {
             validate_artifact(artifact, schemas).map_err(StoreError::Validation)?;
             if artifact.subject.is_none() {
@@ -18,8 +32,14 @@ impl SqliteArtifactStore {
         }
         let transaction =
             Transaction::new_unchecked(&self.connection, TransactionBehavior::Immediate)?;
-        for (subject, expected) in expected {
-            let actual:Option<String>=transaction.query_row("SELECT version_id FROM current_artifacts WHERE subject=?1 AND schema_id='arcs.resource_reservation.v1'",[&subject.0],|row|row.get(0)).optional()?;
+        for (subject, schema, expected) in expected {
+            let actual: Option<String> = transaction
+                .query_row(
+                    "SELECT version_id FROM current_artifacts WHERE subject=?1 AND schema_id=?2",
+                    params![subject.0, schema.0],
+                    |row| row.get(0),
+                )
+                .optional()?;
             if actual.as_deref() != expected.as_ref().map(|id| id.0.as_str()) {
                 return Err(StoreError::IdempotencyConflict);
             }

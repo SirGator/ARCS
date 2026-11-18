@@ -1,0 +1,52 @@
+{
+  "config_version": 1,
+  "database": "../../../../var/reasoner-reconnect/core.sqlite",
+  "node_id": "reasoner-reconnect-host",
+  "schemas": [
+    "../../../../adapters/example-reasoner/schemas/task.schema.json",
+    "../../../../adapters/example-reasoner/schemas/candidate.schema.json"
+  ],
+  "adapters": [
+    {
+      "program": "../../../../target/debug/arcs-json-input",
+      "profile": "../parallel/input-profile.json",
+      "args": [
+        {
+          "path": "../../../../var/reasoner-reconnect/input.sqlite"
+        }
+      ],
+      "grant_file": "../parallel/input-grant.json"
+    },
+    {
+      "program": "../../../../target/debug/arcs-example-reasoner",
+      "profile": "../parallel/solver-profile.json",
+      "args": [
+        {
+          "path": "../../../../var/reasoner-reconnect/solver.sqlite"
+        }
+      ],
+      "grant_file": "../parallel/solver-grant.json",
+      "reasoning_reconnect": {
+        "max_attempts": 2,
+        "delay_ms": 50,
+        "handshake_timeout_ms": 1000
+      },
+      "reasoning_resources": {
+        "analysis_slots": 1
+      }
+    },
+    {
+      "program": "../../../../target/debug/arcs-example-reasoner",
+      "profile": "../parallel/model-profile.json",
+      "args": [
+        {
+          "path": "../../../../var/reasoner-reconnect/model.sqlite"
+        }
+      ],
+      "grant_file": "../parallel/model-grant.json"
+    }
+  ],
+  "resource_pools": {
+    "analysis_slots": 1
+  }
+}

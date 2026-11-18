@@ -1,11 +1,12 @@
 mod input;
 mod reason;
+mod reconnect;
 mod resources;
+pub use reconnect::AdapterReconnectReport;
 pub use resources::ResourcePoolReport;
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
-use std::process::Command;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -101,6 +102,12 @@ pub struct Host {
     reasoning_jobs: HashMap<String, reason::PendingReasoning>,
     unavailable_adapters: HashSet<AdapterId>,
     resource_pools: crate::resource_policy::ResourceQuantities,
+    reconnect_installations: std::collections::BTreeMap<AdapterId, VersionId>,
+    reconnect_states: HashMap<AdapterId, arcs::adapters::reconnect::ConnectionState>,
+    reconnect_jobs: HashMap<AdapterId, reconnect::ReconnectJob>,
+    reconnect_cursor: Option<AdapterId>,
+    reconnect_stopped: bool,
+    _reconnect_lock: Option<std::fs::File>,
 }
 
 fn invalid(message: impl Into<String>) -> HostError {
@@ -350,9 +357,20 @@ impl Host {
                 path: config.database.clone(),
                 source,
             })?;
-        let ids = store
+        let mut ids = store
             .durable_id_generator(&config.node_id)
             .map_err(HostError::Store)?;
+        let reconnect_lock = if config
+            .adapters
+            .iter()
+            .any(|adapter| adapter.reasoning_reconnect.is_some())
+        {
+            Some(reconnect::lock_node(&database_path, &config.node_id)?)
+        } else {
+            None
+        };
+        let mut reconnect_installations = std::collections::BTreeMap::new();
+        let mut reconnect_states = HashMap::new();
         let mut world = WorldState::new();
         for recorded in ObservationLog::new(&store)
             .after(None)
@@ -368,11 +386,7 @@ impl Host {
         register_host(&mut registry, &config.schemas, &store, &config.adapters)?;
         let mut adapters = Vec::new();
         for prepared in config.adapters {
-            let mut command = Command::new(&prepared.program);
-            crate::process_environment::configure(&mut command, &prepared.inherit_env);
-            command
-                .args(&prepared.args)
-                .current_dir(&prepared.working_directory);
+            let mut command = prepared.command();
             let adapter_id = prepared.grant.adapter_id.clone();
             let endpoint = StdioAdapter::connect(
                 &mut command,
@@ -387,6 +401,28 @@ impl Host {
                 source,
             })?;
             validate_operations(&registry, &prepared)?;
+            if let Some(policy) = &prepared.reasoning_reconnect {
+                let definition = arcs::adapters::reconnect::ReconnectDefinition {
+                    capabilities_verified: false,
+                    node_id: config.node_id.clone(),
+                    manifest: endpoint.manifest().clone(),
+                    grant: prepared.grant.clone(),
+                    policy: policy.clone(),
+                };
+                let receipt = arcs::adapters::reconnect::ReconnectService {
+                    registry: &registry,
+                    schemas: &config.schemas,
+                    store: &store,
+                    ids: &mut ids,
+                    clock: &SystemClock,
+                }
+                .observe_connected(&definition)
+                .map_err(reconnect::error)?;
+                reconnect_installations
+                    .insert(adapter_id.clone(), receipt.record.definition_version_id);
+                reconnect_states.insert(adapter_id.clone(), receipt.record.state);
+            }
+
             let report = AdapterReport {
                 adapter_id,
                 enabled_capabilities: prepared.grant.enabled_capabilities.clone(),
@@ -417,6 +453,12 @@ impl Host {
             reasoning_jobs: HashMap::new(),
             unavailable_adapters: HashSet::new(),
             resource_pools: config.resource_pools,
+            reconnect_installations,
+            reconnect_states,
+            reconnect_jobs: HashMap::new(),
+            reconnect_cursor: None,
+            reconnect_stopped: false,
+            _reconnect_lock: reconnect_lock,
         })
     }
 
@@ -767,8 +809,9 @@ impl Host {
 
     /// Ein Fehler beim Beenden verhindert nicht das Beenden der übrigen Childs.
     pub fn shutdown(&mut self) -> Result<(), HostError> {
+        let reconnect_error = self.cancel_reconnections().err();
         let cancelled = self.cancel_reasoning_jobs();
-        let mut first_error = None;
+        let mut first_error = reconnect_error;
         for adapter in &mut self.adapters {
             if cancelled.contains(&adapter.config.grant.adapter_id)
                 || self
@@ -850,5 +893,14 @@ impl Host {
         }
         self.shutdown()?;
         self.report()
+    }
+}
+
+impl Drop for Host {
+    fn drop(&mut self) {
+        // Keep node ownership until all old consumers have stopped. A fresh
+        // host must not overlap a reader retained by an abandoned host object.
+        let _ = self.cancel_reconnections();
+        self.cancel_reasoning_jobs();
     }
 }

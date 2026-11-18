@@ -13,7 +13,8 @@ impl Host {
         Ok(!self.has_reasoning_result(&Self::reasoning_key(request))?
             && self
                 .unavailable_adapters
-                .contains(&request.capability.adapter_id))
+                .contains(&request.capability.adapter_id)
+            && !self.reconnect_can_wait(&request.capability.adapter_id))
     }
     pub(super) fn quarantine_reasoning_failure(
         &mut self,

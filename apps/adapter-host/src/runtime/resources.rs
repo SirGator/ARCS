@@ -45,6 +45,11 @@ impl Host {
                 *used.entry(resource.clone()).or_default() += units;
             }
         }
+        for job in self.reconnect_jobs.values() {
+            for (resource, units) in &job.claims {
+                *used.entry(resource.clone()).or_default() += units;
+            }
+        }
         used
     }
 

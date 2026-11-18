@@ -36,7 +36,9 @@ dokumentiert Slice 17; der
 [Bericht zu Reasoning-Belegen](docs/ZWISCHENBERICHT_2026-11-18_ATTEMPTS.md)
 ergänzt Slice 18. Der
 [Bericht zum begrenzten Fallback](docs/ZWISCHENBERICHT_2026-11-18_RECOVERY.md)
-dokumentiert Slice 19. Die Berichte vom
+dokumentiert Slice 19; der
+[Bericht zur Wiederverbindung](docs/ZWISCHENBERICHT_2026-11-18_RECONNECT.md)
+ergänzt Slice 20. Die Berichte vom
 [17. November](docs/ZWISCHENBERICHT_2026-11-17.md) und
 [16. November](docs/ZWISCHENBERICHT_2026-11-16.md) dokumentieren frühere
 Umsetzungsstände, Prüfergebnisse und offene Grenzen.
@@ -93,6 +95,10 @@ bleiben gesondert zu prüfen.
 wechselt nach belegten technischen Ausfällen zu ausdrücklich erlaubten
 Alternativen. Entscheidungen und Verzögerungen bleiben über Neustarts erhalten;
 Goals und Pläne prüfen den tatsächlichen Ergebnisproduzenten und ihre Budgets.
+[Automatische Wiederverbindung](apps/adapter-host/examples/reasoner-reconnect.md)
+stellt ausgefallene reine Reason-Sessions mit begrenzten Hintergrund-Workern
+wieder her. Der Core prüft die neue Session vor der Übernahme; verbrauchte
+Task-Versuche und Freigaben bleiben erhalten.
 
 ## Projektstruktur
 

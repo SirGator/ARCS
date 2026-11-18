@@ -57,6 +57,8 @@ pub struct AdapterConfig {
     /// Logical capacities used by this adapter while participating in Reason V2.
     #[serde(default)]
     pub reasoning_resources: crate::resource_policy::ResourceQuantities,
+    #[serde(default)]
+    pub reasoning_reconnect: Option<arcs::adapters::reconnect::ReconnectPolicy>,
     pub profile: Option<PathBuf>,
     pub working_directory: Option<PathBuf>,
     pub grant_file: PathBuf,
@@ -136,7 +138,9 @@ pub(crate) struct PreparedConfig {
     pub resource_pools: crate::resource_policy::ResourceQuantities,
 }
 
+#[derive(Clone)]
 pub(crate) struct PreparedAdapter {
+    pub reasoning_reconnect: Option<arcs::adapters::reconnect::ReconnectPolicy>,
     pub program: PathBuf,
     pub args: Vec<OsString>,
     pub inherit_env: Vec<String>,
@@ -146,6 +150,17 @@ pub(crate) struct PreparedAdapter {
     pub timeout_ms: u64,
     pub requests: Vec<RequestConfig>,
     pub transforms: Vec<TransformConfig>,
+}
+
+impl PreparedAdapter {
+    pub(crate) fn command(&self) -> std::process::Command {
+        let mut command = std::process::Command::new(&self.program);
+        crate::process_environment::configure(&mut command, &self.inherit_env);
+        command
+            .args(&self.args)
+            .current_dir(&self.working_directory);
+        command
+    }
 }
 
 fn invalid(message: impl Into<String>) -> HostError {
@@ -265,6 +280,24 @@ impl PreparedConfig {
                 .register_json(&document)
                 .map_err(|source| HostError::Schema { path, source })?;
         }
+        if config
+            .adapters
+            .iter()
+            .filter(|adapter| adapter.reasoning_reconnect.is_some())
+            .count()
+            > 16
+        {
+            return Err(invalid(
+                "at most 16 automatic reconnect installations per host",
+            ));
+        }
+        for adapter in &config.adapters {
+            if let Some(policy) = &adapter.reasoning_reconnect {
+                policy
+                    .validate()
+                    .map_err(|_| invalid("invalid reasoning_reconnect policy"))?;
+            }
+        }
         let mut adapter_ids = HashSet::new();
         let mut request_ids = HashSet::new();
         let mut adapters = Vec::new();
@@ -314,6 +347,7 @@ impl PreparedConfig {
                 arcs::reasoning::selection::PUBLISHER,
                 arcs::reasoning::attempts::PUBLISHER,
                 arcs::reasoning::recovery::PUBLISHER,
+                arcs::adapters::reconnect::PUBLISHER,
             ]
             .contains(&grant.adapter_id.0.as_str())
                 || !adapter_ids.insert(grant.adapter_id.clone())
@@ -449,6 +483,7 @@ impl PreparedConfig {
                 }
             }
             adapters.push(PreparedAdapter {
+                reasoning_reconnect: adapter.reasoning_reconnect,
                 program,
                 args,
                 inherit_env: adapter.inherit_env,

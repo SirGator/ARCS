@@ -1,4 +1,5 @@
 use super::*;
+use crate::core::SchemaId;
 use crate::core::{Source, SourceClass, SourceKind, Trust, TrustLevel};
 use serde_json::json;
 
@@ -196,7 +197,14 @@ fn failed_batch_commit_does_not_leave_partial_ownership() {
     .unwrap();
     assert!(
         store
-            .append_reservations(&[first, second], &schemas, &[])
+            .append_current_compared(
+                &[first, second],
+                &schemas,
+                &[
+                    (records::subject("a"), SchemaId(SCHEMA.into()), None),
+                    (records::subject("b"), SchemaId(SCHEMA.into()), None)
+                ]
+            )
             .is_err()
     );
     assert!(service.current("a").unwrap().is_none());
@@ -217,13 +225,17 @@ fn failed_batch_commit_does_not_leave_partial_ownership() {
     .unwrap();
     assert!(
         store
-            .append_reservations(
+            .append_current_compared(
                 &[next],
                 &schemas,
-                &[(
-                    records::subject("x"),
-                    Some(VersionId("stale-revision".into()))
-                )]
+                &[
+                    (
+                        records::subject("x"),
+                        SchemaId(SCHEMA.into()),
+                        Some(VersionId("stale-revision".into()))
+                    ),
+                    (records::subject("y"), SchemaId(SCHEMA.into()), None)
+                ]
             )
             .is_err()
     );

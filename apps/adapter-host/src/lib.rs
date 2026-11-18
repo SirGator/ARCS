@@ -11,6 +11,6 @@ pub mod task_runtime;
 
 pub use error::HostError;
 pub use runtime::{
-    AdapterReport, EstimateReport, Host, HostReport, RequestReport, ResourcePoolReport,
-    TransformReport,
+    AdapterReconnectReport, AdapterReport, EstimateReport, Host, HostReport, RequestReport,
+    ResourcePoolReport, TransformReport,
 };

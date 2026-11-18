@@ -110,6 +110,38 @@ impl StdioAdapter {
         schemas: &SchemaRegistry,
         store: &SqliteArtifactStore,
     ) -> Result<Self, StdioError> {
+        let endpoint = Self::handshake(command, timeout)?;
+        let manifest = endpoint.manifest();
+        if let Some(installed) = registry.get(&grant.adapter_id) {
+            if installed.manifest() != manifest || installed.grant() != &grant {
+                return Err(StdioError::RegistrationChanged);
+            }
+            store
+                .bind_schemas(schemas)
+                .map_err(|error| StdioError::Registration(AdapterRegistryError::Store(error)))?;
+        } else {
+            registry
+                .register(manifest.clone(), grant, schemas, store)
+                .map_err(StdioError::Registration)?;
+        }
+        Ok(endpoint)
+    }
+
+    /// Transport-only handshake. No registry changes, Store access or capability
+    /// invocation. The owning Core must validate the result before installing it.
+    pub fn handshake(command: &mut Command, timeout: Duration) -> Result<Self, StdioError> {
+        Self::handshake_cancellable(command, timeout, Arc::new(AtomicBool::new(false)))
+    }
+
+    /// Cancellation is observed at most every 25ms while waiting for metadata.
+    pub fn handshake_cancellable(
+        command: &mut Command,
+        timeout: Duration,
+        cancelled: Arc<AtomicBool>,
+    ) -> Result<Self, StdioError> {
+        if cancelled.load(Ordering::Acquire) {
+            return Err(StdioError::Disconnected);
+        }
         // Kein Shell-String und keine vom Child frei wählbare Identität.
         let mut child = command
             .stdin(Stdio::piped())
@@ -121,19 +153,28 @@ impl StdioAdapter {
         let stdout = child.stdout.take().expect("piped stdout");
         let (requests, incoming) = mpsc::sync_channel(1);
         let (outgoing, responses) = mpsc::sync_channel(1);
-        let worker = thread::spawn(move || {
-            let mut stdout = BufReader::new(stdout);
-            while let Ok(request) = incoming.recv() {
-                let response =
-                    write_frame(&mut stdin, &request).and_then(|()| read_frame(&mut stdout));
-                let failed = response.is_err();
-                if outgoing.send(response).is_err() || failed {
-                    break;
+        let worker = thread::Builder::new()
+            .name("arcs-stdio".into())
+            .spawn(move || {
+                let mut stdout = BufReader::new(stdout);
+                while let Ok(request) = incoming.recv() {
+                    let response =
+                        write_frame(&mut stdin, &request).and_then(|()| read_frame(&mut stdout));
+                    let failed = response.is_err();
+                    if outgoing.send(response).is_err() || failed {
+                        break;
+                    }
                 }
+            });
+        let worker = match worker {
+            Ok(worker) => worker,
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(StdioError::Spawn(error));
             }
-        });
+        };
         let child = Arc::new(Mutex::new(child));
-        let cancelled = Arc::new(AtomicBool::new(false));
         let mut session = Session {
             child: Arc::clone(&child),
             cancelled: Arc::clone(&cancelled),
@@ -146,18 +187,6 @@ impl StdioAdapter {
         let AdapterMessage::Manifest { manifest } = session.exchange(HostMessage::Hello)? else {
             return Err(StdioError::UnexpectedMessage);
         };
-        if let Some(installed) = registry.get(&grant.adapter_id) {
-            if installed.manifest() != &manifest || installed.grant() != &grant {
-                return Err(StdioError::RegistrationChanged);
-            }
-            store
-                .bind_schemas(schemas)
-                .map_err(|error| StdioError::Registration(AdapterRegistryError::Store(error)))?;
-        } else {
-            registry
-                .register(manifest.clone(), grant, schemas, store)
-                .map_err(StdioError::Registration)?;
-        }
         Ok(Self {
             manifest,
             session: Mutex::new(session),
@@ -168,6 +197,17 @@ impl StdioAdapter {
 
     pub fn manifest(&self) -> &AdapterManifest {
         &self.manifest
+    }
+
+    /// Change only the local dialog deadline, without I/O or registration.
+    /// Reconnect workers restore the configured RPC timeout after their
+    /// separately bounded metadata handshake.
+    pub fn set_dialog_timeout(&mut self, timeout: Duration) -> Result<(), StdioError> {
+        self.session
+            .get_mut()
+            .map_err(|_| StdioError::SessionPoisoned)?
+            .timeout = timeout;
+        Ok(())
     }
 
     /// Poll liefert höchstens eine Observation. Idle beendet keinen Prozess.
