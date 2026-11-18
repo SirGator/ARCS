@@ -312,6 +312,7 @@ impl PreparedConfig {
                 PLAN_ID,
                 arcs::runtime::reservations::PUBLISHER,
                 arcs::reasoning::selection::PUBLISHER,
+                arcs::reasoning::attempts::PUBLISHER,
             ]
             .contains(&grant.adapter_id.0.as_str())
                 || !adapter_ids.insert(grant.adapter_id.clone())

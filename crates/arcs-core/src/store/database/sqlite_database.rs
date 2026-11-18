@@ -1,9 +1,13 @@
 //! SQLite-Implementierung des unveränderlichen Artefakt-Stores.
 
 mod graph;
+mod metadata;
 mod reservations;
 mod retrieval;
+mod scoped_pages;
+pub use metadata::{ArtifactMetadata, MetadataField, MetadataValue};
 mod text_index;
+pub use scoped_pages::ScopedArtifactRow;
 pub use text_index::TextIndexTrace;
 
 use rusqlite::{Connection, OptionalExtension, params};
@@ -36,6 +40,9 @@ pub enum StoreError {
     SchemaDrift(SchemaId),
     IdempotencyConflict,
     InvalidIdNamespace,
+    InvalidPageLimits,
+    InvalidEventBatch,
+    ProjectionTooLarge,
 }
 
 /// Core-seitiger Wiederholungsschlüssel und kanonische ursprüngliche Eingabe.
@@ -166,6 +173,7 @@ impl SqliteArtifactStore {
             ",
         )?;
         ensure_subject_history_schema(&connection)?;
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_artifact_versions_schema_subject_sequence ON artifact_versions(schema_id,subject,sequence)",[])?;
         Ok(Self { connection })
     }
 
@@ -379,12 +387,31 @@ impl SqliteArtifactStore {
         registry: &SchemaRegistry,
         event_relations: &[(VersionId, RelationKind)],
     ) -> Result<(), StoreError> {
+        self.append_current_with_events(current, &[(event, event_relations)], registry, &[])
+    }
+
+    /// A bounded set of related events and one current-state transition share
+    /// the same commit, including links between the new events themselves.
+    pub(crate) fn append_current_with_events(
+        &self,
+        current: &Artifact,
+        events: &[(&Artifact, &[(VersionId, RelationKind)])],
+        registry: &SchemaRegistry,
+        current_relations: &[(VersionId, RelationKind)],
+    ) -> Result<(), StoreError> {
+        if !(1..=8).contains(&events.len()) {
+            return Err(StoreError::InvalidEventBatch);
+        }
         validate_artifact(current, registry).map_err(StoreError::Validation)?;
-        validate_artifact(event, registry).map_err(StoreError::Validation)?;
+        for (event, _) in events {
+            validate_artifact(event, registry).map_err(StoreError::Validation)?;
+        }
         let subject = current.subject.as_ref().ok_or(StoreError::MissingSubject)?;
 
         let transaction = self.connection.unchecked_transaction()?;
-        append_validated(&transaction, event)?;
+        for (event, _) in events {
+            append_validated(&transaction, event)?;
+        }
         append_validated(&transaction, current)?;
         transaction.execute(
             "INSERT INTO current_artifacts (subject, schema_id, version_id)
@@ -394,7 +421,10 @@ impl SqliteArtifactStore {
                  updated_at = CURRENT_TIMESTAMP",
             params![subject.0, current.schema_id.0, current.version_id.0],
         )?;
-        insert_relations(&transaction, &event.version_id, event_relations)?;
+        for (event, relations) in events {
+            insert_relations(&transaction, &event.version_id, relations)?;
+        }
+        insert_relations(&transaction, &current.version_id, current_relations)?;
         transaction.commit()?;
         Ok(())
     }

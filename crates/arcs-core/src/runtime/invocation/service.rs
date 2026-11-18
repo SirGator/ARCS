@@ -55,6 +55,14 @@ pub struct InvocationState {
     artifact_version: u64,
 }
 
+impl InvocationState {
+    /// Exact immutable state version, useful for linking a particular dispatch
+    /// and its measured outcome without treating a later retry as the same try.
+    pub fn version_id(&self) -> VersionId {
+        VersionId(format!("{}:v{}", self.artifact_id.0, self.artifact_version))
+    }
+}
+
 /// Fehler an der persistierten Invocation-Grenze.
 #[derive(Debug)]
 pub enum InvocationError {
@@ -209,6 +217,79 @@ impl<'a> InvocationService<'a> {
         self.store
             .append_current_with_event(&artifact, result, self.schemas, relations)?;
         Ok(next)
+    }
+
+    pub(crate) fn succeed_with_attempt(
+        &self,
+        state: &InvocationState,
+        result: &Artifact,
+        result_relations: &[(VersionId, crate::store::RelationKind)],
+        attempt: &Artifact,
+        attempt_relations: &[(VersionId, crate::store::RelationKind)],
+    ) -> Result<InvocationState, InvocationError> {
+        ensure_transition(state.status, InvocationStatus::Succeeded, state.retryable)?;
+        let next = self.next_state(
+            state,
+            InvocationStatus::Succeeded,
+            Some(result.version_id.clone()),
+            None,
+            false,
+        );
+        let artifact = self.with_attempt(&next, attempt)?;
+        self.store.append_current_with_events(
+            &artifact,
+            &[(result, result_relations), (attempt, attempt_relations)],
+            self.schemas,
+            &[(
+                attempt.version_id.clone(),
+                crate::store::relation_kinds::based_on(),
+            )],
+        )?;
+        Ok(next)
+    }
+
+    pub(crate) fn fail_with_attempt(
+        &self,
+        state: &InvocationState,
+        error: String,
+        retryable: bool,
+        attempt: &Artifact,
+        relations: &[(VersionId, crate::store::RelationKind)],
+    ) -> Result<InvocationState, InvocationError> {
+        ensure_transition(state.status, InvocationStatus::Failed, state.retryable)?;
+        let next = self.next_state(
+            state,
+            InvocationStatus::Failed,
+            None,
+            Some(error),
+            retryable,
+        );
+        let artifact = self.with_attempt(&next, attempt)?;
+        self.store.append_current_with_events(
+            &artifact,
+            &[(attempt, relations)],
+            self.schemas,
+            &[(
+                attempt.version_id.clone(),
+                crate::store::relation_kinds::based_on(),
+            )],
+        )?;
+        Ok(next)
+    }
+
+    fn with_attempt(
+        &self,
+        state: &InvocationState,
+        attempt: &Artifact,
+    ) -> Result<Artifact, InvocationError> {
+        let mut artifact = state_artifact(state, self.schemas)?;
+        artifact
+            .provenance
+            .as_mut()
+            .expect("invocation provenance")
+            .parents
+            .push(attempt.version_id.0.clone());
+        Ok(artifact)
     }
 
     /// Atomarer Commit für ein Current-State-Resultat und `succeeded`.

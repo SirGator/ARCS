@@ -62,6 +62,7 @@ pub struct PreparedReasoning {
     actor: ActorType,
     manifest: AdapterManifest,
     grant: AdapterGrant,
+    prepared_at: Option<Instant>,
 }
 impl PreparedReasoning {
     pub fn invocation(&self) -> &ReasoningInvocationV2 {
@@ -141,7 +142,11 @@ impl GeneralReasoningService<'_> {
         request: ReasoningRequestV2,
         selections: &[arcs_adapter_protocol::InputDataSelection],
     ) -> Result<ReasoningPreparation, ReasoningError> {
-        for schema in ["arcs.reasoning_request.v2", "arcs.reasoning_result.v2"] {
+        for schema in [
+            "arcs.reasoning_request.v2",
+            "arcs.reasoning_result.v2",
+            super::attempts::SCHEMA,
+        ] {
             if self.schemas.get(&SchemaId(schema.into())).is_none() {
                 return Err(ReasoningError::MissingRegisteredSchema(SchemaId(
                     schema.into(),
@@ -326,6 +331,7 @@ impl GeneralReasoningService<'_> {
             actor,
             manifest: endpoint.manifest().clone(),
             grant: grant.clone(),
+            prepared_at: (!cached).then(Instant::now),
         };
         if let Some(version) = reasoner_selection {
             let relations = crate::store::ArtifactRelations::new(self.store);
@@ -372,7 +378,10 @@ impl GeneralReasoningService<'_> {
             actor,
             manifest,
             grant,
+            prepared_at,
         } = prepared;
+        let latency =
+            prepared_at.map(|start| start.elapsed().as_millis().min(u64::MAX as u128) as u64);
         let invocations = InvocationService::new(self.store, self.schemas, self.clock);
         if invocations.lookup(&invocation.invocation_id)?.as_ref() != Some(&prepared) {
             return Err(invalid("stale reasoning completion"));
@@ -410,10 +419,22 @@ impl GeneralReasoningService<'_> {
                     vec![prepared.input_version.clone()],
                     None,
                 );
-                InvocationService::new(self.store, self.schemas, self.clock).succeed_with_event(
+                let attempt = super::attempts::create(
+                    &invocation,
+                    &prepared,
+                    super::attempts::response_outcome(&response, &result.version_id),
+                    latency,
+                    self.schemas,
+                    self.ids,
+                    self.clock,
+                )?;
+                let attempt_relations = super::attempts::relations(&attempt, &invocation)?;
+                InvocationService::new(self.store, self.schemas, self.clock).succeed_with_attempt(
                     &prepared,
                     &result,
                     &[(prepared.input_version.clone(), relation_kinds::result_of())],
+                    &attempt,
+                    &attempt_relations,
                 )?;
                 Ok(result)
             })();
@@ -432,11 +453,27 @@ impl GeneralReasoningService<'_> {
                             )
                         )
                     );
-                    InvocationService::new(self.store, self.schemas, self.clock).fail(
+                    let attempt = super::attempts::create(
+                        &invocation,
                         &prepared,
-                        format!("{error:?}"),
-                        retryable,
+                        super::attempts::AttemptOutcome::Failed {
+                            failure: super::attempts::failure_kind(&error),
+                            retryable,
+                        },
+                        latency,
+                        self.schemas,
+                        self.ids,
+                        self.clock,
                     )?;
+                    let relations = super::attempts::relations(&attempt, &invocation)?;
+                    InvocationService::new(self.store, self.schemas, self.clock)
+                        .fail_with_attempt(
+                            &prepared,
+                            format!("{error:?}"),
+                            retryable,
+                            &attempt,
+                            &relations,
+                        )?;
                     return Err(error);
                 }
             }

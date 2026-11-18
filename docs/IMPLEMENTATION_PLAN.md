@@ -228,6 +228,21 @@
 > Controller-Fencing, allgemeine versionierte Neuplanung und die vollständige
 > Langzeitabnahme bleiben offen.
 
+> Achtzehnter Slice gemäß v3 §9.2/§9.3 und §6.5 MEM-03 sowie v2 RSN-04:
+> Abgeschlossene Reasoning-V2-Versuche erhalten strukturierte Core-Belege im
+> vorhandenen Artifact-Netz. Sie binden Request, exakte Dispatch-Version,
+> Capability, Methode und Budget an Antwortstatus oder typisierte Fehlerklasse.
+> Antwort beziehungsweise Fehlerbeleg und abschließender Zustand committen
+> atomar; direkte Kontextrelationen erhalten die ursprünglichen Bezüge.
+> Cache-Replay erzeugt keine weiteren Messungen. Eine begrenzte, indexierte
+> Betreiberhistorie prüft gespeicherte Versionen, Zustandsbezüge und aktuelle
+> Grants, ohne Kontextpayloads oder rohe Adapterfehler auszugeben. Host-Latenz,
+> gemeldeter Adapterverbrauch und ungeprüfte Kandidatenqualität bleiben
+> ausdrücklich getrennt. Neun Core- und sechs Prozess-Tests decken Antworten,
+> Fehlschläge, explizite Wiederholung, Rollback, Paging, Neustart, Aufgabenpause
+> und verlorene Queue-Checkpoints ab. Automatischer Fallback, allgemeine
+> Neuplanung, Qualitäts-/Kostenoptimierung und die Phasenabnahmen bleiben offen.
+
 **Leitbild:** ARCS ist ein universeller Agent. Es soll sich einfach bedienen lassen, beliebige kompatible Systeme verbinden, eigenständig Probleme lösen und langfristige Aufgaben über Monate verfolgen.
 
 ## 1. Verbindliche Architekturregeln

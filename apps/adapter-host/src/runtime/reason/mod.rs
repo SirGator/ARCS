@@ -6,6 +6,13 @@ pub(super) use jobs::PendingReasoning;
 use super::*;
 
 impl Host {
+    pub fn reasoning_attempts(
+        &self,
+        query: &arcs::reasoning::attempts::AttemptQuery,
+    ) -> Result<arcs::reasoning::attempts::AttemptPage, HostError> {
+        arcs::reasoning::attempts::history(&self.registry, &self.schemas, &self.store, query)
+            .map_err(HostError::Reasoning)
+    }
     pub(crate) fn saved_reasoning_failure(
         &self,
         request: &arcs::reasoning::ReasoningRequestV2,

@@ -1,0 +1,14 @@
+{
+  "capabilities": [
+    {
+      "adapter_id": "example.solver",
+      "capability_id": "solution.propose"
+    },
+    {
+      "adapter_id": "example.model-fixture",
+      "capability_id": "solution.propose"
+    }
+  ],
+  "after_sequence": 0,
+  "limit": 16
+}

@@ -14,6 +14,7 @@ pub mod routing;
 pub mod selection;
 pub use arcs_adapter_protocol::reasoning_v2::*;
 
+pub mod attempts;
 mod contracts;
 mod error;
 mod proposal;

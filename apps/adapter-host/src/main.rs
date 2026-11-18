@@ -9,7 +9,7 @@ use arcs_host::task_runtime::suspension::TaskControlCommand;
 use arcs_host::task_runtime::{RuntimeConfig, TaskRuntime};
 use serde::Deserialize;
 
-const USAGE: &str = "usage: arcs-host --config <host.json> [--list-adapters | --find-capabilities <query.json> | [--monitor --stop-file <path>] [--runtime <runtime.json>] [--ticks <count>] [--stop-file <path>] | --runtime <runtime.json> [--goal-command <command.json> | --plan-command <command.json> | --task-command <command.json>]]";
+const USAGE: &str = "usage: arcs-host --config <host.json> [--list-adapters | --find-capabilities <query.json> | --reasoning-attempts <query.json> | [--monitor --stop-file <path>] [--runtime <runtime.json>] [--ticks <count>] [--stop-file <path>] | --runtime <runtime.json> [--goal-command <command.json> | --plan-command <command.json> | --task-command <command.json>]]";
 
 #[derive(Deserialize)]
 #[serde(tag = "command", rename_all = "snake_case", deny_unknown_fields)]
@@ -82,6 +82,7 @@ fn run() -> Result<(), String> {
     let mut plan_command = None;
     let mut task_command = None;
     let mut capability_query = None;
+    let mut attempt_query = None;
     let mut args = args.into_iter();
     while let Some(argument) = args.next() {
         if argument == "--list-adapters" && !list_adapters {
@@ -114,13 +115,16 @@ fn run() -> Result<(), String> {
             task_command = Some(PathBuf::from(value));
         } else if argument == "--find-capabilities" && capability_query.is_none() {
             capability_query = Some(PathBuf::from(value));
+        } else if argument == "--reasoning-attempts" && attempt_query.is_none() {
+            attempt_query = Some(PathBuf::from(value));
         } else {
             return Err(USAGE.into());
         }
     }
     let config = config.ok_or(USAGE)?;
-    if capability_query.is_some()
+    if (capability_query.is_some() || attempt_query.is_some())
         && (list_adapters
+            || (capability_query.is_some() && attempt_query.is_some())
             || runtime.is_some()
             || monitor
             || ticks.is_some()
@@ -147,6 +151,25 @@ fn run() -> Result<(), String> {
             query.validate().map_err(|e| format!("{e:?}"))?;
             Ok(query)
         })
+        .transpose()?;
+    let attempt_query: Option<arcs::reasoning::attempts::AttemptQuery> = attempt_query
+        .map(
+            |path| -> Result<arcs::reasoning::attempts::AttemptQuery, String> {
+                let mut bytes = Vec::new();
+                std::fs::File::open(path)
+                    .map_err(|e| e.to_string())?
+                    .take(65537)
+                    .read_to_end(&mut bytes)
+                    .map_err(|e| e.to_string())?;
+                if bytes.len() > 65536 {
+                    return Err("attempt query exceeds 65536 bytes".into());
+                }
+                let query: arcs::reasoning::attempts::AttemptQuery =
+                    serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+                query.validate().map_err(|e| format!("{e:?}"))?;
+                Ok(query)
+            },
+        )
         .transpose()?;
     if [
         goal_command.is_some(),
@@ -221,7 +244,11 @@ fn run() -> Result<(), String> {
             &mut std::io::stdout().lock(),
         );
     }
-    let value = if let Some(query) = capability_query {
+    let value = if let Some(query) = attempt_query {
+        let attempts = host.reasoning_attempts(&query).map_err(|e| e.to_string())?;
+        host.shutdown().map_err(|e| e.to_string())?;
+        serde_json::to_value(attempts)
+    } else if let Some(query) = capability_query {
         let matches = host
             .find_capabilities(&query)
             .map_err(|e| format!("{e:?}"))?;

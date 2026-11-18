@@ -1,0 +1,18 @@
+{
+  "$id": "arcs.reasoning_attempt.v1",
+  "type": "object",
+  "required": ["invocation_id", "dispatch_version_id", "request_version_id", "request_id", "capability", "method", "budget", "outcome", "candidate_quality_verified"],
+  "properties": {
+    "invocation_id": {"type": "string"},
+    "dispatch_version_id": {"type": "string"},
+    "request_version_id": {"type": "string"},
+    "request_id": {"type": "string"},
+    "capability": {"type": "object"},
+    "method": {"type": "string"},
+    "budget": {"type": "object"},
+    "candidate_quality_verified": {"type": "boolean", "enum": [false]},
+    "host_completion_latency_ms": {"type": "integer", "minimum": 0},
+    "outcome": {"type": "object"}
+  },
+  "additionalProperties": false
+}
