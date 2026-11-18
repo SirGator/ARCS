@@ -1,0 +1,14 @@
+{
+  "sequence": 1,
+  "expected_revision": 1,
+  "command_id": "resume-example-1",
+  "operator": {
+    "actor_type": "human",
+    "id": "local.operator"
+  },
+  "reason": "Projekt mit frischen Daten fortsetzen",
+  "change": {
+    "command": "resume",
+    "recover_dispatched": false
+  }
+}

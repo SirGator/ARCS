@@ -153,7 +153,8 @@ fn select(
         AND NOT EXISTS(SELECT 1 FROM runtime_dispatch_visited v WHERE v.sequence=j.sequence)
         AND NOT EXISTS(SELECT 1 FROM runtime_job_schedules s WHERE s.sequence=j.sequence AND s.released_at IS NULL)
         AND NOT EXISTS(SELECT 1 FROM runtime_job_joins d WHERE d.sequence=j.sequence AND d.state!='ready')
-        AND p.sequence > ?2 AND p.sequence <= ?3 ORDER BY p.sequence LIMIT 1");
+        AND NOT ({})
+        AND p.sequence > ?2 AND p.sequence <= ?3 ORDER BY p.sequence LIMIT 1",super::suspension::PAUSED);
     let mut selected = None;
     {
         let mut query = transaction.prepare(&sql).map_err(db)?;

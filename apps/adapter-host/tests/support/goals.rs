@@ -151,3 +151,48 @@ impl Drop for Fixture {
         let _ = std::fs::remove_dir_all(&self.directory);
     }
 }
+
+pub fn plan_fixture() -> Fixture {
+    let f = Fixture::new();
+    f.manual();
+    let mut input = f.read("input-profile.json");
+    input["events"][0]["payload"] =
+        json!({"device_id":"fan-01","enabled":true,"minimum_actuations":1});
+    f.write("input-profile.json", input);
+    let mut config = f.read("runtime.json");
+    let mut goal = config["routes"][0].clone();
+    goal["id"] = json!("switch");
+    goal["goal"]["max_rounds"] = json!(2);
+    let mut root = goal.clone();
+    root.as_object_mut().unwrap().remove("goal");
+    root["id"] = json!("plan-task");
+    root["reasoner"]["adapter_id"] = json!("planner");
+    root["method"] = json!("learned");
+    root["target_schema_id"] = json!("arcs.plan_candidate.v1");
+    root["allowed_capabilities"] = json!([]);
+    root["budget"]["max_runtime_ms"] = json!(10000);
+    root["plan"] = json!({"max_steps":3,"max_total_runtime_ms":120000,"max_total_actions":4,"templates":[{"route":goal,"export_fields":["goal_status","effect"]}]});
+    config["routes"] = json!([root]);
+    config["max_concurrent_reasoning"] = json!(2);
+    config["max_jobs_per_tick"] = json!(10);
+    config["max_pending_jobs"] = json!(4);
+    f.write("runtime.json", config);
+    f.write(
+        "planner.json",
+        json!({"proposal":{"steps":[{"id":"device","template":"switch"}]}}),
+    );
+    std::fs::write(
+        f.directory.join("planner.py"),
+        include_str!("planner_peer.py"),
+    )
+    .unwrap();
+    let mut grant = f.read("planner-grant.json");
+    grant["adapter_id"] = json!("planner");
+    grant["producer_class"] = json!("model");
+    grant["reasoning_limits_v2"]["methods"] = json!(["learned"]);
+    f.write("root-grant.json", grant);
+    let mut host = f.read("host.json");
+    host["adapters"].as_array_mut().unwrap().push(json!({"program":"/usr/bin/python3","args":[{"path":"planner.py"},{"path":"planner.json"}],"grant_file":"root-grant.json","timeout_ms":15000}));
+    f.write("host.json", host);
+    f
+}

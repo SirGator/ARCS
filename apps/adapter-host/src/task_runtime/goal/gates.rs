@@ -255,6 +255,9 @@ impl TaskRuntime {
         reason: String,
     ) -> Result<(), HostError> {
         self.check_goal_host(host)?;
+        if self.journal.task_is_paused(sequence)? {
+            return Err(invalid("paused goals cannot receive an action approval"));
+        }
         if reason.trim().is_empty()
             || reason.len() > 2000
             || actor.id.trim().is_empty()

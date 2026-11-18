@@ -39,7 +39,7 @@ impl Journal {
     ) -> Result<(), HostError> {
         self.connection
             .execute(
-                "INSERT OR IGNORE INTO runtime_reasoning_requests VALUES(?1,?2)",
+                "INSERT OR IGNORE INTO runtime_reasoning_requests(request_id,sequence) VALUES(?1,?2)",
                 params![request, sequence as i64],
             )
             .map_err(db)?;
@@ -62,7 +62,7 @@ impl Journal {
     ) -> Result<HashSet<String>, HostError> {
         // Only inspect live worker IDs (at most the bounded pool), rather than
         // loading all cancelled tasks or all historical goal rounds.
-        let mut query=self.connection.prepare("SELECT 1 FROM runtime_reasoning_requests r JOIN runtime_jobs j ON j.sequence=r.sequence WHERE r.request_id=?1 AND j.state='cancelled'").map_err(db)?;
+        let mut query=self.connection.prepare("SELECT 1 FROM runtime_reasoning_requests r JOIN runtime_jobs j ON j.sequence=r.sequence WHERE r.request_id=?1 AND (j.state='cancelled' OR r.abandoned=1)").map_err(db)?;
         let mut cancelled = HashSet::new();
         for request in requests {
             if query

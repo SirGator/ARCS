@@ -1,0 +1,13 @@
+{
+  "sequence": 1,
+  "expected_revision": 0,
+  "command_id": "pause-example-1",
+  "operator": {
+    "actor_type": "human",
+    "id": "local.operator"
+  },
+  "reason": "Unterbrechung des Beispielprojekts",
+  "change": {
+    "command": "pause"
+  }
+}

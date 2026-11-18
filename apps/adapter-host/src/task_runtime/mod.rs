@@ -9,6 +9,7 @@ pub mod planning;
 pub mod reasoner_selection;
 mod reasoning;
 pub mod scheduler;
+pub mod suspension;
 pub use config::{ReasoningRoute, RuntimeConfig};
 pub use journal::dispatch::{DispatchClassReport, DispatchReport};
 
@@ -62,6 +63,8 @@ pub struct FailedTask {
 }
 #[derive(Debug, Serialize)]
 pub struct RuntimeReport {
+    pub paused_jobs: u64,
+    pub task_controls: Vec<suspension::TaskControlStatus>,
     pub runtime_id: String,
     pub ticks: u64,
     pub pending_jobs: usize,
@@ -161,6 +164,7 @@ impl TaskRuntime {
             self.expire_due_tasks(host, &mut report)?;
         }
         self.reap_cancelled_task_reasoning(host)?;
+        self.collect_paused_reasoning(host, has_deadlines, live_clock, &mut report)?;
         self.cleanup_control_sessions(host)?;
         let caught_up = self.discover(host, &mut report, now_unix_ms)?;
         // Erst alte Core-Ereignisse übernehmen. Normale Inputs nur bei freier Queue.
@@ -373,6 +377,8 @@ impl TaskRuntime {
             [], |row| row.get::<_, i64>(0).map(|n| n as u64),
         ).map_err(db)?;
         Ok(RuntimeReport {
+            paused_jobs: self.journal.paused_count()?,
+            task_controls: self.journal.task_controls_report()?,
             runtime_id: self.config.runtime_id.clone(),
             ticks,
             pending_jobs: self

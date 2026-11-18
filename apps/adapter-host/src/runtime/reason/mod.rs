@@ -6,6 +6,21 @@ pub(super) use jobs::PendingReasoning;
 use super::*;
 
 impl Host {
+    pub(crate) fn saved_reasoning_failure(
+        &self,
+        request: &arcs::reasoning::ReasoningRequestV2,
+    ) -> Result<Option<String>, HostError> {
+        arcs::runtime::InvocationService::new(&self.store, &self.schemas, &SystemClock)
+            .lookup(&Self::reasoning_key(request))
+            .map(|state| {
+                state
+                    .filter(|state| state.status == arcs::runtime::InvocationStatus::Failed)
+                    .map(|state| format!("paused reasoning invocation failed: {:?}", state.error))
+            })
+            .map_err(|error| {
+                HostError::Reasoning(arcs::reasoning::ReasoningError::Invocation(error))
+            })
+    }
     pub(crate) fn reasoner_choice_availability(
         &self,
         choice: &arcs::reasoning::selection::ReasonerChoice,

@@ -77,57 +77,7 @@ impl Host {
             if job.fingerprint != fingerprint {
                 return Err(invalid("running reasoning request identity changed"));
             }
-            let (response, aborted) = match job.response.try_recv() {
-                Ok(response) => (response, false),
-                Err(TryRecvError::Empty) if Instant::now() < job.deadline => return Ok(None),
-                Err(TryRecvError::Empty) => {
-                    for adapter in &self.adapters {
-                        if job.resources.contains(&adapter.config.grant.adapter_id) {
-                            adapter.endpoint.abort();
-                        }
-                    }
-                    (
-                        Err(ReasoningError::AdapterCall(AdapterCallError::Timeout)),
-                        true,
-                    )
-                }
-                Err(TryRecvError::Disconnected) => (
-                    Err(ReasoningError::AdapterCall(AdapterCallError::Unavailable(
-                        "reasoning worker disconnected".into(),
-                    ))),
-                    false,
-                ),
-            };
-            let job = self
-                .reasoning_jobs
-                .remove(&key)
-                .expect("checked running job");
-            if matches!(response, Err(ReasoningError::AdapterCall(_))) {
-                self.unavailable_adapters
-                    .insert(job.prepared.invocation().capability.adapter_id.clone());
-            }
-            if matches!(response, Err(ReasoningError::InputData(_))) {
-                self.unavailable_adapters.extend(
-                    job.resources
-                        .iter()
-                        .filter(|id| **id != job.prepared.invocation().capability.adapter_id)
-                        .cloned(),
-                );
-            }
-            // An elapsed overall deadline aborts every session reserved for
-            // this call; none may be reused while a late worker unwinds.
-            if aborted {
-                self.unavailable_adapters
-                    .extend(job.resources.iter().cloned());
-            }
-            if job.worker.is_finished() {
-                let _ = job.worker.join();
-            }
-            return self
-                .reasoning_service()
-                .finish(job.prepared, response)
-                .map(Some)
-                .map_err(HostError::Reasoning);
+            return self.collect_pending_reasoning(&key);
         }
         let cached = self.has_reasoning_result(&key)?;
         if !cached && self.reasoning_jobs.len() >= limit {
@@ -237,6 +187,85 @@ impl Host {
                 .map(Some)
                 .map_err(HostError::Reasoning),
         }
+    }
+
+    /// Collect only an existing worker. This entry point never prepares or
+    /// dispatches a new request, including after a host restart.
+    fn collect_pending_reasoning(
+        &mut self,
+        key: &str,
+    ) -> Result<Option<ReasoningResult>, HostError> {
+        let Some(job) = self.reasoning_jobs.get(key) else {
+            return Ok(None);
+        };
+        let (response, aborted) = match job.response.try_recv() {
+            Ok(response) => (response, false),
+            Err(TryRecvError::Empty) if Instant::now() < job.deadline => return Ok(None),
+            Err(TryRecvError::Empty) => {
+                for adapter in &self.adapters {
+                    if job.resources.contains(&adapter.config.grant.adapter_id) {
+                        adapter.endpoint.abort();
+                    }
+                }
+                (
+                    Err(ReasoningError::AdapterCall(AdapterCallError::Timeout)),
+                    true,
+                )
+            }
+            Err(TryRecvError::Disconnected) => (
+                Err(ReasoningError::AdapterCall(AdapterCallError::Unavailable(
+                    "reasoning worker disconnected".into(),
+                ))),
+                false,
+            ),
+        };
+        let job = self
+            .reasoning_jobs
+            .remove(key)
+            .expect("checked running job");
+        if matches!(response, Err(ReasoningError::AdapterCall(_))) {
+            self.unavailable_adapters
+                .insert(job.prepared.invocation().capability.adapter_id.clone());
+        }
+        if matches!(response, Err(ReasoningError::InputData(_))) {
+            self.unavailable_adapters.extend(
+                job.resources
+                    .iter()
+                    .filter(|id| **id != job.prepared.invocation().capability.adapter_id)
+                    .cloned(),
+            );
+        }
+        // An elapsed overall deadline aborts every session reserved for
+        // this call; none may be reused while a late worker unwinds.
+        if aborted {
+            self.unavailable_adapters
+                .extend(job.resources.iter().cloned());
+        }
+        if job.worker.is_finished() {
+            let _ = job.worker.join();
+        }
+        self.reasoning_service()
+            .finish(job.prepared, response)
+            .map(Some)
+            .map_err(HostError::Reasoning)
+    }
+
+    pub(crate) fn collect_reasoning_requests(
+        &mut self,
+        requests: &HashSet<String>,
+    ) -> Vec<(String, Result<Option<ReasoningResult>, HostError>)> {
+        let pending: Vec<_> = self
+            .reasoning_jobs
+            .iter()
+            .filter(|(_, job)| {
+                !job.discarded && requests.contains(&job.prepared.invocation().request_id)
+            })
+            .map(|(key, job)| (key.clone(), job.prepared.invocation().request_id.clone()))
+            .collect();
+        pending
+            .into_iter()
+            .map(|(key, id)| (id, self.collect_pending_reasoning(&key)))
+            .collect()
     }
 
     pub(in crate::runtime) fn cancel_reasoning_jobs(&mut self) -> HashSet<AdapterId> {

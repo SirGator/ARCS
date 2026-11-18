@@ -6,6 +6,7 @@ mod planning;
 mod queries;
 mod reasoning;
 mod scheduling;
+pub(super) mod suspension;
 pub(super) use planning::capacity_query;
 
 use std::fs::File;
@@ -170,6 +171,7 @@ impl Journal {
         dependencies::initialize(&connection)?;
         planning::initialize(&connection)?;
         reasoning::initialize(&connection)?;
+        suspension::initialize(&connection)?;
         control::initialize(&connection)?;
         dispatch::initialize(&connection, config)?;
         deadlines::initialize(&connection)?;

@@ -30,7 +30,9 @@ hält den Stand bis Slice 14 fest. Die
 [Ergänzung zur Reasoner-Auswahl](docs/ZWISCHENBERICHT_2026-11-18_ROUTING.md)
 dokumentiert Slice 15 und seine Prüfungen. Der
 [Bericht zur Textsuche](docs/ZWISCHENBERICHT_2026-11-18_MEMORY.md)
-ergänzt Slice 16. Die Berichte vom
+ergänzt Slice 16; der
+[Bericht zu Aufgabenpausen](docs/ZWISCHENBERICHT_2026-11-18_PAUSES.md)
+dokumentiert Slice 17. Die Berichte vom
 [17. November](docs/ZWISCHENBERICHT_2026-11-17.md) und
 [16. November](docs/ZWISCHENBERICHT_2026-11-16.md) dokumentieren frühere
 Umsetzungsstände, Prüfergebnisse und offene Grenzen.
@@ -73,6 +75,10 @@ und stellen sie auch dem vorhandenen Vorlagenplaner zur Verfügung.
 [Dauerhafte Reasoner-Auswahl](apps/adapter-host/examples/reasoner-routing.md)
 wählt pro Aufgabe innerhalb erlaubter Optionen und aktueller Host-Kapazitäten;
 ein Core-Beleg erhält die Entscheidung über Neustarts und Goal-Runden.
+[Dauerhafte Aufgabenpausen](apps/adapter-host/examples/task-pauses.md)
+sperren einzelne Aufgaben oder ganze Pläne über Neustarts. Laufende
+Reasoning-Antworten werden noch abgeholt; Goals brauchen vor einer neuen
+Aktion frische Vorbereitung und Freigabe.
 
 ## Projektstruktur
 

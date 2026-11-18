@@ -146,6 +146,8 @@ impl GoalState {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GoalTask {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resume_observation_cursor: Option<u64>,
     pub sequence: u64,
     pub route_id: String,
     pub input_version_id: VersionId,

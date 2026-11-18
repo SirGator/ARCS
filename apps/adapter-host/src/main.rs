@@ -5,10 +5,11 @@ use std::path::PathBuf;
 use arcs::approval::ApprovalDecision;
 use arcs::core::{Actor, ActorType, VersionId};
 use arcs_host::Host;
+use arcs_host::task_runtime::suspension::TaskControlCommand;
 use arcs_host::task_runtime::{RuntimeConfig, TaskRuntime};
 use serde::Deserialize;
 
-const USAGE: &str = "usage: arcs-host --config <host.json> [--list-adapters | --find-capabilities <query.json> | [--monitor --stop-file <path>] [--runtime <runtime.json>] [--ticks <count>] [--stop-file <path>] | --runtime <runtime.json> [--goal-command <command.json> | --plan-command <command.json>]]";
+const USAGE: &str = "usage: arcs-host --config <host.json> [--list-adapters | --find-capabilities <query.json> | [--monitor --stop-file <path>] [--runtime <runtime.json>] [--ticks <count>] [--stop-file <path>] | --runtime <runtime.json> [--goal-command <command.json> | --plan-command <command.json> | --task-command <command.json>]]";
 
 #[derive(Deserialize)]
 #[serde(tag = "command", rename_all = "snake_case", deny_unknown_fields)]
@@ -79,6 +80,7 @@ fn run() -> Result<(), String> {
     let mut monitor = false;
     let mut goal_command = None;
     let mut plan_command = None;
+    let mut task_command = None;
     let mut capability_query = None;
     let mut args = args.into_iter();
     while let Some(argument) = args.next() {
@@ -108,6 +110,8 @@ fn run() -> Result<(), String> {
             goal_command = Some(PathBuf::from(value));
         } else if argument == "--plan-command" && plan_command.is_none() {
             plan_command = Some(PathBuf::from(value));
+        } else if argument == "--task-command" && task_command.is_none() {
+            task_command = Some(PathBuf::from(value));
         } else if argument == "--find-capabilities" && capability_query.is_none() {
             capability_query = Some(PathBuf::from(value));
         } else {
@@ -122,7 +126,8 @@ fn run() -> Result<(), String> {
             || ticks.is_some()
             || stop_file.is_some()
             || goal_command.is_some()
-            || plan_command.is_some())
+            || plan_command.is_some()
+            || task_command.is_some())
     {
         return Err(USAGE.into());
     }
@@ -143,8 +148,16 @@ fn run() -> Result<(), String> {
             Ok(query)
         })
         .transpose()?;
-    if (goal_command.is_some() && plan_command.is_some())
-        || (goal_command.is_some() || plan_command.is_some())
+    if [
+        goal_command.is_some(),
+        plan_command.is_some(),
+        task_command.is_some(),
+    ]
+    .into_iter()
+    .filter(|value| *value)
+    .count()
+        > 1
+        || (goal_command.is_some() || plan_command.is_some() || task_command.is_some())
             && (runtime.is_none()
                 || list_adapters
                 || monitor
@@ -165,6 +178,23 @@ fn run() -> Result<(), String> {
             std::fs::read(path)
                 .map_err(|e| e.to_string())
                 .and_then(|bytes| serde_json::from_slice(&bytes).map_err(|e| e.to_string()))
+        })
+        .transpose()?;
+    let task_command: Option<TaskControlCommand> = task_command
+        .map(|path| -> Result<TaskControlCommand, String> {
+            let mut bytes = Vec::new();
+            std::fs::File::open(path)
+                .map_err(|e| e.to_string())?
+                .take(65537)
+                .read_to_end(&mut bytes)
+                .map_err(|e| e.to_string())?;
+            if bytes.len() > 65536 {
+                return Err("task command exceeds 65536 bytes".into());
+            }
+            let command: TaskControlCommand =
+                serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+            command.validate().map_err(|e| e.to_string())?;
+            Ok(command)
         })
         .transpose()?;
     if runtime.is_none() && !monitor && (ticks.is_some() || stop_file.is_some()) {
@@ -203,7 +233,12 @@ fn run() -> Result<(), String> {
         serde_json::to_value(catalog)
     } else if let Some(config) = runtime {
         let mut runtime = TaskRuntime::open(&host, config).map_err(|e| e.to_string())?;
-        let report = if let Some(PlanCommand::Cancel { sequence, reason }) = plan_command {
+        let report = if let Some(command) = task_command {
+            runtime
+                .control_task(&mut host, command)
+                .map_err(|e| e.to_string())?;
+            runtime.report(0).map_err(|e| e.to_string())?
+        } else if let Some(PlanCommand::Cancel { sequence, reason }) = plan_command {
             runtime
                 .cancel_plan(&mut host, sequence, reason)
                 .map_err(|e| e.to_string())?;

@@ -10,6 +10,8 @@ fn setup() -> Connection {
         serde_json::json!({"config_version":1,"runtime_id":"test","journal":"unused","routes":[]}),
     )
     .unwrap();
+    super::super::reasoning::initialize(&connection).unwrap();
+    super::super::suspension::initialize(&connection).unwrap();
     initialize(&connection, &config).unwrap();
     connection
 }

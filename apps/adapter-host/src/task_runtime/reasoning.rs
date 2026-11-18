@@ -165,6 +165,11 @@ impl TaskRuntime {
             Some(policy) => host.recall_context(request, policy, inputs)?,
             None => request,
         };
+        if self.journal.captured_reasoning(&request.request_id)?
+            && let Some(error) = host.saved_reasoning_failure(&request)?
+        {
+            return Err(invalid(error));
+        }
         self.journal.bind_reasoning(sequence, &request.request_id)?;
         if self.config.max_concurrent_reasoning == 1 {
             host.reason_with_data(request, inputs).map(Some)

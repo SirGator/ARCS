@@ -210,6 +210,24 @@
 > zeitliche Wissensgültigkeit, breite Qualitäts-/Token-/Latenzbenchmarks und
 > die allgemeinen Phasenabnahmen bleiben offen.
 
+> Siebzehnter Slice gemäß v3 §8.2 LNG-05 und §7.2 PAR-05/PAR-07/PAR-10:
+> Revisionierte, idempotente Betreiberkommandos pausieren Aufgaben und komplette
+> Pläne im bestehenden Journal. Der Scheduler sperrt auch erzeugte Kinder;
+> eigene Kindpausen bleiben unabhängig. Vorhandene Reasoning-Worker werden
+> ohne neuen Dispatch abgeholt, validiert und freigegeben. Wiederaufnahme nutzt
+> persistierte Ergebnisse und verhindert nach verlorenen Fehler-Checkpoints
+> stille Neuversuche. Goals verwerfen vor einem Dispatch die alte Vorbereitung
+> und benötigen frische Daten, Verification und Freigabe innerhalb des bisherigen
+> Versuchslimits. Ungeklärte Dispatches verlangen ausdrücklich bezeichnete
+> idempotente Recovery; spätere neue Planungsrunden erfassen frische Daten.
+> Fristen, Abbruch, Queuekapazität und exklusive Reservierungen bleiben wirksam.
+> 14 Prozess-Tests prüfen Konkurrenz, Kontrollrevisionen, Rollback, verlorene
+> Checkpoints, erzeugte Goal-Schritte, Budgets, Fristen, CLI und additive Migration.
+> Die Reason-Manager-Antwortübernahme und das gemeinsame Goal-Plan-Testsetup
+> wurden nach Zuständigkeiten getrennt. Live-IPC, harte I/O-Unterbrechung,
+> Controller-Fencing, allgemeine versionierte Neuplanung und die vollständige
+> Langzeitabnahme bleiben offen.
+
 **Leitbild:** ARCS ist ein universeller Agent. Es soll sich einfach bedienen lassen, beliebige kompatible Systeme verbinden, eigenständig Probleme lösen und langfristige Aufgaben über Monate verfolgen.
 
 ## 1. Verbindliche Architekturregeln

@@ -43,7 +43,9 @@ impl TaskRuntime {
                 // A generated goal may start long after its original input or
                 // plan admission. Begin its freshness window at acquisition,
                 // not at the old input cursor; persist it before any query.
-                let input_cursor = if !config.exclusive_resources.is_empty()
+                let input_cursor = if let Some(barrier) = self.journal.resume_barrier(sequence)? {
+                    barrier
+                } else if !config.exclusive_resources.is_empty()
                     || self.journal.dynamic_origin(sequence)?.is_some()
                 {
                     host.store().latest_sequence().map_err(HostError::Store)?
@@ -51,6 +53,7 @@ impl TaskRuntime {
                     self.journal.source_sequence(sequence)?
                 };
                 let task = GoalTask {
+                    resume_observation_cursor: None,
                     sequence,
                     route_id: route.id.clone(),
                     input_version_id: input.version_id.clone(),
@@ -78,6 +81,15 @@ impl TaskRuntime {
                 task
             }
         };
+        // A resumed dispatched round may finish its old effect/assessment,
+        // but its next planning round must start from new observations.
+        if task.state == GoalState::Planning && task.resume_observation_cursor.is_some() {
+            crate::task_runtime::journal::suspension::reset_goal(
+                &mut task,
+                host.store().latest_sequence().map_err(HostError::Store)?,
+            );
+            return self.save_goal(&task);
+        }
         // A goal may spend months acquiring control or waiting before it needs
         // a planner. Freeze the planner binding when planning actually begins.
         let route = if task.state == GoalState::Planning {
