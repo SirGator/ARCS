@@ -17,7 +17,22 @@ impl PlanBudget {
         bounded_tokens: bool,
     ) -> Result<(), HostError> {
         let rounds = route.goal.as_ref().map_or(1, |g| g.max_rounds as usize);
-        self.reasoning(&route.budget, route.method, rounds, bounded_tokens)?;
+        let mut maximum_runtime = 0;
+        let mut maximum_tokens = 0;
+        for choice in route.reasoner_choices() {
+            let mut option = Self::default();
+            option.reasoning(&choice.budget, choice.method, rounds, bounded_tokens)?;
+            maximum_runtime = maximum_runtime.max(option.runtime);
+            maximum_tokens = maximum_tokens.max(option.tokens);
+        }
+        self.runtime = self
+            .runtime
+            .checked_add(maximum_runtime)
+            .ok_or_else(|| invalid("plan runtime budget overflow"))?;
+        self.tokens = self
+            .tokens
+            .checked_add(maximum_tokens)
+            .ok_or_else(|| invalid("plan token budget overflow"))?;
         if let Some(goal) = &route.goal {
             self.actions = self
                 .actions

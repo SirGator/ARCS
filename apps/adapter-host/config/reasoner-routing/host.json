@@ -1,0 +1,60 @@
+{
+  "config_version": 1,
+  "database": "../../../../var/reasoner-routing/core.sqlite",
+  "node_id": "reasoner-routing-host",
+  "schemas": [
+    "../../../../adapters/example-reasoner/schemas/task.schema.json",
+    "../../../../adapters/example-reasoner/schemas/candidate.schema.json"
+  ],
+  "adapters": [
+    {
+      "program": "../../../../target/debug/arcs-json-input",
+      "profile": "../parallel/input-profile.json",
+      "args": [
+        {
+          "path": "../../../../var/reasoner-routing/input.sqlite"
+        }
+      ],
+      "grant_file": "../parallel/input-grant.json"
+    },
+    {
+      "program": "../../../../target/debug/arcs-example-reasoner",
+      "profile": "holder-profile.json",
+      "args": [
+        {
+          "path": "../../../../var/reasoner-routing/holder.sqlite"
+        }
+      ],
+      "grant_file": "holder-grant.json",
+      "reasoning_resources": {
+        "analysis_slots": 1
+      }
+    },
+    {
+      "program": "../../../../target/debug/arcs-example-reasoner",
+      "profile": "../discovery/solver-profile.json",
+      "args": [
+        {
+          "path": "../../../../var/reasoner-routing/solver.sqlite"
+        }
+      ],
+      "grant_file": "../parallel/solver-grant.json",
+      "reasoning_resources": {
+        "analysis_slots": 1
+      }
+    },
+    {
+      "program": "../../../../target/debug/arcs-example-reasoner",
+      "profile": "../discovery/model-profile.json",
+      "args": [
+        {
+          "path": "../../../../var/reasoner-routing/model.sqlite"
+        }
+      ],
+      "grant_file": "../parallel/model-grant.json"
+    }
+  ],
+  "resource_pools": {
+    "analysis_slots": 1
+  }
+}

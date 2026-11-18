@@ -178,6 +178,23 @@
 > automatische Fähigkeitsprüfung und allgemeine freie Werkzeugkomposition
 > bleiben offen; CAP-01/CAP-02 sind teilweise umgesetzt, nicht abgenommen.
 
+> Fünfzehnter Slice gemäß v3 §9.2/§9.3 und §7.2 PAR-04/PAR-10: Betreiber-
+> Routen und autorisierte Vorlagen können mehrere erlaubte Reasoner mit eigenen
+> Methoden und Budgets anbieten. Eine begrenzte lexikalische Suche kombiniert
+> Relevanz, Betreiberreihenfolge und aktuelle Host-Verfügbarkeit. Der Core friert
+> die Auswahl vor dem Dispatch als Artefakt ein; konkurrierende Verbindungen und
+> Wiederaufnahme übernehmen denselben Beleg. Private Eingabefelder können die
+> Suche steuern, ohne zusätzlichen externen Kontext zu erzeugen. Goals binden
+> erst bei tatsächlichem Planungsbedarf; Assessor, Verification und manuelle
+> Freigaben bleiben separat. Root-Pläne, erzeugte Schritte und Joins prüfen den
+> tatsächlichen Produzenten; Gesamtbudgets decken alle erlaubten Optionen ab.
+> Fünf Core- und zwölf Prozess-Tests prüfen Auswahl, Fehlerisolierung, Recovery,
+> konkurrierende Speicherung, Cache-Replay und bestätigte simulierte Wirkung.
+> Verfügbarkeit ist eine Beobachtung, keine Ressourcenreservierung. Allgemeine
+> versionierte Neuplanung, gemessene Eignung/Zuverlässigkeit, Kostenoptimierung
+> und freie Werkzeugauswahl bleiben offen; die allgemeinen Abnahmen bleiben
+> unverändert offen.
+
 **Leitbild:** ARCS ist ein universeller Agent. Es soll sich einfach bedienen lassen, beliebige kompatible Systeme verbinden, eigenständig Probleme lösen und langfristige Aufgaben über Monate verfolgen.
 
 ## 1. Verbindliche Architekturregeln

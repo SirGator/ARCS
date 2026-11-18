@@ -201,7 +201,13 @@ impl SqliteArtifactStore {
             .subject
             .as_ref()
             .ok_or(StoreError::MissingSubject)?;
-        let transaction = self.connection.unchecked_transaction()?;
+        // Serialize receipt inspection with its append. A deferred reader
+        // upgraded after another reader has committed can fail immediately
+        // with SQLITE_BUSY instead of waiting for the configured timeout.
+        let transaction = rusqlite::Transaction::new_unchecked(
+            &self.connection,
+            rusqlite::TransactionBehavior::Immediate,
+        )?;
         let existing: Option<(String, i64, String)> = transaction
             .query_row(
                 "SELECT receipts.input_json, versions.sequence, versions.artifact_json

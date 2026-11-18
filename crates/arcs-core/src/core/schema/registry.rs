@@ -9,6 +9,7 @@ use super::{SchemaDefinition, SchemaViolation};
 // Die Verträge werden in die Binary eingebettet. Ihre Verfügbarkeit hängt
 // damit zur Laufzeit nicht von einem veränderbaren Arbeitsverzeichnis ab.
 const BUNDLED_SCHEMAS: &[&str] = &[
+    include_str!("../../../schemas/v1/reasoner-selection.schema.json"),
     include_str!("../../../schemas/v1/resource-reservation.schema.json"),
     include_str!("../../../schemas/v1/plan-candidate.schema.json"),
     include_str!("../../../schemas/v1/plan.schema.json"),

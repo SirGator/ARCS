@@ -12,6 +12,16 @@ impl TaskRuntime {
         sequence: u64,
         id: &str,
     ) -> Result<ReasoningRoute, HostError> {
+        let route = self.raw_route_for_job(host, sequence, id)?;
+        self.apply_saved_reasoner(host, sequence, route)
+    }
+
+    pub(in crate::task_runtime) fn raw_route_for_job(
+        &self,
+        host: &Host,
+        sequence: u64,
+        id: &str,
+    ) -> Result<ReasoningRoute, HostError> {
         if let Some(route) = self.config.routes.iter().find(|route| route.id == id) {
             return Ok(route.clone());
         }
@@ -32,6 +42,7 @@ impl TaskRuntime {
             .iter()
             .find(|route| route.id == plan.parent_route_id)
             .ok_or_else(|| invalid("plan owner route is missing"))?;
+        let owner = self.apply_saved_reasoner(host, parent, owner.clone())?;
         let config = owner
             .plan
             .as_ref()

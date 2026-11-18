@@ -11,6 +11,7 @@
 pub mod context;
 pub mod general;
 pub mod routing;
+pub mod selection;
 pub use arcs_adapter_protocol::reasoning_v2::*;
 
 mod contracts;

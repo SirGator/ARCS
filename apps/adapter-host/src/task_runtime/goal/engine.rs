@@ -78,6 +78,14 @@ impl TaskRuntime {
                 task
             }
         };
+        // A goal may spend months acquiring control or waiting before it needs
+        // a planner. Freeze the planner binding when planning actually begins.
+        let route = if task.state == GoalState::Planning {
+            self.bind_reasoner_route(host, sequence, route, input)?
+        } else {
+            route.clone()
+        };
+        let route = &route;
         match task.state {
             GoalState::Acquiring | GoalState::Observing => {
                 let after = task.state == GoalState::Observing;

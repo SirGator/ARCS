@@ -141,6 +141,11 @@ fn snapshot(
         .transpose()
         .map_err(fail)?
         .unwrap_or_default();
+    let selections = runtime
+        .map(|runtime| runtime.reasoner_selections(host))
+        .transpose()
+        .map_err(fail)?
+        .unwrap_or_default();
     let runtime = runtime
         .map(|runtime| runtime.report(ticks))
         .transpose()
@@ -173,6 +178,6 @@ fn snapshot(
         writer,
         json!({"event":"snapshot","ticks":ticks,"uptime_ms":started.elapsed().as_millis(),
         "stored_artifacts":report.stored_artifacts,"world_revision":report.world_revision,
-        "adapters":adapters,"runtime":runtime,"recent_artifacts":recent,"resource_pools":report.resource_pools,"resource_reservations":reservations}),
+        "adapters":adapters,"runtime":runtime,"recent_artifacts":recent,"resource_pools":report.resource_pools,"resource_reservations":reservations,"reasoner_selections":selections}),
     )
 }

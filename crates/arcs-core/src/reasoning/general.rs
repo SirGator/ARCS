@@ -189,6 +189,8 @@ impl GeneralReasoningService<'_> {
         }
         ensure_candidate_schema(self.schemas, &request.target_schema_id)?;
         validate_allowed_capabilities(self.registry, &request.allowed_capabilities)?;
+        let reasoner_selection =
+            super::selection::request_selection(self.registry, self.schemas, self.store, &request)?;
         if request.context.len() > request.budget.max_context_items {
             return Err(invalid("context item limit exceeded"));
         }
@@ -232,6 +234,9 @@ impl GeneralReasoningService<'_> {
                 SourceClass::External
             },
         };
+        if let Some(version) = &reasoner_selection {
+            parents.push(version.clone());
+        }
         let actor = match grant.producer_class {
             ProducerClass::Model => ActorType::Model,
             ProducerClass::System => ActorType::System,
@@ -322,6 +327,20 @@ impl GeneralReasoningService<'_> {
             manifest: endpoint.manifest().clone(),
             grant: grant.clone(),
         };
+        if let Some(version) = reasoner_selection {
+            let relations = crate::store::ArtifactRelations::new(self.store);
+            if !relations
+                .outgoing(&prepared.state.input_version)?
+                .iter()
+                .any(|edge| edge.to == version && edge.kind == relation_kinds::based_on())
+            {
+                relations.connect(
+                    prepared.state.input_version.clone(),
+                    version,
+                    relation_kinds::based_on(),
+                )?;
+            }
+        }
         if cached {
             Ok(ReasoningPreparation::Complete(
                 self.finish_inner(prepared, None)?,

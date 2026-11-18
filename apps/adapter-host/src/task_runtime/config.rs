@@ -67,6 +67,8 @@ pub struct ReasoningRoute {
     pub allowed_capabilities: Vec<CapabilityRef>,
     pub constraints: Value,
     pub budget: ReasoningResources,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoner_selection: Option<super::reasoner_selection::ReasonerRouting>,
     /// Voraussetzungen derselben unveränderlichen Eingabe; leere Listen bleiben
     /// für vorhandene Routen auch in der gespeicherten Identität unsichtbar.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -199,6 +201,10 @@ pub(super) fn validate_route_contract(
             .iter()
             .any(|field| field.trim().is_empty() || !fields.insert(field))
         || !route.budget.supports(route.method)
+        || route
+            .constraints
+            .get(arcs::reasoning::selection::CONSTRAINT)
+            .is_some()
     {
         return Err(invalid(format!("invalid route {}", route.id)));
     }
@@ -245,6 +251,9 @@ pub(super) fn validate_route_contract(
         route.reasoner.adapter_id.0.clone(),
         reasoner.manifest().clone(),
     );
+    if let Some(routing) = &route.reasoner_selection {
+        routing.validate(host, route, manifests)?;
+    }
     let mut allowed = HashSet::new();
     for capability in &route.allowed_capabilities {
         if !allowed.insert(capability) {

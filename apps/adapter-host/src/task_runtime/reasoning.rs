@@ -19,6 +19,14 @@ impl TaskRuntime {
         input: &Artifact,
         now_unix_ms: u64,
     ) -> Result<Option<CompletedTask>, HostError> {
+        let route = self.apply_saved_reasoner(host, sequence, route.clone())?;
+        let route = &route;
+        let route = if route.goal.is_none() {
+            self.bind_reasoner_route(host, sequence, route, input)?
+        } else {
+            route.clone()
+        };
+        let route = &route;
         if route.plan.is_some() {
             self.advance_plan(host, sequence, route, input, now_unix_ms)?;
             return Ok(None);
@@ -121,6 +129,23 @@ impl TaskRuntime {
         inputs: &[arcs::adapters::input_data::InputDataSelection],
         memory: Option<&arcs::reasoning::context::MemoryPolicy>,
     ) -> Result<Option<arcs::reasoning::general::ReasoningResult>, HostError> {
+        if let Some(selection) = self.saved_reasoner_for_task(host, sequence)? {
+            let choice = selection.choice();
+            if choice.capability == request.capability
+                && choice.method == request.method
+                && choice.budget == request.budget
+                && selection.record.policy.target_schema_id == request.target_schema_id
+            {
+                if let Some(object) = request.constraints.as_object_mut() {
+                    object.insert(
+                        arcs::reasoning::selection::CONSTRAINT.into(),
+                        serde_json::json!(selection.version_id),
+                    );
+                } else {
+                    request.constraints = serde_json::json!({"operator_constraints":request.constraints,arcs::reasoning::selection::CONSTRAINT:selection.version_id});
+                }
+            }
+        }
         let dependencies = self.journal.dependency_bindings(sequence)?;
         if !dependencies.is_empty() {
             request.context.extend(

@@ -26,7 +26,9 @@ Sie ist die maßgebliche Grundlage für die weitere Implementierung.
 Der [Implementierungsplan v2.0](docs/IMPLEMENTATION_PLAN.md)
 hält die weiteren Aufgaben und den aktuellen Implementierungsstand fest.
 Der [Zwischenbericht vom 18. November 2026](docs/ZWISCHENBERICHT_2026-11-18.md)
-hält den aktuellen Stand und die nächsten Prioritäten fest. Die Berichte vom
+hält den Stand bis Slice 14 fest. Die
+[Ergänzung zur Reasoner-Auswahl](docs/ZWISCHENBERICHT_2026-11-18_ROUTING.md)
+dokumentiert Slice 15 und seine Prüfungen. Die Berichte vom
 [17. November](docs/ZWISCHENBERICHT_2026-11-17.md) und
 [16. November](docs/ZWISCHENBERICHT_2026-11-16.md) dokumentieren frühere
 Umsetzungsstände, Prüfergebnisse und offene Grenzen.
@@ -63,6 +65,9 @@ Neustarts; abgelaufene Arbeit wird über die vorhandenen Abbruchpfade beendet.
 [Fähigkeitsbeschreibungen und Suche](apps/adapter-host/examples/capability-discovery.md)
 ergänzen den autorisierten Katalog um ausdrücklich ungeprüfte Adapterangaben
 und stellen sie auch dem vorhandenen Vorlagenplaner zur Verfügung.
+[Dauerhafte Reasoner-Auswahl](apps/adapter-host/examples/reasoner-routing.md)
+wählt pro Aufgabe innerhalb erlaubter Optionen und aktueller Host-Kapazitäten;
+ein Core-Beleg erhält die Entscheidung über Neustarts und Goal-Runden.
 
 ## Projektstruktur
 

@@ -1,0 +1,106 @@
+{
+  "$id": "arcs.reasoner_selection.v1",
+  "type": "object",
+  "required": [
+    "owner",
+    "policy",
+    "observations",
+    "selected_index"
+  ],
+  "properties": {
+    "owner": {
+      "type": "object",
+      "required": [
+        "definition_version",
+        "input_version",
+        "task_id"
+      ],
+      "properties": {
+        "definition_version": {
+          "type": "string"
+        },
+        "input_version": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "policy": {
+      "type": "object",
+      "required": [
+        "target_schema_id",
+        "query_text",
+        "choices"
+      ],
+      "properties": {
+        "target_schema_id": {
+          "type": "string"
+        },
+        "query_text": {
+          "type": "string"
+        },
+        "choices": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "capability",
+              "method",
+              "budget"
+            ],
+            "properties": {
+              "capability": {
+                "type": "object"
+              },
+              "method": {
+                "type": "string"
+              },
+              "budget": {
+                "type": "object"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "observations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "availability",
+          "matched",
+          "relevance_score"
+        ],
+        "properties": {
+          "availability": {
+            "enum": [
+              "ready",
+              "busy",
+              "unavailable"
+            ]
+          },
+          "matched": {
+            "type": "boolean"
+          },
+          "relevance_score": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "selected_index": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 7
+    }
+  },
+  "additionalProperties": false
+}

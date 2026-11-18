@@ -6,6 +6,86 @@ pub(super) use jobs::PendingReasoning;
 use super::*;
 
 impl Host {
+    pub(crate) fn reasoner_choice_availability(
+        &self,
+        choice: &arcs::reasoning::selection::ReasonerChoice,
+    ) -> Result<arcs::reasoning::selection::ReasonerAvailability, HostError> {
+        use arcs::reasoning::selection::ReasonerAvailability;
+        if !self
+            .adapters
+            .iter()
+            .any(|adapter| adapter.config.grant.adapter_id == choice.capability.adapter_id)
+            || self
+                .unavailable_adapters
+                .contains(&choice.capability.adapter_id)
+        {
+            return Ok(ReasonerAvailability::Unavailable);
+        }
+        if self.busy_adapters().contains(&choice.capability.adapter_id) {
+            return Ok(ReasonerAvailability::Busy);
+        }
+        let claims = self.reasoning_claims(&std::collections::HashSet::from([choice
+            .capability
+            .adapter_id
+            .clone()]))?;
+        match self.ensure_resources_available(&claims) {
+            Ok(()) => Ok(ReasonerAvailability::Ready),
+            Err(HostError::ResourceBusy { .. }) => Ok(ReasonerAvailability::Busy),
+            Err(error) => Err(error),
+        }
+    }
+
+    pub(crate) fn load_reasoner_selection(
+        &self,
+        owner: &arcs::reasoning::selection::SelectionOwner,
+        policy: &arcs::reasoning::selection::SelectionPolicy,
+    ) -> Result<Option<arcs::reasoning::selection::SelectedReasoner>, HostError> {
+        arcs::reasoning::selection::load_selection(
+            &self.registry,
+            &self.schemas,
+            &self.store,
+            owner,
+            policy,
+        )
+        .map_err(HostError::Reasoning)
+    }
+
+    pub(crate) fn has_reasoner_selection(
+        &self,
+        owner: &arcs::reasoning::selection::SelectionOwner,
+    ) -> Result<bool, HostError> {
+        arcs::reasoning::selection::selection_exists(&self.store, owner)
+            .map_err(HostError::Reasoning)
+    }
+
+    pub(crate) fn select_reasoner(
+        &mut self,
+        owner: &arcs::reasoning::selection::SelectionOwner,
+        policy: &arcs::reasoning::selection::SelectionPolicy,
+    ) -> Result<arcs::reasoning::selection::SelectionPreparation, HostError> {
+        // Load before looking at transient occupancy. Replay must not switch
+        // providers because the old worker is busy or another one became free.
+        if let Some(saved) = self.load_reasoner_selection(owner, policy)? {
+            return Ok(arcs::reasoning::selection::SelectionPreparation::Selected(
+                Box::new(saved),
+            ));
+        }
+        let availability = policy
+            .choices
+            .iter()
+            .map(|choice| self.reasoner_choice_availability(choice))
+            .collect::<Result<Vec<_>, _>>()?;
+        arcs::reasoning::selection::ReasonerSelectionService {
+            registry: &self.registry,
+            schemas: &self.schemas,
+            store: &self.store,
+            ids: &mut self.ids,
+            clock: &SystemClock,
+        }
+        .select(owner, policy, &availability)
+        .map_err(HostError::Reasoning)
+    }
+
     fn reasoning_key(request: &arcs::reasoning::ReasoningRequestV2) -> String {
         arcs::runtime::deterministic_invocation_id(
             arcs::runtime::InvocationKind::Reasoning,
@@ -21,9 +101,6 @@ impl Host {
     fn has_reasoning_result(&self, key: &str) -> Result<bool, HostError> {
         // Admission hint only. The Core still validates the complete request,
         // current grants, input fingerprint and cached artifacts before reuse.
-        if self.resource_pools.is_empty() {
-            return Ok(false);
-        }
         arcs::runtime::InvocationService::new(&self.store, &self.schemas, &SystemClock)
             .lookup(key)
             .map(|state| {

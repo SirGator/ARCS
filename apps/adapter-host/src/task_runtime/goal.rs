@@ -220,8 +220,15 @@ impl GoalConfig {
             || !(1..=16).contains(&self.sources.len())
             || !(1..=32).contains(&self.actions.len())
             || !fields(&self.execution_payload_fields)
-            || route.budget.max_candidates != 1
-            || route.budget.max_context_items < 2 + self.sources.len()
+            || route.reasoner_choices().iter().any(|choice| {
+                choice.budget.max_candidates != 1
+                    || choice.budget.max_context_items < 2 + self.sources.len()
+            })
+            || self
+                .assessment
+                .constraints
+                .get(arcs::reasoning::selection::CONSTRAINT)
+                .is_some()
             || self.assessment.budget.max_context_items < 3 + 2 * self.sources.len()
         {
             return Err(invalid(
@@ -281,6 +288,32 @@ impl GoalConfig {
             }
         }
         let mut actions = HashSet::new();
+        let binary_objects = self
+            .sources
+            .iter()
+            .filter(|source| source.binary.is_some())
+            .count();
+        if route.reasoner_selection.is_some() && binary_objects > 0 {
+            for choice in route.reasoner_choices() {
+                let (adapter, _) = host
+                    .registry()
+                    .authorized_capability(
+                        &choice.capability.adapter_id,
+                        &choice.capability.capability_id,
+                    )
+                    .map_err(HostError::Registration)?;
+                if adapter
+                    .grant()
+                    .input_data_limits
+                    .as_ref()
+                    .is_none_or(|limits| limits.max_objects < binary_objects)
+                {
+                    return Err(invalid(
+                        "every selectable goal planner needs a sufficient binary input receiver grant",
+                    ));
+                }
+            }
+        }
         for action in &self.actions {
             if !actions.insert(&action.capability)
                 || !route.allowed_capabilities.contains(&action.capability)

@@ -20,7 +20,10 @@ impl PlanningConfig {
             || self.max_total_actions.is_some_and(|n| n > 31_000)
             || owner.goal.is_some()
             || owner.target_schema_id.0 != PLAN_CANDIDATE
-            || owner.budget.max_candidates != 1
+            || owner
+                .reasoner_choices()
+                .iter()
+                .any(|choice| choice.budget.max_candidates != 1)
             || !owner.allowed_capabilities.is_empty()
             || owner.constraints.get("task_planning").is_some()
         {
@@ -106,6 +109,25 @@ impl PlanningConfig {
                 .ok_or_else(|| invalid("template reasoner is no longer authorized"))?;
             if let Some(claim) = &capability.description_claim {
                 entry["reasoner_description_claim"] = json!(claim);
+            }
+            if template.route.reasoner_selection.is_some() {
+                entry["reasoner_choices"] = json!(
+                    template
+                        .route
+                        .reasoner_choices()
+                        .iter()
+                        .map(|choice| {
+                            let mut value = json!(choice);
+                            if let Some(claim) = capabilities
+                                .get(&choice.capability)
+                                .and_then(|cap| cap.description_claim.as_ref())
+                            {
+                                value["description_claim"] = json!(claim);
+                            }
+                            value
+                        })
+                        .collect::<Vec<_>>()
+                );
             }
             if let Some(goal) = &template.route.goal {
                 let mut actions = Vec::new();

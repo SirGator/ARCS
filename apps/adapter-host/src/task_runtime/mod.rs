@@ -6,6 +6,7 @@ pub mod dependencies;
 pub mod goal;
 mod journal;
 pub mod planning;
+pub mod reasoner_selection;
 mod reasoning;
 pub mod scheduler;
 pub use config::{ReasoningRoute, RuntimeConfig};
@@ -95,17 +96,27 @@ pub struct TaskRuntime {
     core_database: std::path::PathBuf,
     journal: Journal,
     control_cursor: u64,
+    has_reasoner_selection: bool,
 }
 impl TaskRuntime {
     pub fn open(host: &Host, config: RuntimeConfig) -> Result<Self, HostError> {
         let identity = config.identity(host)?;
         let journal = Journal::open(host, &config, identity.clone())?;
+        let has_reasoner_selection = config.routes.iter().any(|route| {
+            route.reasoner_selection.is_some()
+                || route.plan.as_ref().is_some_and(|plan| {
+                    plan.templates
+                        .iter()
+                        .any(|template| template.route.reasoner_selection.is_some())
+                })
+        });
         Ok(Self {
             config,
             identity,
             core_database: host.database_path().into(),
             journal,
             control_cursor: 0,
+            has_reasoner_selection,
         })
     }
 
@@ -205,7 +216,7 @@ impl TaskRuntime {
             if has_deadlines && self.expire_task(host, sequence, &mut report)? {
                 continue;
             }
-            let route = self.route_for_job(host, sequence, &route_id)?;
+            let route = self.raw_route_for_job(host, sequence, &route_id)?;
             if route.priority != priority {
                 return Err(invalid(
                     "saved task priority differs from its authorized route",
