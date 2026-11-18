@@ -38,6 +38,7 @@ fn note(f: &Fixture, id: &str, project: &str, body: &str) -> Artifact {
 }
 fn policy() -> MemoryPolicy {
     MemoryPolicy {
+        epistemic: None,
         anchors: vec![],
         scopes: vec![MemoryScope {
             filter: ArtifactFilter {
@@ -84,8 +85,245 @@ fn records(f: &Fixture) -> Vec<Artifact> {
         .unwrap()
         .into_iter()
         .map(|event| event.artifact)
-        .filter(|artifact| artifact.schema_id.0 == SCHEMA)
+        .filter(|artifact| matches!(artifact.schema_id.0.as_str(), SCHEMA | EPISTEMIC_SCHEMA))
         .collect()
+}
+
+fn assess(
+    f: &Fixture,
+    target: &Artifact,
+    status: crate::memory::MemoryStatus,
+    until: Option<&str>,
+    replacement: Option<&Artifact>,
+) -> crate::memory::MemoryAssessment {
+    use crate::memory::*;
+    MemoryAssessmentService {
+        store: &f.store,
+        schemas: &f.schemas,
+        clock: &SystemClock,
+    }
+    .assess(&MemoryAssessmentCommand {
+        target_version_id: target.version_id.clone(),
+        expected_version_id: None,
+        decision_by: Actor {
+            actor_type: ActorType::Human,
+            id: "operator".into(),
+        },
+        reason: "PRIVATE_ASSESSMENT_REASON".into(),
+        status,
+        valid_from: None,
+        valid_until: until.map(str::to_owned),
+        evidence: vec![],
+        replacement_version_id: replacement.map(|a| a.version_id.clone()),
+    })
+    .unwrap()
+}
+
+#[test]
+fn epistemic_context_excludes_retracted_expired_disputed_and_unassessed_memories() {
+    use crate::memory::*;
+    let mut f = fixture();
+    let active = note(&f, "active", "project:p", "usable older evidence");
+    assess(&f, &active, MemoryStatus::Active, None, None);
+    for (id, status, until) in [
+        ("disputed", MemoryStatus::Disputed, None),
+        ("retracted", MemoryStatus::Retracted, None),
+        (
+            "expired",
+            MemoryStatus::Active,
+            Some("2000-01-01T00:00:00Z"),
+        ),
+    ] {
+        let target = note(&f, id, "project:p", "must not be automatically used");
+        assess(&f, &target, status, until, None);
+    }
+    let unknown = note(&f, "unknown", "project:p", "unassessed proposal");
+    let mut p = policy();
+    p.epistemic = Some(MemoryEpistemicPolicy {
+        allow_unassessed: false,
+        allow_disputed: false,
+    });
+    let selected = augment(&mut f, request(), &p).unwrap();
+    assert_eq!(selected.context.len(), 2);
+    assert_eq!(selected.context[1].version_id, active.version_id);
+    let saved = records(&f).remove(0);
+    assert_eq!(saved.schema_id.0, EPISTEMIC_SCHEMA);
+    assert_eq!(saved.payload["skipped"], 4);
+    assert_eq!(
+        saved.payload["epistemic"]["decisions"]
+            .as_array()
+            .unwrap()
+            .len(),
+        5
+    );
+    let invocation = match (GeneralReasoningService {
+        registry: &f.registry,
+        schemas: &f.schemas,
+        store: &f.store,
+        ids: &mut f.ids,
+        clock: &SystemClock,
+    })
+    .prepare(&f.peer, selected, &[])
+    .unwrap()
+    {
+        ReasoningPreparation::Dispatch(call) => call.invocation().clone(),
+        _ => panic!("new invocation expected"),
+    };
+    let item = invocation
+        .context
+        .iter()
+        .find(|item| item.version_id == active.version_id)
+        .unwrap();
+    assert_eq!(item.trust_level, TrustLevel::Low);
+    let wire = serde_json::to_string(&invocation).unwrap();
+    assert!(
+        !wire.contains("PRIVATE_ASSESSMENT_REASON")
+            && !wire.contains("private_note")
+            && !wire.contains(&unknown.version_id.0)
+    );
+}
+
+#[test]
+fn retraction_changes_new_context_but_saved_request_replays_original_snapshot() {
+    use crate::memory::*;
+    let mut f = fixture();
+    let target = note(&f, "old", "project:p", "original proposal");
+    let receipt = assess(&f, &target, MemoryStatus::Active, None, None);
+    let mut p = policy();
+    p.epistemic = Some(MemoryEpistemicPolicy {
+        allow_unassessed: false,
+        allow_disputed: false,
+    });
+    let first = augment(&mut f, request(), &p).unwrap();
+    let mut command = receipt.command;
+    command.expected_version_id = Some(receipt.version_id);
+    command.status = MemoryStatus::Retracted;
+    MemoryAssessmentService {
+        store: &f.store,
+        schemas: &f.schemas,
+        clock: &SystemClock,
+    }
+    .assess(&command)
+    .unwrap();
+    assert_eq!(augment(&mut f, request(), &p).unwrap(), first);
+    let mut new = request();
+    new.request_id.push_str("-new-round");
+    assert_eq!(augment(&mut f, new, &p).unwrap().context.len(), 1);
+    assert_eq!(records(&f).len(), 2);
+}
+
+#[test]
+fn supersession_never_imports_a_replacement_from_an_unauthorized_scope() {
+    use crate::memory::*;
+    let mut f = fixture();
+    let old = note(&f, "old", "project:p", "superseded");
+    let foreign = note(&f, "foreign", "project:secret", "PRIVATE_REPLACEMENT_BODY");
+    assess(&f, &old, MemoryStatus::Superseded, None, Some(&foreign));
+    assess(&f, &foreign, MemoryStatus::Active, None, None);
+    let mut p = policy();
+    p.epistemic = Some(MemoryEpistemicPolicy {
+        allow_unassessed: true,
+        allow_disputed: true,
+    });
+    let selected = augment(&mut f, request(), &p).unwrap();
+    assert_eq!(selected.context.len(), 1);
+    let saved = records(&f).remove(0);
+    assert!(
+        !saved
+            .payload
+            .to_string()
+            .contains("PRIVATE_REPLACEMENT_BODY")
+    );
+    assert_eq!(
+        saved.payload["epistemic"]["decisions"][0]["disposition"],
+        "superseded"
+    );
+    assert_eq!(saved.provenance.unwrap().parents.len(), 3); // input, excluded target, assessment
+}
+
+#[test]
+fn unknown_and_disputed_memory_require_their_own_explicit_policy_opt_in() {
+    use crate::memory::*;
+    let mut f = fixture();
+    let disputed = note(&f, "disputed", "project:p", "contested");
+    assess(&f, &disputed, MemoryStatus::Disputed, None, None);
+    note(&f, "unknown", "project:p", "unknown");
+    let mut p = policy();
+    p.epistemic = Some(MemoryEpistemicPolicy {
+        allow_unassessed: false,
+        allow_disputed: true,
+    });
+    let first = augment(&mut f, request(), &p).unwrap();
+    assert_eq!(first.context.len(), 2);
+    assert_eq!(first.context[1].version_id, disputed.version_id);
+    p.epistemic = Some(MemoryEpistemicPolicy {
+        allow_unassessed: true,
+        allow_disputed: false,
+    });
+    let mut next = request();
+    next.request_id.push_str("-different-policy");
+    let next = augment(&mut f, next, &p).unwrap();
+    assert_eq!(next.context.len(), 2);
+    assert_eq!(next.context[1].version_id.0, "unknown-v1");
+}
+
+#[test]
+fn later_months_use_fresh_validity_and_policy_changes_cannot_replace_a_request_snapshot() {
+    use crate::memory::*;
+    struct At(&'static str);
+    impl Clock for At {
+        fn now_rfc3339(&self) -> String {
+            self.0.into()
+        }
+    }
+    let mut f = fixture();
+    let note = note(&f, "seasonal", "project:p", "temporary information");
+    assess(
+        &f,
+        &note,
+        MemoryStatus::Active,
+        Some("2027-02-01T00:00:00Z"),
+        None,
+    );
+    let mut p = policy();
+    p.epistemic = Some(MemoryEpistemicPolicy {
+        allow_unassessed: false,
+        allow_disputed: false,
+    });
+    let mut at = |r, p: &MemoryPolicy, clock: &dyn Clock| {
+        ReasoningContextService {
+            registry: &f.registry,
+            schemas: &f.schemas,
+            store: &f.store,
+            ids: &mut f.ids,
+            clock,
+        }
+        .augment(r, p, &[])
+    };
+    let first = at(request(), &p, &At("2026-11-18T00:00:00Z")).unwrap();
+    assert_eq!(first.context.len(), 2);
+    assert_eq!(
+        at(request(), &p, &At("2027-04-01T00:00:00Z")).unwrap(),
+        first
+    );
+    let mut next = request();
+    next.request_id.push_str("-next-months");
+    assert_eq!(
+        at(next, &p, &At("2027-04-01T00:00:00Z"))
+            .unwrap()
+            .context
+            .len(),
+        1
+    );
+    let mut different = p.clone();
+    different.epistemic = None;
+    assert!(at(request(), &different, &At("2027-04-01T00:00:00Z")).is_err());
+    different.epistemic = Some(MemoryEpistemicPolicy {
+        allow_unassessed: true,
+        allow_disputed: true,
+    });
+    assert!(at(request(), &different, &At("2027-04-01T00:00:00Z")).is_err());
+    assert_eq!(records(&f).len(), 2);
 }
 
 #[test]

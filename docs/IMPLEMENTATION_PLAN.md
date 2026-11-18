@@ -282,6 +282,25 @@
 > unerreichbaren Installationen, Fähigkeitszertifizierung, Controller-Fencing
 > und die vollständigen Phasenabnahmen bleiben offen.
 
+> Einundzwanzigster Slice gemäß v3 §6.4, §6.5 MEM-03/MEM-04/MEM-05/MEM-08/
+> MEM-09 und v2 MEM-06 teilweise: Authentifizierte Betreiber können einzelne
+> Erinnerungs-Versionen als aktiv, strittig, zurückgezogen oder ersetzt bewerten.
+> Gründe, Belege, optionale UTC-Gültigkeitsgrenzen und erwartete Revisionen
+> bleiben als `arcs.memory_assessment.v1` im gemeinsamen Artifact-Netz erhalten.
+> Eine optionale Abrufpolicy prüft die Bewertungen an der festen Commit-Grenze
+> der Suche. `arcs.context_selection.v2` belegt Zeitpunkt, genaue Bewertungs-
+> Versionen und auch Ausschlussentscheidungen. Neue Aufträge berücksichtigen
+> Widerrufe; laufende Requests behalten ihre gespeicherte Identität. Quell-Trust,
+> Feldgrenzen, Verification und Approval werden dadurch nicht geändert.
+> Fachliche Bewertungslogik liegt im Core, der Store liefert einen allgemeinen
+> begrenzten historischen Head-Abruf; die Host-CLI setzt und inspiziert Belege.
+> Sieben neue Bewertungs-, fünf Kontext- und fünf Prozess-Tests prüfen unter
+> anderem Revisionen, Rollback, simulierte Monate, Scopegrenzen, tatsächliche
+> Adaptereingaben und Wiederaufnahme. Eine ausführbare Demo verwendet die
+> vorhandenen Input- und Solverprozesse. Automatische Widerspruchserkennung,
+> Konsolidierung, kalibrierte Unsicherheit, Widerruf laufender Aktionen und
+> allgemeine Neuplanung bleiben offen; die Phasen sind damit nicht abgenommen.
+
 **Leitbild:** ARCS ist ein universeller Agent. Es soll sich einfach bedienen lassen, beliebige kompatible Systeme verbinden, eigenständig Probleme lösen und langfristige Aufgaben über Monate verfolgen.
 
 ## 1. Verbindliche Architekturregeln

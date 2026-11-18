@@ -9,6 +9,8 @@ begrenzte Graphsuche. Er verwendet noch keine Sprachähnlichkeit, Embeddings ode
 automatische Konsolidierung. Die Relevanz folgt einer Betreiberpolicy.
 Die optionale [Textsuche](text-memory.md) ergänzt diesen Abruf um exakte
 Suchwörter in freigegebenen Stringfeldern und einen wiederaufbaubaren Index.
+Optionale [Bewertungen und Zeitgrenzen](memory-assessments.md) können den
+automatischen Zusatzkontext auf ausdrücklich zugelassene Erinnerungen begrenzen.
 
 ## Ausführbares Beispiel
 

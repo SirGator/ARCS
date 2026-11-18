@@ -12,6 +12,7 @@ use arcs::world::ReduceError;
 
 #[derive(Debug)]
 pub enum HostError {
+    Memory(arcs::memory::MemoryError),
     AdapterBusy(AdapterId),
     ResourceBusy {
         resource: String,
@@ -65,6 +66,7 @@ pub enum HostError {
 impl fmt::Display for HostError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Memory(source) => write!(f, "memory assessment: {source:?}"),
             Self::ResourceBusy {
                 resource,
                 requested,

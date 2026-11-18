@@ -1,0 +1,61 @@
+{
+  "$id": "arcs.context_selection.v2",
+  "type": "object",
+  "required": [
+    "request",
+    "policy",
+    "inputs",
+    "selected",
+    "trace",
+    "skipped",
+    "epistemic"
+  ],
+  "properties": {
+    "request": {
+      "type": "object"
+    },
+    "policy": {
+      "type": "object"
+    },
+    "inputs": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "selected": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "trace": {
+      "type": "object"
+    },
+    "skipped": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "epistemic": {
+      "type": "object",
+      "required": [
+        "evaluated_at",
+        "decisions"
+      ],
+      "properties": {
+        "evaluated_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "decisions": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

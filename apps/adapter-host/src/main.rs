@@ -5,11 +5,12 @@ use std::path::PathBuf;
 use arcs::approval::ApprovalDecision;
 use arcs::core::{Actor, ActorType, VersionId};
 use arcs_host::Host;
+use arcs_host::memory::MemoryCommand;
 use arcs_host::task_runtime::suspension::TaskControlCommand;
 use arcs_host::task_runtime::{RuntimeConfig, TaskRuntime};
 use serde::Deserialize;
 
-const USAGE: &str = "usage: arcs-host --config <host.json> [--list-adapters | --find-capabilities <query.json> | --reasoning-attempts <query.json> | [--monitor --stop-file <path>] [--runtime <runtime.json>] [--ticks <count>] [--stop-file <path>] | --runtime <runtime.json> [--goal-command <command.json> | --plan-command <command.json> | --task-command <command.json>]]";
+const USAGE: &str = "usage: arcs-host --config <host.json> [--list-adapters | --find-capabilities <query.json> | --reasoning-attempts <query.json> | --memory-command <command.json> | [--monitor --stop-file <path>] [--runtime <runtime.json>] [--ticks <count>] [--stop-file <path>] | --runtime <runtime.json> [--goal-command <command.json> | --plan-command <command.json> | --task-command <command.json>]]";
 
 #[derive(Deserialize)]
 #[serde(tag = "command", rename_all = "snake_case", deny_unknown_fields)]
@@ -83,6 +84,7 @@ fn run() -> Result<(), String> {
     let mut task_command = None;
     let mut capability_query = None;
     let mut attempt_query = None;
+    let mut memory_command = None;
     let mut args = args.into_iter();
     while let Some(argument) = args.next() {
         if argument == "--list-adapters" && !list_adapters {
@@ -117,11 +119,44 @@ fn run() -> Result<(), String> {
             capability_query = Some(PathBuf::from(value));
         } else if argument == "--reasoning-attempts" && attempt_query.is_none() {
             attempt_query = Some(PathBuf::from(value));
+        } else if argument == "--memory-command" && memory_command.is_none() {
+            memory_command = Some(PathBuf::from(value));
         } else {
             return Err(USAGE.into());
         }
     }
     let config = config.ok_or(USAGE)?;
+    if memory_command.is_some()
+        && (capability_query.is_some()
+            || attempt_query.is_some()
+            || list_adapters
+            || runtime.is_some()
+            || monitor
+            || ticks.is_some()
+            || stop_file.is_some()
+            || goal_command.is_some()
+            || plan_command.is_some()
+            || task_command.is_some())
+    {
+        return Err(USAGE.into());
+    }
+    let memory_command: Option<MemoryCommand> = memory_command
+        .map(|path| -> Result<MemoryCommand, String> {
+            let mut bytes = Vec::new();
+            std::fs::File::open(path)
+                .map_err(|e| e.to_string())?
+                .take(65537)
+                .read_to_end(&mut bytes)
+                .map_err(|e| e.to_string())?;
+            if bytes.len() > 65536 {
+                return Err("memory command exceeds 65536 bytes".into());
+            }
+            let command: MemoryCommand =
+                serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+            command.validate().map_err(|e| e.to_string())?;
+            Ok(command)
+        })
+        .transpose()?;
     if (capability_query.is_some() || attempt_query.is_some())
         && (list_adapters
             || (capability_query.is_some() && attempt_query.is_some())
@@ -244,7 +279,19 @@ fn run() -> Result<(), String> {
             &mut std::io::stdout().lock(),
         );
     }
-    let value = if let Some(query) = attempt_query {
+    let value = if let Some(command) = memory_command {
+        let result = match command {
+            MemoryCommand::Assess { assessment } => {
+                serde_json::to_value(host.assess_memory(&assessment).map_err(|e| e.to_string())?)
+            }
+            MemoryCommand::Inspect { target_version_ids } => serde_json::to_value(
+                host.inspect_memory(&target_version_ids)
+                    .map_err(|e| e.to_string())?,
+            ),
+        };
+        host.shutdown().map_err(|e| e.to_string())?;
+        result
+    } else if let Some(query) = attempt_query {
         let attempts = host.reasoning_attempts(&query).map_err(|e| e.to_string())?;
         host.shutdown().map_err(|e| e.to_string())?;
         serde_json::to_value(attempts)

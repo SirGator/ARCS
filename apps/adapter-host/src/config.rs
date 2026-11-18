@@ -348,6 +348,7 @@ impl PreparedConfig {
                 arcs::reasoning::attempts::PUBLISHER,
                 arcs::reasoning::recovery::PUBLISHER,
                 arcs::adapters::reconnect::PUBLISHER,
+                arcs::memory::PUBLISHER,
             ]
             .contains(&grant.adapter_id.0.as_str())
                 || !adapter_ids.insert(grant.adapter_id.clone())

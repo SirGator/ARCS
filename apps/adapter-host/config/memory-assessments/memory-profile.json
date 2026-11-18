@@ -1,0 +1,43 @@
+{
+  "adapter_id": "memory.input",
+  "capability_id": "memory.capture",
+  "schema_id": "arcs.note.project_memory.v1",
+  "events": [
+    {
+      "id": "active",
+      "subject": "project-nearest",
+      "reference": "memory:active",
+      "payload": {
+        "body": "Betreiberbewertete Notiz; die neue Aufgabe erfordert weiterhin eigene Verification.",
+        "private_note": "PRIVATE_MEMORY_active"
+      }
+    },
+    {
+      "id": "retired",
+      "subject": "project-nearest",
+      "reference": "memory:retired",
+      "payload": {
+        "body": "Zurückgezogene Notiz, die nicht im neuen Kontext erscheinen soll.",
+        "private_note": "PRIVATE_MEMORY_retired"
+      }
+    },
+    {
+      "id": "unknown",
+      "subject": "project-nearest",
+      "reference": "memory:unknown",
+      "payload": {
+        "body": "Unbewertete Notiz, die die strikte Policy auslässt.",
+        "private_note": "PRIVATE_MEMORY_unknown"
+      }
+    },
+    {
+      "id": "foreign",
+      "subject": "project-other",
+      "reference": "memory:foreign",
+      "payload": {
+        "body": "Notiz eines anderen Projekts.",
+        "private_note": "PRIVATE_MEMORY_foreign"
+      }
+    }
+  ]
+}

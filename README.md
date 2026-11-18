@@ -38,7 +38,8 @@ ergänzt Slice 18. Der
 [Bericht zum begrenzten Fallback](docs/ZWISCHENBERICHT_2026-11-18_RECOVERY.md)
 dokumentiert Slice 19; der
 [Bericht zur Wiederverbindung](docs/ZWISCHENBERICHT_2026-11-18_RECONNECT.md)
-ergänzt Slice 20. Die Berichte vom
+ergänzt Slice 20. Der [Bericht zu Gedächtnisbewertungen](docs/ZWISCHENBERICHT_2026-11-18_EPISTEMIC.md)
+dokumentiert Slice 21. Die Berichte vom
 [17. November](docs/ZWISCHENBERICHT_2026-11-17.md) und
 [16. November](docs/ZWISCHENBERICHT_2026-11-16.md) dokumentieren frühere
 Umsetzungsstände, Prüfergebnisse und offene Grenzen.
@@ -99,6 +100,11 @@ Goals und Pläne prüfen den tatsächlichen Ergebnisproduzenten und ihre Budgets
 stellt ausgefallene reine Reason-Sessions mit begrenzten Hintergrund-Workern
 wieder her. Der Core prüft die neue Session vor der Übernahme; verbrauchte
 Task-Versuche und Freigaben bleiben erhalten.
+
+[Bewertungen von Erinnerungen](apps/adapter-host/examples/memory-assessments.md)
+halten Gültigkeitszeiträume, strittige Aussagen, Widerrufe und Ersatzversionen
+im gemeinsamen Artifact-Netz fest. Eine optionale Abrufpolicy berücksichtigt
+diese Bewertungen mit dauerhaft belegten Kontextentscheidungen.
 
 ## Projektstruktur
 
@@ -424,7 +430,7 @@ Observation → Belief Update → Goal → Memory/Skill Retrieval
 | Kuratiertes Reasoning | V1-Modellfall und allgemeiner V2-Port; externe Solver und Modell-Testadapter, noch kein echter Modellanbieter |
 | Verification → Approval → Action → Execution → Outcome | Implementiert |
 | Explizite Goals und maschinenprüfbare Zielbedingungen | Aufgabensteuerung vorhanden; Zielbedeutung und Wirkungsprüfung über konfigurierte externe Reasoner, kein universeller Beweisprüfer |
-| Artifact-Gedächtnis und wiederverwendbare Skills | Begrenzter Graph-/Metadatenabruf mit eingefrorenem Kontext implementiert; semantische Suche, Konsolidierung und Skills bleiben geplant |
+| Artifact-Gedächtnis und wiederverwendbare Skills | Begrenzter Graph-/Metadaten-/Textabruf mit eingefrorenem Kontext und optionalen versionierten Bewertungen; semantische Suche, Konsolidierung und Skills bleiben geplant |
 | Gelerntes Kosten-/Latenz-/Risiko-Routing | Geplant |
 | Kalibrierte Sensorfusion und probabilistischer Belief State | Geplant |
 

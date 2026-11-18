@@ -1,0 +1,73 @@
+{
+  "$id": "arcs.memory_assessment.v1",
+  "type": "object",
+  "required": [
+    "target_version_id",
+    "decision_by",
+    "reason",
+    "status"
+  ],
+  "properties": {
+    "target_version_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "expected_version_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "decision_by": {
+      "type": "object",
+      "required": [
+        "actor_type",
+        "id"
+      ],
+      "properties": {
+        "actor_type": {
+          "type": "string",
+          "enum": [
+            "human"
+          ]
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "active",
+        "disputed",
+        "retracted",
+        "superseded"
+      ]
+    },
+    "valid_from": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "valid_until": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "replacement_version_id": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "additionalProperties": false
+}

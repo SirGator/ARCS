@@ -23,10 +23,12 @@ use crate::store::retrieval::{
 };
 use crate::store::{ArtifactRelation, RelationKind, SqliteArtifactStore, relation_kinds};
 
+mod epistemic;
 mod text;
 pub use text::MemoryTextQuery;
 
 const SCHEMA: &str = "arcs.context_selection.v1";
+const EPISTEMIC_SCHEMA: &str = "arcs.context_selection.v2";
 const PRODUCER: &str = "arcs.context_selection";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -41,6 +43,8 @@ pub struct MemoryScope {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MemoryPolicy {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub epistemic: Option<crate::memory::MemoryEpistemicPolicy>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub anchors: Vec<VersionId>,
     pub scopes: Vec<MemoryScope>,
@@ -121,6 +125,8 @@ struct ContextRecord {
     selected: Vec<SelectedMemory>,
     trace: RetrievalTrace,
     skipped: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    epistemic: Option<epistemic::EpistemicTrace>,
 }
 
 pub struct ReasoningContextService<'a> {
@@ -165,9 +171,15 @@ impl ReasoningContextService<'_> {
             return Err(invalid("mandatory context exceeds item budget"));
         }
         self.check_wire_budget(&request, inputs)?;
+        let schema = if policy.epistemic.is_some() {
+            EPISTEMIC_SCHEMA
+        } else {
+            SCHEMA
+        };
         let key = deterministic_invocation_id(
             InvocationKind::Reasoning,
             &[
+                // One selection identity per request across schema versions.
                 "context-v1",
                 &request.capability.adapter_id.0,
                 &request.capability.capability_id.0,
@@ -178,7 +190,7 @@ impl ReasoningContextService<'_> {
         if let Some(saved) = self.store.find_by_stream_key(&stream)? {
             validate_artifact(&saved, self.schemas)
                 .map_err(|_| invalid("invalid saved memory selection"))?;
-            if saved.schema_id.0 != SCHEMA
+            if saved.schema_id.0 != schema
                 || saved.created_by.id != PRODUCER
                 || saved.created_by.actor_type != ActorType::System
                 || saved.source.kind != SourceKind::Internal
@@ -218,8 +230,16 @@ impl ReasoningContextService<'_> {
             selected: vec![],
             trace: result.trace,
             skipped: 0,
+            epistemic: policy
+                .epistemic
+                .as_ref()
+                .map(|_| epistemic::EpistemicTrace {
+                    evaluated_at: self.clock.now_rfc3339(),
+                    decisions: vec![],
+                }),
         };
         let mut augmented = request.clone();
+        self.validate_epistemic_record(&record)?;
         let mut memory_items = Vec::new();
         let mut seen: HashSet<_> = request
             .context
@@ -227,6 +247,10 @@ impl ReasoningContextService<'_> {
             .map(|selection| selection.version_id.clone())
             .collect();
         for hit in result.hits {
+            if !self.admit_memory(&mut record, &hit.artifact.version_id)? {
+                record.skipped += 1;
+                continue;
+            }
             if !seen.insert(hit.artifact.version_id.clone()) {
                 continue;
             }
@@ -281,18 +305,29 @@ impl ReasoningContextService<'_> {
                 path: hit.path,
             });
         }
-        let parents: Vec<_> = augmented
+        let mut parents: Vec<_> = augmented
             .context
             .iter()
             .map(|selection| selection.version_id.clone())
             .collect();
+        if let Some(trace) = &record.epistemic {
+            for decision in &trace.decisions {
+                for id in std::iter::once(&decision.target_version_id)
+                    .chain(decision.assessment_version_id.iter())
+                {
+                    if !parents.contains(id) {
+                        parents.push(id.clone());
+                    }
+                }
+            }
+        }
         let artifact = ArtifactFactory::new(self.clock, self.ids)
             .create(ArtifactFactoryInput {
                 schema: self
                     .schemas
-                    .get(&SchemaId(SCHEMA.into()))
+                    .get(&SchemaId(schema.into()))
                     .ok_or_else(|| {
-                        ReasoningError::MissingRegisteredSchema(SchemaId(SCHEMA.into()))
+                        ReasoningError::MissingRegisteredSchema(SchemaId(schema.into()))
                     })?
                     .clone(),
                 created_by: Actor {
@@ -343,6 +378,7 @@ impl ReasoningContextService<'_> {
         mut request: ReasoningRequestV2,
         record: &ContextRecord,
     ) -> Result<ReasoningRequestV2, ReasoningError> {
+        self.validate_epistemic_record(record)?;
         if record.selected.len() > record.policy.max_items {
             return Err(invalid("saved memory item limit exceeded"));
         }

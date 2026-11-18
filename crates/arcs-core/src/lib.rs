@@ -17,6 +17,8 @@ pub mod decision;
 pub mod io;
 /// Explizite lokale Gewichtsänderungen im gespeicherten Artifact-Netz.
 pub mod learning;
+/// Versioned epistemic annotations over the shared Artifact Store.
+pub mod memory;
 /// Kuratierter Fallback für neue oder komplexe Situationen.
 pub mod reasoning;
 /// Orchestrierung zwischen bekanntem Fast Path und kuratiertem Reasoning.

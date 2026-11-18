@@ -2,6 +2,7 @@
 
 pub mod config;
 mod error;
+pub mod memory;
 pub mod monitor;
 pub mod pipeline;
 mod process_environment;

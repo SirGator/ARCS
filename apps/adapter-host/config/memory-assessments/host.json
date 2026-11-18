@@ -1,0 +1,42 @@
+{
+  "config_version": 1,
+  "database": "../../../../var/memory-assessments/core.sqlite",
+  "node_id": "memory-assessments-host",
+  "schemas": [
+    "../../../../adapters/example-reasoner/schemas/task.schema.json",
+    "../../../../adapters/example-reasoner/schemas/candidate.schema.json",
+    "../memory/note.schema.json"
+  ],
+  "adapters": [
+    {
+      "program": "../../../../target/debug/arcs-json-input",
+      "profile": "memory-profile.json",
+      "args": [
+        {
+          "path": "../../../../var/memory-assessments/notes.sqlite"
+        }
+      ],
+      "grant_file": "../memory/memory-grant.json"
+    },
+    {
+      "program": "../../../../target/debug/arcs-json-input",
+      "profile": "../roles/input-profile.json",
+      "args": [
+        {
+          "path": "../../../../var/memory-assessments/input.sqlite"
+        }
+      ],
+      "grant_file": "../roles/input-grant.json"
+    },
+    {
+      "program": "../../../../target/debug/arcs-example-reasoner",
+      "profile": "../roles/solver-profile.json",
+      "args": [
+        {
+          "path": "../../../../var/memory-assessments/solver.sqlite"
+        }
+      ],
+      "grant_file": "../roles/solver-grant.json"
+    }
+  ]
+}
