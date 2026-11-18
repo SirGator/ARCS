@@ -1,0 +1,73 @@
+{
+  "config_version": 1,
+  "runtime_id": "text-memory",
+  "journal": "../../../../var/text-memory/runtime.sqlite",
+  "interval_ms": 100,
+  "max_events_per_tick": 1000,
+  "max_jobs_per_tick": 10,
+  "max_pending_jobs": 100,
+  "routes": [
+    {
+      "id": "nearest-solver",
+      "source": {
+        "adapter_id": "example.input",
+        "capability_id": "task.submit"
+      },
+      "input_schema_id": "arcs.task.nearest.v1",
+      "payload_fields": [
+        "values",
+        "target"
+      ],
+      "reasoner": {
+        "adapter_id": "example.solver",
+        "capability_id": "solution.propose"
+      },
+      "method": "solver",
+      "objective": "Find the nearest listed value to the target",
+      "target_schema_id": "arcs.solution_candidate.nearest.v1",
+      "allowed_capabilities": [],
+      "constraints": {},
+      "budget": {
+        "max_context_items": 3,
+        "max_context_bytes": 8192,
+        "max_output_bytes": 4096,
+        "max_candidates": 1,
+        "max_runtime_ms": 1000,
+        "max_iterations": 4096,
+        "max_output_tokens": null
+      },
+      "memory": {
+        "scopes": [
+          {
+            "filter": {
+              "schema_id": "arcs.note.project_memory.v1",
+              "subject": "input:12:memory.input:14:memory.capture:15:project-nearest"
+            },
+            "payload_fields": [
+              "body"
+            ],
+            "text_query": {
+              "input_fields": [
+                "private_note"
+              ]
+            }
+          }
+        ],
+        "relations": [
+          "based_on",
+          "supported_by",
+          "part_of_goal"
+        ],
+        "search": {
+          "max_depth": 2,
+          "max_visited": 3,
+          "max_edges": 128,
+          "max_candidates": 16
+        },
+        "max_items": 2,
+        "max_bytes": 2048
+      }
+    }
+  ],
+  "max_concurrent_reasoning": 2
+}

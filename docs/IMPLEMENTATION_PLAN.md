@@ -195,6 +195,21 @@
 > und freie Werkzeugauswahl bleiben offen; die allgemeinen Abnahmen bleiben
 > unverändert offen.
 
+> Sechzehnter Slice gemäß v3 §6.5 MEM-02/MEM-08/MEM-09/MEM-10: Memory-Scopes
+> können freigegebene Stringfelder lexikalisch durchsuchen. Explizite interne
+> Eingabefelder können die Anfrage ergänzen, ohne zusätzlichen Datenexport.
+> Derselbe SQLite-Store hält begrenzte, wiederaufbaubare Feldprojektionen;
+> Aufbaufortschritt und Indexeinträge committen atomar. Unvollständiger Aufbau
+> führt zu Ressourcenwarten ohne Worker oder eingefrorenen Teilkontext. Die
+> Suchausführung erhält zusätzlich eine SQLite-VM-Arbeitsgrenze. Alte passende
+> Belege werden innerhalb derselben Besuchsgrenze gefunden, wo die jüngste
+> Metadatenstichprobe sie verfehlt. Projektgrenzen, Graphfilter, Feldminimierung,
+> Trust und bestehende Kontextbudgets bleiben wirksam. Elf neue Core- und fünf
+> Prozess-Tests prüfen Abruf, negative Fälle, Konkurrenz, Indexneubau und
+> Wiederaufnahme auch nach Indexlöschung. Semantische Suche, Konsolidierung,
+> zeitliche Wissensgültigkeit, breite Qualitäts-/Token-/Latenzbenchmarks und
+> die allgemeinen Phasenabnahmen bleiben offen.
+
 **Leitbild:** ARCS ist ein universeller Agent. Es soll sich einfach bedienen lassen, beliebige kompatible Systeme verbinden, eigenständig Probleme lösen und langfristige Aufgaben über Monate verfolgen.
 
 ## 1. Verbindliche Architekturregeln

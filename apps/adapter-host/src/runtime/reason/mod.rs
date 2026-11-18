@@ -181,6 +181,18 @@ impl Host {
             clock: &SystemClock,
         }
         .augment(request, policy, inputs)
-        .map_err(HostError::Reasoning)
+        .map_err(|error| match error {
+            arcs::reasoning::ReasoningError::Retrieval(
+                arcs::store::retrieval::RetrievalError::TextIndexPending {
+                    indexed_through,
+                    target,
+                },
+            ) => HostError::ResourceBusy {
+                resource: "memory-text-index".into(),
+                requested: target,
+                available: indexed_through,
+            },
+            other => HostError::Reasoning(other),
+        })
     }
 }

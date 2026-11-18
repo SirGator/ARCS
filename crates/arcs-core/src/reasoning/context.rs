@@ -23,6 +23,9 @@ use crate::store::retrieval::{
 };
 use crate::store::{ArtifactRelation, RelationKind, SqliteArtifactStore, relation_kinds};
 
+mod text;
+pub use text::MemoryTextQuery;
+
 const SCHEMA: &str = "arcs.context_selection.v1";
 const PRODUCER: &str = "arcs.context_selection";
 
@@ -31,6 +34,8 @@ const PRODUCER: &str = "arcs.context_selection";
 pub struct MemoryScope {
     pub filter: ArtifactFilter,
     pub payload_fields: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text_query: Option<MemoryTextQuery>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -70,7 +75,11 @@ impl MemoryPolicy {
         }
         for scope in &self.scopes {
             let mut fields = HashSet::new();
-            if schemas.get(&scope.filter.schema_id).is_none()
+            if scope
+                .text_query
+                .as_ref()
+                .is_some_and(|query| !query.valid())
+                || schemas.get(&scope.filter.schema_id).is_none()
                 || scope.payload_fields.is_empty()
                 || scope.payload_fields.len() > 64
                 || scope.payload_fields.iter().any(|field| {
@@ -195,13 +204,10 @@ impl ReasoningContextService<'_> {
                 seeds.push(anchor.clone());
             }
         }
+        let scopes = text::resolve_scopes(self.store, &request, policy)?;
         let result = ArtifactRetrieval::new(self.store).recall(&RetrievalQuery {
             seeds,
-            filters: policy
-                .scopes
-                .iter()
-                .map(|scope| scope.filter.clone())
-                .collect(),
+            scopes: scopes.clone(),
             relations: policy.relations.clone(),
             limits: policy.search.clone(),
         })?;
@@ -233,7 +239,9 @@ impl ReasoningContextService<'_> {
             let scope = policy
                 .scopes
                 .iter()
-                .find(|scope| scope.filter.matches(&hit.artifact))
+                .zip(&scopes)
+                .find(|(_, scope)| scope.matches(&hit.artifact))
+                .map(|(scope, _)| scope)
                 .expect("retrieval respects filters");
             let selection = ContextSelection {
                 version_id: hit.artifact.version_id.clone(),
@@ -344,6 +352,7 @@ impl ReasoningContextService<'_> {
             .map(|item| item.version_id.clone())
             .collect();
         let mut items = Vec::new();
+        let scopes = text::resolve_scopes(self.store, &request, &record.policy)?;
         for selected in &record.selected {
             let artifact = self
                 .store
@@ -352,10 +361,15 @@ impl ReasoningContextService<'_> {
                     ReasoningError::MissingContextArtifact(selected.selection.version_id.clone())
                 })?;
             if !seen.insert(selected.selection.version_id.clone())
-                || !record.policy.scopes.iter().any(|scope| {
-                    scope.filter.matches(&artifact)
-                        && scope.payload_fields == selected.selection.payload_fields
-                })
+                || !record
+                    .policy
+                    .scopes
+                    .iter()
+                    .zip(&scopes)
+                    .any(|(scope, resolved)| {
+                        resolved.matches(&artifact)
+                            && scope.payload_fields == selected.selection.payload_fields
+                    })
             {
                 return Err(invalid("saved memory selection exceeds configured scope"));
             }

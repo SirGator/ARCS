@@ -46,6 +46,7 @@ fn policy() -> MemoryPolicy {
                 tags: vec!["project:p".into()],
             },
             payload_fields: vec!["body".into()],
+            text_query: None,
         }],
         relations: vec![relation_kinds::based_on()],
         search: RetrievalLimits {
@@ -85,6 +86,132 @@ fn records(f: &Fixture) -> Vec<Artifact> {
         .map(|event| event.artifact)
         .filter(|artifact| artifact.schema_id.0 == SCHEMA)
         .collect()
+}
+
+#[test]
+fn text_context_finds_older_evidence_and_waits_without_freezing_partial_index() {
+    let mut f = fixture();
+    let wanted = note(&f, "wanted", "project:p", "confirmed battery calibration");
+    for n in 0..70 {
+        note(
+            &f,
+            &format!("noise-{n}"),
+            "project:p",
+            "unrelated recent note",
+        );
+    }
+    note(
+        &f,
+        "foreign",
+        "project:other",
+        "confirmed battery calibration",
+    );
+    let mut p = policy();
+    p.search.max_visited = 3;
+    p.scopes[0].text_query = Some(MemoryTextQuery {
+        text: "battery calibration".into(),
+        input_fields: vec![],
+    });
+    for _ in 0..2 {
+        assert!(matches!(
+            augment(&mut f, request(), &p),
+            Err(ReasoningError::Retrieval(
+                crate::store::retrieval::RetrievalError::TextIndexPending { .. }
+            ))
+        ));
+        assert!(records(&f).is_empty());
+    }
+    let selected = augment(&mut f, request(), &p).unwrap();
+    assert_eq!(selected.context.len(), 2);
+    assert_eq!(selected.context[1].version_id, wanted.version_id);
+    assert_eq!(selected.context[1].payload_fields, vec!["body"]);
+    let snapshot = records(&f).remove(0);
+    assert_eq!(
+        snapshot.payload["trace"]["text_indexes"][0]["skipped_oversized"],
+        0
+    );
+    note(&f, "new", "project:p", "battery calibration new evidence");
+    let count = f.store.len().unwrap();
+    assert_eq!(augment(&mut f, request(), &p).unwrap(), selected);
+    assert_eq!(f.store.len().unwrap(), count);
+    assert_eq!(records(&f)[0].version_id, snapshot.version_id);
+}
+
+#[test]
+fn hidden_memory_fields_cannot_make_a_public_projection_match() {
+    let mut f = fixture();
+    note(&f, "public", "project:p", "innocent text");
+    let mut p = policy();
+    p.scopes[0].text_query = Some(MemoryTextQuery {
+        text: "must stay inside".into(),
+        input_fields: vec![],
+    });
+    assert_eq!(augment(&mut f, request(), &p).unwrap().context.len(), 1);
+    assert!(
+        records(&f)[0].payload["selected"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn overlapping_scopes_export_only_fields_of_a_matching_text_scope() {
+    let mut f = fixture();
+    let wanted = note(
+        &f,
+        "calibration",
+        "project:p",
+        "verified battery calibration",
+    );
+    let mut p = policy();
+    let mut public = p.scopes[0].clone();
+    public.text_query = Some(MemoryTextQuery {
+        text: "battery".into(),
+        input_fields: vec![],
+    });
+    p.scopes[0].payload_fields = vec!["private_note".into()];
+    p.scopes[0].text_query = Some(MemoryTextQuery {
+        text: "unmatched".into(),
+        input_fields: vec![],
+    });
+    p.scopes.push(public);
+    let augmented = augment(&mut f, request(), &p).unwrap();
+    assert_eq!(augmented.context[1].version_id, wanted.version_id);
+    assert_eq!(augmented.context[1].payload_fields, vec!["body"]);
+    assert_eq!(augment(&mut f, request(), &p).unwrap(), augmented);
+}
+
+#[test]
+fn memory_query_fields_are_explicit_and_missing_or_empty_values_do_not_broaden_search() {
+    for field in ["raw_text", "missing"] {
+        let mut f = fixture();
+        let wanted = note(&f, "wanted", "project:p", "continue the previous test");
+        let mut p = policy();
+        p.scopes[0].text_query = Some(MemoryTextQuery {
+            text: String::new(),
+            input_fields: vec![field.into()],
+        });
+        match augment(&mut f, request(), &p) {
+            Ok(selected) => {
+                assert_eq!(field, "raw_text");
+                assert_eq!(selected.context[1].version_id, wanted.version_id);
+            }
+            Err(ReasoningError::InvalidReasoningRequest(_)) => {
+                assert_eq!(field, "missing");
+                assert!(records(&f).is_empty());
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+    let mut f = fixture();
+    let mut p = policy();
+    p.scopes[0].text_query = Some(MemoryTextQuery {
+        text: "***".into(),
+        input_fields: vec![],
+    });
+    assert!(augment(&mut f, request(), &p).is_err());
+    assert!(records(&f).is_empty());
 }
 
 #[test]

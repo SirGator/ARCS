@@ -3,6 +3,8 @@
 mod graph;
 mod reservations;
 mod retrieval;
+mod text_index;
+pub use text_index::TextIndexTrace;
 
 use rusqlite::{Connection, OptionalExtension, params};
 

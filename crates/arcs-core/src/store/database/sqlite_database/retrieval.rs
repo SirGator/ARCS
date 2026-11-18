@@ -5,18 +5,56 @@ use crate::store::retrieval::*;
 use std::collections::{HashSet, VecDeque};
 
 // Large payloads must not turn a bounded graph search into an unbounded read.
-const MAX_RETRIEVED_ARTIFACT_BYTES: usize = 262_144;
+const MAX_RETRIEVED_ARTIFACT_BYTES: usize = super::text_index::MAX_ARTIFACT_BYTES;
 
 impl SqliteArtifactStore {
     pub(crate) fn retrieve(
         &self,
         query: &RetrievalQuery,
     ) -> Result<RetrievalResult, RetrievalError> {
-        let transaction = self
-            .connection
-            .unchecked_transaction()
+        let transaction = rusqlite::Transaction::new_unchecked(
+            &self.connection,
+            if query.scopes.iter().any(|scope| scope.text.is_some()) {
+                rusqlite::TransactionBehavior::Immediate
+            } else {
+                rusqlite::TransactionBehavior::Deferred
+            },
+        )
+        .map_err(StoreError::from)?;
+        let target: u64 = transaction
+            .query_row(
+                "SELECT COALESCE(MAX(sequence),0) FROM artifact_versions",
+                [],
+                |row| row.get::<_, i64>(0).map(|n| n as u64),
+            )
             .map_err(StoreError::from)?;
-        let result = retrieve(&transaction, query)?;
+        let indexes = super::text_index::prepare(&transaction, query, target)?;
+        if let Some(pending) = indexes
+            .iter()
+            .filter(|index| index.indexed_through < target)
+            .min_by_key(|index| index.indexed_through)
+        {
+            let indexed_through = pending.indexed_through;
+            transaction.commit().map_err(StoreError::from)?;
+            return Err(RetrievalError::TextIndexPending {
+                indexed_through,
+                target,
+            });
+        }
+        let work = if indexes.is_empty() {
+            None
+        } else {
+            Some(super::text_index::SearchWork::new(&transaction)?)
+        };
+        let retrieved = retrieve(&transaction, query);
+        let exhausted = work.as_ref().is_some_and(|work| work.exhausted());
+        drop(work);
+        if exhausted {
+            return Err(RetrievalError::TextSearchWorkLimit);
+        }
+        let mut result = retrieved?;
+        result.trace.truncated |= indexes.iter().any(|index| index.skipped_oversized > 0);
+        result.trace.text_indexes = indexes;
         transaction.commit().map_err(StoreError::from)?;
         Ok(result)
     }
@@ -37,6 +75,7 @@ fn retrieve(db: &Connection, query: &RetrievalQuery) -> Result<RetrievalResult, 
         visited: 0,
         edges_read: 0,
         truncated: false,
+        text_indexes: vec![],
     };
     let mut queue = VecDeque::new();
     let mut queued = HashSet::new();
@@ -50,7 +89,48 @@ fn retrieve(db: &Connection, query: &RetrievalQuery) -> Result<RetrievalResult, 
     }
     // Only explicit subjects/tags seed a metadata search. A schema alone must
     // never implicitly expose unrelated projects from the shared history.
-    for filter in query.filters.iter().filter(|filter| filter.is_scoped()) {
+    for scope in query.scopes.iter().filter(|scope| scope.filter.is_scoped()) {
+        let filter = &scope.filter;
+        if let Some(text) = &scope.text {
+            let projection = super::text_index::key(&filter.schema_id, text)?;
+            let tags = serde_json::to_string(&filter.tags).map_err(StoreError::from)?;
+            let remaining = query.limits.max_visited.saturating_sub(queue.len());
+            let mut statement=db.prepare("SELECT v.version_id FROM artifact_text_fts_v1
+                JOIN artifact_text_documents_v1 d ON d.id=artifact_text_fts_v1.rowid
+                JOIN artifact_versions v ON v.sequence=d.version_sequence
+                WHERE artifact_text_fts_v1 MATCH ?1 AND d.projection=?2
+                AND v.schema_id=?3 AND (?4 IS NULL OR v.subject=?4) AND v.sequence<=?5
+                AND NOT EXISTS(SELECT 1 FROM json_each(?6) wanted WHERE NOT EXISTS(
+                    SELECT 1 FROM json_each(v.artifact_json,'$.tags') tag WHERE tag.value=wanted.value))
+                ORDER BY v.sequence DESC LIMIT ?7").map_err(StoreError::from)?;
+            let rows = statement
+                .query_map(
+                    params![
+                        text.expression(),
+                        projection,
+                        filter.schema_id.0,
+                        filter.subject.as_ref().map(|s| &s.0),
+                        trace.artifact_cursor as i64,
+                        tags,
+                        (remaining + 1) as i64
+                    ],
+                    |row| row.get::<_, String>(0),
+                )
+                .map_err(StoreError::from)?;
+            for row in rows {
+                let version = VersionId(row.map_err(StoreError::from)?);
+                if queued.contains(&version) {
+                    continue;
+                }
+                if queue.len() >= query.limits.max_visited {
+                    trace.truncated = true;
+                    break;
+                }
+                queued.insert(version.clone());
+                queue.push_back((version, 0, vec![]));
+            }
+            continue;
+        }
         let mut statement = db
             .prepare(
                 "SELECT version_id FROM artifact_versions v
@@ -106,7 +186,7 @@ fn retrieve(db: &Connection, query: &RetrievalQuery) -> Result<RetrievalResult, 
             .map_err(StoreError::from)?;
         if let Some(encoded) = node.1 {
             let artifact: Artifact = serde_json::from_str(&encoded).map_err(StoreError::from)?;
-            if query.filters.iter().any(|filter| filter.matches(&artifact)) {
+            if query.scopes.iter().any(|scope| scope.matches(&artifact)) {
                 hits.push(RetrievalHit {
                     artifact,
                     sequence: node.0,

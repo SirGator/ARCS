@@ -7,6 +7,8 @@ Es gibt keine zusätzliche Gedächtnisdatenbank und keinen weiteren Agenten.
 Der erste Abruf kombiniert explizite Versionen, Subjects, Tags, Schemas und
 begrenzte Graphsuche. Er verwendet noch keine Sprachähnlichkeit, Embeddings oder
 automatische Konsolidierung. Die Relevanz folgt einer Betreiberpolicy.
+Die optionale [Textsuche](text-memory.md) ergänzt diesen Abruf um exakte
+Suchwörter in freigegebenen Stringfeldern und einen wiederaufbaubaren Index.
 
 ## Ausführbares Beispiel
 

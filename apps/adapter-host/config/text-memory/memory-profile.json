@@ -1,0 +1,52 @@
+{
+  "adapter_id": "memory.input",
+  "capability_id": "memory.capture",
+  "schema_id": "arcs.note.project_memory.v1",
+  "events": [
+    {
+      "id": "old-calibration",
+      "subject": "project-nearest",
+      "reference": "memory:text:old-calibration",
+      "payload": {
+        "body": "Der frühere Test zur Akku-Kalibrierung ist belegt. Neue Aktionen benötigen eine neue Prüfung.",
+        "private_note": "Core-intern"
+      }
+    },
+    {
+      "id": "other-calibration",
+      "subject": "project-other",
+      "reference": "memory:text:other-calibration",
+      "payload": {
+        "body": "Akku Kalibrierung eines fremden Projekts.",
+        "private_note": "Nicht exportieren"
+      }
+    },
+    {
+      "id": "recent-status",
+      "subject": "project-nearest",
+      "reference": "memory:text:recent-status",
+      "payload": {
+        "body": "Neuer allgemeiner Projektstatus ohne technische Details.",
+        "private_note": "Akku Kalibrierung nur im privaten Feld"
+      }
+    },
+    {
+      "id": "recent-meeting",
+      "subject": "project-nearest",
+      "reference": "memory:text:recent-meeting",
+      "payload": {
+        "body": "Aktuelle Besprechungsnotiz.",
+        "private_note": "Core-intern"
+      }
+    },
+    {
+      "id": "recent-note",
+      "subject": "project-nearest",
+      "reference": "memory:text:recent-note",
+      "payload": {
+        "body": "Aktuelle Organisationsnotiz.",
+        "private_note": "Core-intern"
+      }
+    }
+  ]
+}

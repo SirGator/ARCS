@@ -3,11 +3,20 @@ use crate::core::*;
 use crate::store::{ArtifactRelations, relation_kinds};
 use serde_json::json;
 
-fn save(
+pub(super) fn save(
     store: &SqliteArtifactStore,
     schemas: &SchemaRegistry,
     id: &str,
     project: &str,
+) -> Artifact {
+    save_body(store, schemas, id, project, id)
+}
+pub(super) fn save_body(
+    store: &SqliteArtifactStore,
+    schemas: &SchemaRegistry,
+    id: &str,
+    project: &str,
+    body: &str,
 ) -> Artifact {
     let mut artifact = Artifact::new(
         id,
@@ -28,20 +37,23 @@ fn save(
             source_class: SourceClass::Human,
         },
         id,
-        json!({"raw_text":id}),
+        json!({"raw_text":body}),
     );
     artifact.tags = vec![project.into()];
     artifact.subject = Some(SubjectId(project.into()));
     store.append(&artifact, schemas).unwrap();
     artifact
 }
-fn query(seed: VersionId) -> RetrievalQuery {
+pub(super) fn query(seed: VersionId) -> RetrievalQuery {
     RetrievalQuery {
         seeds: vec![seed],
-        filters: vec![ArtifactFilter {
-            schema_id: SchemaId("arcs.input.v1".into()),
-            subject: None,
-            tags: vec![],
+        scopes: vec![RetrievalScope {
+            filter: ArtifactFilter {
+                schema_id: SchemaId("arcs.input.v1".into()),
+                subject: None,
+                tags: vec![],
+            },
+            text: None,
         }],
         relations: vec![relation_kinds::based_on()],
         limits: RetrievalLimits {
@@ -63,12 +75,12 @@ fn metadata_requires_explicit_scope_and_respects_all_filters() {
     let result = ArtifactRetrieval::new(&store).recall(&q).unwrap();
     assert_eq!(result.hits.len(), 1);
     assert_eq!(result.hits[0].artifact, a);
-    q.filters[0].subject = Some(SubjectId("project:b".into()));
-    q.filters[0].tags = vec!["project:b".into()];
+    q.scopes[0].filter.subject = Some(SubjectId("project:b".into()));
+    q.scopes[0].filter.tags = vec!["project:b".into()];
     let result = ArtifactRetrieval::new(&store).recall(&q).unwrap();
     assert_eq!(result.hits.len(), 1);
     assert_eq!(result.hits[0].artifact, b);
-    q.filters[0].tags.push("missing".into());
+    q.scopes[0].filter.tags.push("missing".into());
     assert!(
         ArtifactRetrieval::new(&store)
             .recall(&q)

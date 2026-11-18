@@ -28,7 +28,9 @@ hält die weiteren Aufgaben und den aktuellen Implementierungsstand fest.
 Der [Zwischenbericht vom 18. November 2026](docs/ZWISCHENBERICHT_2026-11-18.md)
 hält den Stand bis Slice 14 fest. Die
 [Ergänzung zur Reasoner-Auswahl](docs/ZWISCHENBERICHT_2026-11-18_ROUTING.md)
-dokumentiert Slice 15 und seine Prüfungen. Die Berichte vom
+dokumentiert Slice 15 und seine Prüfungen. Der
+[Bericht zur Textsuche](docs/ZWISCHENBERICHT_2026-11-18_MEMORY.md)
+ergänzt Slice 16. Die Berichte vom
 [17. November](docs/ZWISCHENBERICHT_2026-11-17.md) und
 [16. November](docs/ZWISCHENBERICHT_2026-11-16.md) dokumentieren frühere
 Umsetzungsstände, Prüfergebnisse und offene Grenzen.
@@ -36,6 +38,9 @@ Umsetzungsstände, Prüfergebnisse und offene Grenzen.
 Der [Gedächtnisabruf](apps/adapter-host/examples/artifact-memory.md) ergänzt
 Reasoning-Kontext aus dem gemeinsamen Artifact-Netz. Er begrenzt Suche und
 Payloadfelder und speichert die Auswahl für Wiederaufnahme und parallele Aufrufe.
+Die optionale [Textsuche](apps/adapter-host/examples/text-memory.md) findet ältere
+passende Belege in freigegebenen Feldern. Ihr Index entsteht schrittweise im
+bestehenden Store; eine unvollständige Suche belegt keinen Reasoning-Worker.
 
 Die [Termin- und Ereignisaktivierung](apps/adapter-host/examples/scheduled-runtime.md)
 lässt Aufgaben ohne belegten Reasoning-Worker auf Termine oder externe Signale
