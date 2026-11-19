@@ -129,7 +129,7 @@ CLI-Befehls.
 
 | `kind` | CLI-Befehl | Operationen |
 | --- | --- | --- |
-| `task` | `--task-command` | Aufgabe pausieren oder fortsetzen |
+| `task` | `--task-command` | Aufgabe pausieren, fortsetzen oder abbrechen |
 | `series` | `--series-command` | Prüfserie pausieren, fortsetzen oder abbrechen |
 | `plan` | `--plan-command` | Plan abbrechen |
 | `goal` | `--goal-command` | Aktionsvorschlag ansehen, freigeben oder ablehnen, Goal abbrechen oder Ressourcen anhand von Belegen klären |
@@ -174,9 +174,11 @@ Zustand ändern. Im Filter `open` entfällt er nach seinem Abschluss. Mit
 
 Die Seite enthält ausschließlich Betriebsdaten und Versionsreferenzen.
 `locally_paused` bezeichnet die eigene Pause, `paused` berücksichtigt auch
-Plan oder Serie und `control_revision` gehört in `expected_revision` bei
-einer Pause oder Fortsetzung. Die Abfrage läuft in `TaskRuntime::task_queue`
-und verwendet maximal 100 Aufträge je Antwort.
+Plan oder Serie und `control_revision` gehört bei einer Änderung in
+`expected_revision`. Die Abfrage läuft in `TaskRuntime::task_queue` und
+verwendet maximal 100 Aufträge je Antwort. Sobald `ready.control.task_queue.cancel`
+den Wert `true` hat, unterstützt der Host auch `{"command":"cancel"}` als
+`change` eines Aufgabenbefehls. [Vertrag für den Aufgabenabbruch](task-pauses.md#aufgaben-abbrechen)
 
 Der Monitor nimmt vollständige Zeilen bis 65.536 Byte an. Die interne Queue
 fasst 16 Zeilen und der Host verarbeitet bis zu acht davon vor einer Runde.

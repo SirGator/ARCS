@@ -207,6 +207,34 @@ fn queue_pages_keep_their_sequence_bound_and_show_live_waiting_and_pause_states(
     assert_eq!(all["receipt"]["tasks"][1]["state"], "ready_for_review");
     assert_eq!(all["receipt"]["tasks"][1]["can_control"], false);
     assert!(all["receipt"]["tasks"][1].get("payload").is_none());
+    let mut cancel = task_control(0, "cancel");
+    cancel["sequence"] = json!(1);
+    let stale = monitor.command("stale-cancel", "task", cancel.clone());
+    assert_eq!(stale["ok"], false);
+    assert!(
+        stale["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("revision conflict")
+    );
+    cancel["expected_revision"] = json!(1);
+    let stopped = monitor.command("cancel-pending", "task", cancel.clone());
+    assert_eq!(stopped["receipt"]["revision"], 2);
+    assert_eq!(stopped["receipt"]["cancelled"], true);
+    assert_eq!(
+        monitor.command("cancel-replay", "task", cancel)["receipt"],
+        stopped["receipt"]
+    );
+    let mut resume = task_control(2, "resume");
+    resume["sequence"] = json!(1);
+    assert_eq!(monitor.command("resume-ended", "task", resume)["ok"], false);
+    let all = monitor.command(
+        "cancelled-history",
+        "queue",
+        json!({"limit":1,"scope":"all"}),
+    );
+    assert_eq!(all["receipt"]["tasks"][0]["state"], "cancelled");
+    assert_eq!(all["receipt"]["tasks"][0]["can_control"], false);
     assert_eq!(f.count("a", "attempts"), 2);
     monitor.stop();
 }

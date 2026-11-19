@@ -85,12 +85,7 @@ impl Journal {
                     params![sequence as i64, reason, now as i64],
                 )
                 .map_err(db)?;
-            transaction
-                .execute(
-                    "UPDATE runtime_jobs SET state='cancelled',error=?2 WHERE sequence=?1",
-                    params![sequence as i64, reason],
-                )
-                .map_err(db)?;
+            Self::cancel_task_in(transaction, sequence, reason)?;
             Self::cancel_plan_children_in(transaction, sequence, reason)?;
         }
         Ok(())
@@ -110,14 +105,7 @@ impl Journal {
                 .map_err(db)?
         };
         for child in children {
-            transaction
-                .execute(
-                    "UPDATE runtime_jobs SET state='cancelled',error=?2 WHERE sequence=?1",
-                    params![child, reason],
-                )
-                .map_err(db)?;
-            transaction.execute("UPDATE runtime_job_joins SET state='blocked',error=?2 WHERE sequence=?1 AND state='waiting'",params![child,reason]).map_err(db)?;
-            Self::cancel_goal_checkpoint(transaction, child as u64, reason)?;
+            Self::cancel_task_in(transaction, child as u64, reason)?;
         }
         Ok(())
     }

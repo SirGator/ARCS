@@ -13,6 +13,7 @@ pub enum TaskChange {
         #[serde(default)]
         recover_dispatched: bool,
     },
+    Cancel,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -32,6 +33,8 @@ pub struct TaskControlReceipt {
     pub revision: u64,
     pub command_id: String,
     pub paused: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub cancelled: bool,
     pub changed_at_unix_ms: u64,
 }
 
@@ -103,24 +106,39 @@ impl TaskRuntime {
             return Err(invalid("runtime topology changed"));
         }
         command.validate()?;
-        // Resolve every possible child only from the bound operator definition.
         let affected = self.journal.control_scope(command.sequence)?;
+        let is_plan = affected.iter().any(|(sequence, id)| {
+            *sequence == command.sequence
+                && self
+                    .config
+                    .routes
+                    .iter()
+                    .any(|route| route.id == *id && route.plan.is_some())
+        });
+        // Only resume needs the authorized round budgets of the affected goals.
         let mut limits = std::collections::BTreeMap::new();
-        for (sequence, route) in affected {
-            if let Some(goal) = self.raw_route_for_job(host, sequence, &route)?.goal {
-                limits.insert(sequence, goal.max_rounds);
+        let core_cursor = if matches!(command.change, TaskChange::Resume { .. }) {
+            for (sequence, route) in &affected {
+                if let Some(goal) = self.raw_route_for_job(host, *sequence, route)?.goal {
+                    limits.insert(*sequence, goal.max_rounds);
+                }
             }
-        }
+            host.store().latest_sequence().map_err(HostError::Store)?
+        } else {
+            0
+        };
         let receipt = self.journal.change_task_control(
             &command,
             now_unix_ms()?,
-            host.store().latest_sequence().map_err(HostError::Store)?,
+            core_cursor,
             &limits,
+            is_plan,
+            self.config.retry_failed_jobs(),
         )?;
         // A failed control transaction must never discard a live response.
         self.reap_abandoned_task_work(host)?;
-        for sequence in limits.keys() {
-            self.cleanup_control(host, *sequence)?;
+        for (sequence, _) in affected {
+            self.cleanup_control(host, sequence)?;
         }
         Ok(receipt)
     }

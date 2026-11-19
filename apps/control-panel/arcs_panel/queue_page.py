@@ -34,6 +34,7 @@ class QueuePage(Gtk.Box):
         self.submit = submit
         self.operator = local_operator()
         self.page_size = None
+        self.cancel_available = False
         self.page = None
         self.cursors = (0,)
         self.pending = None
@@ -83,24 +84,34 @@ class QueuePage(Gtk.Box):
         self.detail.set_selectable(True)
         self.pack_start(self.detail, False, False, 0)
         actions = Gtk.Box(spacing=8)
-        self.reason = Gtk.Entry(placeholder_text="Begründung für Pause oder Fortsetzung")
+        self.reason = Gtk.Entry(placeholder_text="Begründung für den Befehl")
         self.reason.connect("changed", lambda *_: self._refresh())
         self.pause_button = Gtk.Button(label="Pausieren")
-        self.pause_button.connect("clicked", self._pause)
+        self.pause_button.connect("clicked", self._change_task)
+        self.cancel_button = Gtk.Button(label="Abbrechen", no_show_all=True)
+        self.cancel_button.get_style_context().add_class("danger")
+        self.cancel_button.set_tooltip_text(
+            "Ein Plan-Hauptauftrag wird samt offenen Schritten beendet. "
+            "Bei einer Prüfserie endet der ausgewählte Durchlauf."
+        )
+        self.cancel_button.connect("clicked", self._change_task, True)
         actions.pack_start(self.reason, True, True, 0)
         actions.pack_start(self.pause_button, False, False, 0)
+        actions.pack_start(self.cancel_button, False, False, 0)
         self.pack_start(actions, False, False, 0)
         self.status = text_label(css="muted")
         self.status.set_selectable(True)
         self.pack_start(self.status, False, False, 0)
         self._refresh()
 
-    def set_connected(self, max_page_size):
+    def set_connected(self, max_page_size, cancel_available=False):
         self.page_size = min(max_page_size, 25) if max_page_size else None
+        self.cancel_available = bool(self.page_size and cancel_available)
         self._refresh()
 
     def reset(self):
         self.page_size = None
+        self.cancel_available = False
         self.page = None
         self.cursors = (0,)
         self.pending = None
@@ -146,14 +157,16 @@ class QueuePage(Gtk.Box):
         self.reason.set_text("")
         self._refresh()
 
-    def _pause(self, *_):
-        if not self.pause_button.get_sensitive():
+    def _change_task(self, button, cancel=False):
+        if not button.get_sensitive():
             return
         task = self._selected()
         reason = reason_text(self.reason)
         if task is None or not reason:
             return
         change = "resume" if task["locally_paused"] else "pause"
+        if cancel:
+            change = "cancel"
         command = revision_command(self.operator, task["sequence"], task["control_revision"], reason, {"command": change})
         self._send("task", command, None)
 
@@ -204,10 +217,15 @@ class QueuePage(Gtk.Box):
         self.next_button.set_sensitive(bool(ready and matches_scope and self.page["next_after_sequence"] is not None))
         self.page_number.set_text(f"Seite {len(self.cursors)}" if matches_scope else "")
         recover = bool(task and task["locally_paused"] and task["action_recovery_required"])
-        adjustable = bool(ready and matches_scope and task and task["can_control"] and not recover)
-        self.reason.set_sensitive(adjustable)
+        adjustable = bool(ready and matches_scope and task and task["can_control"])
+        can_pause = adjustable and not recover
+        can_cancel = adjustable and self.cancel_available
+        has_reason = reason_text(self.reason) is not None
+        self.reason.set_sensitive(can_pause or can_cancel)
         self.pause_button.set_label("Fortsetzen" if task and task["locally_paused"] else "Pausieren")
-        self.pause_button.set_sensitive(adjustable and reason_text(self.reason) is not None)
+        self.pause_button.set_sensitive(can_pause and has_reason)
+        self.cancel_button.set_visible(self.cancel_available)
+        self.cancel_button.set_sensitive(can_cancel and has_reason)
         if not self.page_size:
             detail = "Starte einen Host mit Aufgaben-Runtime und Unterstützung für die Warteschlange."
         elif not task:

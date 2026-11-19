@@ -330,6 +330,81 @@ fn series_cancellation_commits_before_reaping_a_late_reply_and_stays_terminal() 
 }
 
 #[test]
+fn cancelling_a_live_occurrence_is_atomic_and_keeps_the_series_on_its_grid() {
+    let f = gated_fixture(true);
+    let (mut host, mut runtime) = f.open();
+    tick_until(&mut host, &mut runtime, NOW, |_, _| f.started("a"));
+    let db = rusqlite::Connection::open(f.directory.join("runtime.sqlite")).unwrap();
+    db.execute_batch(
+        "CREATE TRIGGER interrupt_task_cancel BEFORE INSERT ON runtime_task_control_events
+         BEGIN SELECT RAISE(ABORT,'test task control checkpoint failure'); END;",
+    )
+    .unwrap();
+    let cancel = TaskControlCommand {
+        sequence: 1,
+        expected_revision: 0,
+        command_id: "cancel-first-occurrence".into(),
+        operator: Actor {
+            actor_type: ActorType::Human,
+            id: "operator.test".into(),
+        },
+        reason: "stop only this occurrence".into(),
+        change: TaskChange::Cancel,
+    };
+    assert!(runtime.control_task(&mut host, cancel.clone()).is_err());
+    assert!(runtime.task_control_history(1, 0, 10).unwrap().is_empty());
+    assert_eq!(
+        runtime.report(0).unwrap().recurring_checks[0].last_state,
+        "running"
+    );
+    db.execute_batch("DROP TRIGGER interrupt_task_cancel")
+        .unwrap();
+    let receipt = runtime.control_task(&mut host, cancel.clone()).unwrap();
+    assert!(receipt.cancelled);
+    let stopped = runtime.report(0).unwrap();
+    assert_eq!(stopped.recurring_checks[0].state, SeriesState::Active);
+    assert_eq!(stopped.recurring_checks[0].last_state, "cancelled");
+    assert_eq!(
+        stopped.recurring_checks[0].next_due_unix_ms,
+        Some(NOW + MONTH)
+    );
+
+    f.release("a");
+    tick_until(&mut host, &mut runtime, NOW + MONTH, |_, run| {
+        run.report(0).unwrap().ready_for_review == 2
+    });
+    let report = runtime.report(0).unwrap();
+    assert_eq!(
+        report.recurring_checks[0].next_due_unix_ms,
+        Some(NOW + 2 * MONTH)
+    );
+    assert_eq!(f.count("a", "attempts"), 3);
+    assert_eq!(
+        host.store()
+            .committed_after(0)
+            .unwrap()
+            .iter()
+            .filter(|event| event.artifact.schema_id.0 == "arcs.reasoning_result.v2")
+            .count(),
+        2
+    );
+    host.shutdown().unwrap();
+    drop((runtime, host));
+
+    let (mut host, mut runtime) = f.open();
+    let mut reused = cancel.clone();
+    reused.reason = "changed reason".into();
+    assert!(runtime.control_task(&mut host, reused).is_err());
+    assert_eq!(
+        json!(runtime.control_task(&mut host, cancel).unwrap()),
+        json!(receipt)
+    );
+    assert_eq!(runtime.task_control_history(1, 0, 10).unwrap().len(), 1);
+    assert_eq!(runtime.check_occurrences_after(1, 0, 10).unwrap().len(), 2);
+    host.shutdown().unwrap();
+}
+
+#[test]
 fn switching_to_synchronous_retry_cannot_revive_failed_occurrences_of_a_cancelled_series() {
     let f = gated_fixture(false);
     let mut peer = f.read("a.json");

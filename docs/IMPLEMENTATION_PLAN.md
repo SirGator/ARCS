@@ -386,6 +386,14 @@
 > und Teilschritte lassen sich mit ihrer aktuellen Kontrollrevision pausieren
 > und fortsetzen. Die Ansicht zeigt Fristen, Wartezustände und vererbte Pausen.
 
+> Dreißigster Schritt gemäß v3 §7.2 PAR-07/PAR-08/PAR-10 und §8.2 LNG-04:
+> Einzelne Aufgaben lassen sich aus dem Desktop, über die CLI und im laufenden
+> Monitor dauerhaft abbrechen. Im bestehenden Journal bilden Endzustand,
+> Kontrollrevision und wiederholbarer Beleg eine Transaktion. Der
+> Plan-Hauptauftrag verwendet den Planabbruch, ein Seriendurchlauf behält
+> seine Serienzuordnung und die Serie ihren Zeitplan. Eine ungeklärte
+> Reservierung nach einem Dispatch bleibt über den Neustart bestehen.
+
 **Leitbild:** ARCS ist ein universeller Agent. Es soll sich einfach bedienen lassen, beliebige kompatible Systeme verbinden, eigenständig Probleme lösen und langfristige Aufgaben über Monate verfolgen.
 
 ## 1. Verbindliche Architekturregeln

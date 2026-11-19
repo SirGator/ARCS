@@ -8,7 +8,7 @@ use crate::{
         suspension::*,
     },
 };
-use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
+use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 use std::collections::BTreeMap;
 
 // Plans currently have a single level of generated children (nested plans are
@@ -103,6 +103,8 @@ impl Journal {
         now: u64,
         core_cursor: u64,
         goals: &BTreeMap<u64, u32>,
+        is_plan: bool,
+        retry_failed: bool,
     ) -> Result<TaskControlReceipt, HostError> {
         let encoded = serde_json::to_string(command).map_err(|e| invalid(e.to_string()))?;
         let tx = self
@@ -118,8 +120,9 @@ impl Journal {
             }
             return serde_json::from_str(&receipt).map_err(|e| invalid(e.to_string()));
         }
+        let cancelled = matches!(command.change, TaskChange::Cancel);
         let active: bool = tx.query_row(&format!("SELECT EXISTS(SELECT 1 FROM runtime_jobs j
-            WHERE (j.sequence=?1 OR j.sequence IN (SELECT sequence FROM runtime_plan_steps WHERE parent_sequence=?1)) AND {})", runnable("j", true)),
+            WHERE (j.sequence=?1 OR j.sequence IN (SELECT sequence FROM runtime_plan_steps WHERE parent_sequence=?1)) AND {})", runnable("j", !cancelled || retry_failed)),
             [command.sequence as i64], |row| row.get(0)).map_err(db)?;
         if !active {
             return Err(invalid("task control requires unfinished work"));
@@ -137,12 +140,18 @@ impl Journal {
         if revision != command.expected_revision {
             return Err(invalid("task control revision conflict"));
         }
-        if paused == next_paused {
+        if !cancelled && paused == next_paused {
             return Err(invalid("task control already has this state"));
         }
         let revision = revision + 1;
         tx.execute("INSERT INTO runtime_task_controls VALUES(?1,?2,?3,?4) ON CONFLICT(sequence) DO UPDATE SET revision=excluded.revision,paused=excluded.paused,reason=excluded.reason",params![command.sequence as i64,revision as i64,next_paused,&command.reason]).map_err(db)?;
-        if next_paused {
+        if cancelled {
+            if is_plan {
+                Self::cancel_plan_in(&tx, command.sequence, &command.reason, now)?;
+            } else {
+                Self::cancel_task_in(&tx, command.sequence, &command.reason)?;
+            }
+        } else if next_paused {
             tx.execute("UPDATE runtime_reasoning_requests SET pause_captured=1 WHERE sequence=?1 OR sequence IN (SELECT sequence FROM runtime_plan_steps WHERE parent_sequence=?1)",[command.sequence as i64]).map_err(db)?;
         } else {
             let recover = matches!(
@@ -227,6 +236,7 @@ impl Journal {
             revision,
             command_id: command.command_id.clone(),
             paused: next_paused,
+            cancelled,
             changed_at_unix_ms: now,
         };
         tx.execute(
@@ -242,6 +252,22 @@ impl Journal {
         .map_err(db)?;
         tx.commit().map_err(db)?;
         Ok(receipt)
+    }
+
+    // The caller checks eligibility inside the same transaction.
+    pub(super) fn cancel_task_in(
+        transaction: &Transaction<'_>,
+        sequence: u64,
+        reason: &str,
+    ) -> Result<(), HostError> {
+        transaction
+            .execute(
+                "UPDATE runtime_jobs SET state='cancelled',error=?2 WHERE sequence=?1",
+                params![sequence as i64, reason],
+            )
+            .map_err(db)?;
+        transaction.execute("UPDATE runtime_job_joins SET state='blocked',error=?2 WHERE sequence=?1 AND state='waiting'",params![sequence as i64,reason]).map_err(db)?;
+        Self::cancel_goal_checkpoint(transaction, sequence, reason)
     }
 
     pub(in crate::task_runtime) fn resume_barrier(

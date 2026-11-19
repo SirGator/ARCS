@@ -48,7 +48,8 @@ dokumentiert Slice 25. Der [Bericht zur Steuerung von Prüfserien](docs/ZWISCHEN
 dokumentiert Slice 26. Der [Bericht zur Steuerung im laufenden Host](docs/ZWISCHENBERICHT_2026-11-19_MONITOR_CONTROL.md)
 dokumentiert Slice 27. Der [Bericht zur Desktop-Steuerung](docs/ZWISCHENBERICHT_2026-11-19_DESKTOP_CONTROL.md)
 dokumentiert Slice 28. Der [Bericht zur Aufgabenwarteschlange](docs/ZWISCHENBERICHT_2026-11-19_TASK_QUEUE.md)
-dokumentiert Slice 29. Die Berichte vom
+dokumentiert Slice 29. Der [Bericht zum Aufgabenabbruch](docs/ZWISCHENBERICHT_2026-11-19_TASK_CANCELLATION.md)
+dokumentiert Slice 30. Die Berichte vom
 [17. November](docs/ZWISCHENBERICHT_2026-11-17.md) und
 [16. November](docs/ZWISCHENBERICHT_2026-11-16.md) dokumentieren frühere
 Umsetzungsstände, Prüfergebnisse und offene Grenzen.
@@ -91,10 +92,11 @@ und stellen sie auch dem vorhandenen Vorlagenplaner zur Verfügung.
 [Dauerhafte Reasoner-Auswahl](apps/adapter-host/examples/reasoner-routing.md)
 wählt pro Aufgabe innerhalb erlaubter Optionen und aktueller Host-Kapazitäten;
 ein Core-Beleg erhält die Entscheidung über Neustarts und Goal-Runden.
-[Dauerhafte Aufgabenpausen](apps/adapter-host/examples/task-pauses.md)
-sperren einzelne Aufgaben oder ganze Pläne über Neustarts. Laufende
-Reasoning-Antworten werden noch abgeholt; Goals brauchen vor einer neuen
-Aktion frische Vorbereitung und Freigabe.
+[Aufgabensteuerung](apps/adapter-host/examples/task-pauses.md) erlaubt dauerhafte
+Pausen und Abbrüche einzelner Aufgaben und ganzer Pläne. Während einer Pause
+holt ARCS bereits laufende Reasoning-Antworten ab. Vor einer neuen Aktion
+braucht das fortgesetzte Goal frische Vorbereitung und Freigabe. Beim Abbruch
+speichert ARCS den Endzustand mit einem wiederholbaren Beleg.
 
 [Reasoning-Versuche](apps/adapter-host/examples/reasoning-attempts.md) erhalten
 strukturierte Belege für gültige Antworten und technische Fehlschläge im

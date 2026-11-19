@@ -92,9 +92,11 @@ des Checkouts lassen sie sich mit demselben Befehl aktualisieren.
 - **Aufgaben:** Blättert durch offene Aufgaben oder den gesamten Verlauf der
   laufenden Runtime. Die Ansicht zeigt Route, Priorität und Wartegrund. Wähle
   eine Aufgabe aus, um Frist, Eingabe sowie gegebenenfalls den zugehörigen Plan
-  oder die Prüfserie zu sehen. Mit Begründung lässt sich eine eigenständige
-  Aufgabe oder ein Teilschritt pausieren und fortsetzen. Eine vererbte Pause
-  wird beim zugehörigen Plan oder bei der Prüfserie aufgehoben.
+  oder die Prüfserie zu sehen. Mit Begründung lässt sich eine Aufgabe pausieren,
+  fortsetzen oder abbrechen. Ein abgebrochener Auftrag erscheint weiter unter
+  **Alle Aufgaben**. Beim Abbruch eines Plan-Hauptauftrags enden auch seine
+  offenen Schritte. Bei einer Prüfserie endet nur der ausgewählte Durchlauf.
+  Eine vererbte Pause wird beim zugehörigen Plan oder bei der Prüfserie aufgehoben.
   **Aktualisieren** lädt die erste Seite neu und nimmt inzwischen angelegte
   Aufträge in den nächsten Durchgang auf.
 - **Steuerung:** Zeigt die vom laufenden Host gemeldeten Goals, Pläne und

@@ -1,4 +1,4 @@
-# Aufgaben und Pläne dauerhaft pausieren
+# Aufgaben und Pläne pausieren, fortsetzen und abbrechen
 
 Dieser Slice ergänzt `ARCHITECTURE.md`, v3 §8.2 LNG-05 sowie §7.2 PAR-05,
 PAR-07 und PAR-10. Eine Aufgabe kann ihre Ausführung unterbrechen, ohne ihre
@@ -91,11 +91,32 @@ vollständigen ursprünglichen Angaben gebunden. Eine geänderte Wiederholung
 wird abgewiesen; eine alte identische Wiederholung kann eine inzwischen erfolgte
 Fortsetzung nicht wieder rückgängig machen. Historie und aktueller Zustand
 bleiben getrennt. Der Runtime-Einstieg liefert bei Wiederholung den ursprünglichen
-Beleg; die CLI zeigt den aktuellen Runtime-Bericht.
+Beleg. Die CLI zeigt ihn unter `task_control` neben dem aktuellen Runtime-Bericht.
 
 Die CLI bedient ein gestopptes Journal. Ein laufender Host hält dessen
-vorhandene exklusive Sperre. Eine eingebettete Anwendung kann den direkten
-Runtime-Einstieg zwischen Ticks verwenden; ein Live-IPC-Kanal ist noch offen.
+vorhandene exklusive Sperre. Im laufenden Host nimmt der lokale Monitor den
+gleichen Befehl als `kind: "task"` entgegen. Eine eingebettete Anwendung kann
+den Runtime-Einstieg zwischen Ticks verwenden. [Monitorsteuerung](task-runtime.md#steuerung-im-laufenden-host)
+
+## Aufgaben abbrechen
+
+Sende einen Aufgabenbefehl mit der aktuellen Revision, einer neuen Command-ID
+und `{"command":"cancel"}` als `change`. Die Aufgabe wechselt dauerhaft zu
+`cancelled`. Kontrollrevision, Begründung und Beleg mit `cancelled: true` werden
+gemeinsam mit dem Aufgabenstatus gespeichert. Wiederhole bei verlorenem Beleg
+denselben Befehl, um den ursprünglichen Beleg erneut zu erhalten.
+
+Der Abbruch eines Plan-Hauptauftrags beendet den Plan samt offenen Schritten.
+Der Abbruch eines einzelnen Schritts beendet diese Aufgabensequenz. Eine
+Abhängigkeit von ihr wird als nicht erfüllt behandelt. Eine konfigurierte
+Neuplanung kann ausstehende Arbeit als neue Schritte einplanen. Bei einer
+Prüfserie endet der ausgewählte Durchlauf und die Serie behält ihren Zeitplan.
+
+Nach dem Commit verwirft der Host noch nicht übernommene Reasoning- und
+Request-Antworten der beendeten Arbeit. Laufende Adapterdialoge halten ihren
+Platz bis zur Antwort oder Deadline. Bereits ausgeführte Aktionen behalten
+ihre Belege. Eine ungeklärte exklusive Reservierung bleibt bis zur
+vorhandenen Betreiberklärung bestehen.
 
 ## Wirkung auf Aufgaben, Pläne und Worker
 
@@ -186,7 +207,9 @@ die Journalmigration ergänzt nur Tabellen und Spalten.
 cargo test --locked --offline -p arcs-host --test task_suspension
 ```
 
-14 Prozess-Tests prüfen Live-Worker/Kapazitäten, Planer-Recovery, Eltern-/
+Prozess-Tests prüfen Live-Worker/Kapazitäten, Planer-Recovery, Eltern-/
 Kindpausen, Optimismus und Idempotenz, Rollback, Fristen, verlorene Fehler- und
 Execution-Checkpoints, neue Goal-Freigaben, Versuchslimits, erzeugte Goal-Schritte,
-Aufnahme vor dem ersten Checkpoint sowie CLI und Migration.
+Aufnahme vor dem ersten Checkpoint sowie CLI und Migration. Der Abbruch wird
+für einzelne Planschritte, ganze Pläne und eine ungeklärte Reservierung des
+simulierten Aktors geprüft.

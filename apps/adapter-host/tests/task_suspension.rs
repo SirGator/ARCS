@@ -8,6 +8,7 @@ mod support;
 
 use arcs::approval::ApprovalDecision;
 use arcs::core::{Actor, ActorType};
+use arcs::runtime::reservations::ReservationState;
 use arcs_host::{
     Host,
     task_runtime::{
@@ -324,6 +325,55 @@ fn lifetime_expiry_still_cancels_a_paused_task_before_it_can_dispatch() {
 }
 
 #[test]
+fn cancelling_a_plan_step_leaves_its_sibling_running_until_the_plan_root_is_cancelled() {
+    let f = plan_support::fixture("gate", "gate");
+    let (mut host, mut runtime) = f.open();
+    until(&mut host, &mut runtime, |_, _| {
+        f.started("a") && f.started("b")
+    });
+    let plan = runtime.plans_after(0, 1).unwrap().remove(0);
+    let left = plan.steps.iter().find(|step| step.id == "left").unwrap();
+    let cancel = command(left.sequence, 0, "cancel-left", TaskChange::Cancel);
+    assert!(runtime.control_task(&mut host, cancel).unwrap().cancelled);
+    let partial = runtime.plans_after(0, 1).unwrap().remove(0);
+    assert_eq!(partial.state, plan.state);
+    assert_eq!(
+        partial.steps.iter().find(|s| s.id == "left").unwrap().state,
+        "cancelled"
+    );
+    assert_eq!(
+        partial
+            .steps
+            .iter()
+            .find(|s| s.id == "right")
+            .unwrap()
+            .state,
+        "running"
+    );
+    assert_eq!(runtime.report(0).unwrap().cancelled_jobs, 1);
+
+    let cancel = command(plan.sequence, 0, "cancel-root", TaskChange::Cancel);
+    let receipt = runtime.control_task(&mut host, cancel).unwrap();
+    let stopped = runtime.plans_after(0, 1).unwrap().remove(0);
+    assert!(receipt.cancelled);
+    assert_eq!(
+        stopped.state,
+        arcs_host::task_runtime::planning::PlanState::Cancelled
+    );
+    assert_eq!(
+        stopped.cancelled_at_unix_ms,
+        Some(receipt.changed_at_unix_ms)
+    );
+    assert_eq!(stopped.plan_version_id, plan.plan_version_id);
+    assert!(stopped.steps.iter().all(|step| step.state == "cancelled"));
+    assert_eq!(runtime.report(0).unwrap().capacity_used, 0);
+    f.release("a");
+    f.release("b");
+    host.shutdown().unwrap();
+    assert!(!f.started("join"));
+}
+
+#[test]
 fn paused_collection_checks_an_expiry_that_the_bounded_sweep_has_not_reached() {
     let f = Fixture::new();
     f.peer("a", "gate", false);
@@ -382,6 +432,45 @@ fn approve(host: &Host, runtime: &mut TaskRuntime, task: &GoalTask) {
             "reviewed current evidence".into(),
         )
         .unwrap();
+}
+
+#[test]
+fn task_cancellation_retains_an_unresolved_simulated_action_reservation() {
+    let f = goal_support::Fixture::new();
+    f.manual();
+    let mut config = f.read("runtime.json");
+    config["routes"][0]["goal"]["exclusive_resources"] = json!(["device.fan-01"]);
+    f.write("runtime.json", config);
+    let mut host = f.host();
+    let mut runtime = f.runtime(&host);
+    let waiting = goal_until(&mut host, &mut runtime, GoalState::AwaitingApproval);
+    approve(&host, &mut runtime, &waiting);
+    let dispatched = goal_until(&mut host, &mut runtime, GoalState::Observing);
+    let reservation = runtime.exclusive_resources(&host).unwrap().remove(0);
+    assert_eq!(reservation.state, ReservationState::Held);
+    assert!(dispatched.dispatch_cursor.is_some());
+    assert_eq!(actuations(&f), 1);
+    pause(&mut runtime, &mut host, waiting.sequence, "pause-action");
+    let cancel = command(waiting.sequence, 1, "cancel-action", TaskChange::Cancel);
+    let receipt = runtime.control_task(&mut host, cancel).unwrap();
+    assert!(receipt.cancelled);
+    assert!(!receipt.paused);
+    let stopped = goal(&runtime);
+    assert_eq!(stopped.state, GoalState::Cancelled);
+    assert_eq!(stopped.dispatch_cursor, dispatched.dispatch_cursor);
+    assert_eq!(stopped.execution, dispatched.execution);
+    host.shutdown().unwrap();
+    drop((runtime, host));
+
+    let mut host = f.host();
+    let mut runtime = f.runtime(&host);
+    runtime.tick(&mut host).unwrap();
+    let held = runtime.exclusive_resources(&host).unwrap().remove(0);
+    assert_eq!(held.version_id, reservation.version_id);
+    assert_eq!(held.state, reservation.state);
+    assert_eq!(goal(&runtime).state, GoalState::Cancelled);
+    assert_eq!(actuations(&f), 1);
+    host.shutdown().unwrap();
 }
 
 #[test]
@@ -677,7 +766,7 @@ fn a_goal_paused_before_its_first_checkpoint_uses_a_fresh_barrier_without_spendi
 }
 
 #[test]
-fn cli_commands_and_additive_migration_preserve_pause_across_restarts() {
+fn cli_commands_and_additive_migration_preserve_task_control_across_restarts() {
     let f = Fixture::new();
     f.peer("a", "normal", false);
     f.route("main", "a");
@@ -734,5 +823,19 @@ fn cli_commands_and_additive_migration_preserve_pause_across_restarts() {
         .unwrap(),
     );
     assert_eq!(run("resume.json")["paused_jobs"], 0);
+    f.write(
+        "cancel.json",
+        json!(command(1, 2, "cancel", TaskChange::Cancel)),
+    );
+    let stopped = run("cancel.json");
+    assert_eq!(stopped["cancelled_jobs"], 1);
+    assert_eq!(stopped["task_control"]["cancelled"], true);
+    assert_eq!(stopped["task_control"]["revision"], 3);
+    assert_eq!(run("cancel.json")["task_control"], stopped["task_control"]);
+    let (mut host, mut runtime) = f.open();
+    runtime.tick_at(&mut host, i64::MAX as u64).unwrap();
+    assert_eq!(runtime.report(0).unwrap().cancelled_jobs, 1);
+    assert_eq!(runtime.report(0).unwrap().ready_for_review, 0);
     assert_eq!(f.count("a", "attempts"), 0);
+    host.shutdown().unwrap();
 }

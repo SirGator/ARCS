@@ -136,17 +136,10 @@ impl Journal {
         if is_plan {
             Self::cancel_plan_in(&transaction, sequence, &reason, now as u64)?;
         } else {
-            transaction
-                .execute(
-                    "UPDATE runtime_jobs SET state='cancelled',error=?2 WHERE sequence=?1",
-                    params![sequence as i64, reason],
-                )
-                .map_err(db)?;
-            Self::cancel_goal_checkpoint(&transaction, sequence, &reason)?;
+            Self::cancel_task_in(&transaction, sequence, &reason)?;
         }
         for task in affected {
             transaction.execute("UPDATE runtime_task_deadlines SET expired_at=?2 WHERE sequence=?1 AND expired_at IS NULL AND expires_at<=?2",params![task,now]).map_err(db)?;
-            transaction.execute("UPDATE runtime_job_joins SET state='blocked',error=?2 WHERE sequence=?1 AND state='waiting'",params![task,reason]).map_err(db)?;
         }
         transaction.commit().map_err(db)?;
         Ok(true)

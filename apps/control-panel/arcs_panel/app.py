@@ -83,6 +83,7 @@ class ControlWindow(Gtk.ApplicationWindow):
         self._control_protocol = False
         self._review_preview = False
         self._queue_size = None
+        self._task_cancel = False
         self.presets = [
             ("Aufgaben per Text · Beispiel", Configuration(self.root / "apps/adapter-host/config/text-tasks/host.json", self.root / "apps/adapter-host/config/text-tasks/runtime.json")),
             ("Mehrere Adapter", Configuration(self.root / "apps/adapter-host/config/multiple-adapters/host.json")),
@@ -376,6 +377,7 @@ class ControlWindow(Gtk.ApplicationWindow):
         self.queue_page.reset()
         self._control_protocol = False
         self._queue_size = None
+        self._task_cancel = False
         try:
             preview = read_configuration(configuration)
             self.catalog = preview["adapters"]
@@ -440,6 +442,7 @@ class ControlWindow(Gtk.ApplicationWindow):
             self.queue_page.reset()
             self._control_protocol = False
             self._queue_size = None
+            self._task_cancel = False
             self.snapshot = {}
             self.metrics["artifacts"][0].set_text("—")
             self.metrics["review"][0].set_text("—")
@@ -475,7 +478,8 @@ class ControlWindow(Gtk.ApplicationWindow):
         self.state = state
         self.input_page.set_running(state == "running")
         self.control_page.set_connected(state == "running" and self._control_protocol, self._review_preview)
-        self.queue_page.set_connected(self._queue_size if state == "running" and self._control_protocol else None)
+        queue_size = self._queue_size if state == "running" and self._control_protocol else None
+        self.queue_page.set_connected(queue_size, self._task_cancel)
         text, sub = {
             "idle": ("Bereit", "Wartet auf den Start"), "building": ("Build", "Programme werden gebaut"),
             "starting": ("Startet", "Adapter werden verbunden"), "running": ("Läuft", "Verarbeitung ist aktiv"),
@@ -576,8 +580,10 @@ class ControlWindow(Gtk.ApplicationWindow):
                 control = event.get("control") or {}
                 self._control_protocol = control.get("protocol_version") == 1 and control.get("transport") == "stdin_jsonl"
                 self._review_preview = control.get("goal_review_preview") is True
-                queue_size = (control.get("task_queue") or {}).get("max_page_size")
+                queue_features = control.get("task_queue") or {}
+                queue_size = queue_features.get("max_page_size")
                 self._queue_size = queue_size if type(queue_size) is int and queue_size > 0 else None
+                self._task_cancel = queue_features.get("cancel") is True
                 self.metrics["adapters"][0].set_text(str(len(self.catalog)))
                 self.metrics["adapters"][1].set_text("angeschlossen")
                 if self.state != "stopping":

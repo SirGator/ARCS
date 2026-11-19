@@ -332,6 +332,10 @@ fn run() -> Result<(), String> {
         host.shutdown().map_err(|e| e.to_string())?;
         serde_json::to_value(report).map(|mut value| {
             match receipt {
+                Some(CommandReceipt::Task(receipt)) => {
+                    value["task_control"] =
+                        serde_json::to_value(receipt).expect("task control receipt serialization")
+                }
                 Some(CommandReceipt::Series(receipt)) => {
                     value["series_control"] =
                         serde_json::to_value(receipt).expect("series control receipt serialization")
