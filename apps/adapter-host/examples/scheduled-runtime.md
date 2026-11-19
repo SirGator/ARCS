@@ -142,6 +142,51 @@ ersten Aufgabenschritt**. Goal-Routen können zusätzlich mit
 Runden warten. Frühere Aktivierungen bleiben als Revisionen erhalten;
 `scheduled_after` liefert jeweils die letzte Revision einer Aufgabe.
 `scheduled_history(sequence, after_revision, limit)` liest ihre Historie.
+
+## Wiederkehrende Prüfungen
+
+Eine eigenständige Reasoning-Route kann für jede passende Eingabeversion eine
+Prüfserie anlegen. Ergänze dafür beispielsweise in der Route unter `routes`
+in der [Rollen-Konfiguration](../config/roles/runtime.json) das Feld
+`recurrence` und verwende für die geänderte Konfiguration eine eigene Runtime-ID
+und ein eigenes Journal.
+
+```json
+{
+  "recurrence": { "every_ms": 604800000, "max_occurrences": 16 }
+}
+```
+
+Der erste Auftrag wird ab Aufnahme normal zur Ausführung eingeplant. Die
+übrigen Termine liegen auf einem festen Raster ab diesem Zeitpunkt. `every_ms`
+ist ein Abstand in Millisekunden von 1 bis 315576000000. `max_occurrences` zählt
+alle 2 bis 10000 Rasterpositionen einschließlich der ersten. Die Route braucht
+eine leere `allowed_capabilities`-Liste und verwendet weder `activation` noch
+`goal`, `plan` oder eigene Abhängigkeiten. Reasoning-Budgets und eine optionale
+Aufgabenfrist gelten pro ausgeführtem Termin.
+
+Zwischen den Prüfungen belegt die Serie keinen Queueplatz. Ist eine Prüfung
+noch offen, wartet die nächste. Sobald ein Platz frei ist, wird der jüngste
+noch offene fällige Termin aufgenommen. Nach langer Standzeit kann das auch
+der letzte konfigurierte Termin sein. Frühere fällige Termine gelten als
+übersprungen. Sie zählen zum Terminlimit, und die nächste Fälligkeit bleibt
+auf dem ursprünglichen Raster. Neue Eingaben teilen sich den verfügbaren
+Platz mit fälligen Prüfungen. Bei Konkurrenz wechselt die bevorzugte Aufnahme
+auch über Neustarts hinweg.
+
+Der Host-Bericht enthält die anstehenden Serien unter `recurring_checks`
+sowie die nächste Fälligkeit unter `next_wake_unix_ms`. `last_sequence` verweist
+auf die zuletzt aufgenommene Aufgabe. `last_state` zeigt deren Status. Das
+Tick-Ergebnis führt neu aufgenommene Folgetermine unter `recurring_jobs`.
+`TaskRuntime::recurring_checks_after(sequence, limit)` liest Serien und
+`TaskRuntime::check_occurrences_after(series_sequence, after_sequence, limit)`
+liest aufgenommene Termine, jeweils bis zu 1000 pro Seite. Ein Terminbeleg
+enthält geplante Fälligkeit, Aufnahmezeit und die Zahl der übersprungenen
+Termine davor. Dieselben Angaben stehen unter `task_recurrence` im dauerhaft
+gespeicherten Reasoning-Request. Die Prüfungen verwenden dieselbe
+Eingabeversion. Eine konfigurierte Memory-Policy kann jeder Prüfung passenden
+Kontext bereitstellen.
+
 Unterbrechung laufender Planschritte, Kalender-/Cron-Termine, dynamisch durch
 Reasoner vorgeschlagene Wartezustände, Abhängigkeitsplanung und ein allgemein
 versioniertes Langzeit-Zielmodell bleiben offen. Die Architektur und ihre

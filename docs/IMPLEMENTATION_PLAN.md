@@ -347,6 +347,16 @@
 > allgemeine Strategiequalität, verteiltes Fencing und die vollständigen
 > Phasenabnahmen bleiben offen.
 
+> Fünfundzwanzigster Schritt gemäß v3 §7.2 PAR-06/PAR-10/PAR-11 und
+> §8.2 LNG-04/LNG-10: Eine eigenständige Reasoning-Route kann ab Aufnahme
+> einer Eingabe eine begrenzte, persistente Prüfserie starten. Nur fällige
+> Prüfungen belegen einen Queueplatz. ARCS führt pro Serie eine Prüfung
+> gleichzeitig aus, fasst verpasste Termine zusammen und protokolliert ihre
+> Anzahl. Jeder ausgeführte Termin erhält eine eigene Reasoning-Identität.
+> Prüftermine und neue Eingaben wechseln sich bei der bevorzugten Aufnahme ab.
+> Kalenderregeln, Steuerung ganzer Serien und die Langzeitabnahme im Betrieb
+> bleiben offen.
+
 **Leitbild:** ARCS ist ein universeller Agent. Es soll sich einfach bedienen lassen, beliebige kompatible Systeme verbinden, eigenständig Probleme lösen und langfristige Aufgaben über Monate verfolgen.
 
 ## 1. Verbindliche Architekturregeln

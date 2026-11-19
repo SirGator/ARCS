@@ -9,6 +9,7 @@ pub mod planning;
 pub mod reasoner_selection;
 mod reasoning;
 pub mod recovery;
+mod routes;
 pub mod scheduler;
 pub mod suspension;
 mod worker_lifecycle;
@@ -44,6 +45,8 @@ pub struct CompletedTask {
 pub struct TickReport {
     pub discovered_jobs: usize,
     pub backpressure: bool,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub recurring_jobs: Vec<u64>,
     pub ready_for_review: Vec<CompletedTask>,
     pub failed: Vec<FailedTask>,
     pub waiting_resources: Vec<ResourceWait>,
@@ -80,6 +83,8 @@ pub struct RuntimeReport {
     pub waiting_time: u64,
     pub waiting_event: u64,
     pub next_wake_unix_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub recurring_checks: Vec<scheduler::CheckSeries>,
     pub waiting_dependency: u64,
     pub blocked_dependencies: u64,
     pub capacity_used: usize,
@@ -103,6 +108,7 @@ pub struct TaskRuntime {
     control_cursor: u64,
     has_reasoner_selection: bool,
     has_reasoning_recovery: bool,
+    has_recurrence: bool,
     live_clock: bool,
 }
 impl TaskRuntime {
@@ -125,6 +131,7 @@ impl TaskRuntime {
                         .any(|template| template.route.reasoning_recovery.is_some())
                 })
         });
+        let has_recurrence = config.routes.iter().any(|route| route.recurrence.is_some());
         Ok(Self {
             config,
             identity,
@@ -133,6 +140,7 @@ impl TaskRuntime {
             control_cursor: 0,
             has_reasoner_selection,
             has_reasoning_recovery,
+            has_recurrence,
             live_clock: true,
         })
     }
@@ -183,6 +191,15 @@ impl TaskRuntime {
         self.collect_paused_source_requests(host, has_deadlines, &mut report)?;
         self.collect_paused_reasoning(host, has_deadlines, live_clock, &mut report)?;
         self.cleanup_control_sessions(host)?;
+        let checks_due = self.has_recurrence
+            && self
+                .journal
+                .next_check()?
+                .is_some_and(|due| due <= now_unix_ms);
+        let recurring_first = checks_due && self.journal.recurring_first(&self.config)?;
+        if recurring_first {
+            self.admit_recurring_checks(now_unix_ms, &mut report)?;
+        }
         let caught_up = self.discover(host, &mut report, now_unix_ms)?;
         // Erst alte Core-Ereignisse übernehmen. Normale Inputs nur bei freier Queue.
         if caught_up
@@ -215,6 +232,9 @@ impl TaskRuntime {
             {
                 host.poll_round()?;
             }
+        }
+        if checks_due && !recurring_first {
+            self.admit_recurring_checks(now_unix_ms, &mut report)?;
         }
         self.activate_scheduled(host, now_unix_ms)?;
         self.advance_dependencies(host)?;
@@ -331,6 +351,9 @@ impl TaskRuntime {
                 if let Some(activation) = &route.activation {
                     Journal::schedule(&transaction, sequence, event.sequence, activation, now)?;
                 }
+                if let Some(recurrence) = route.recurrence {
+                    Journal::start_recurrence(&transaction, sequence, recurrence, now)?;
+                }
                 pending += route.queue_slots();
                 report.discovered_jobs += 1;
             }
@@ -371,6 +394,15 @@ impl TaskRuntime {
     }
     pub fn report(&self, ticks: u64) -> Result<RuntimeReport, HostError> {
         let (waiting_time, waiting_event, next_wake_unix_ms) = self.journal.schedule_summary()?;
+        let (recurring_checks, next_check) = if self.has_recurrence {
+            (
+                self.journal.recurring_checks_for_report()?,
+                self.journal.next_check()?,
+            )
+        } else {
+            (Vec::new(), None)
+        };
+        let next_wake_unix_ms = next_wake_unix_ms.into_iter().chain(next_check).min();
         let (waiting_dependency, blocked_dependencies) = self.journal.dependency_summary()?;
         let (running_plans, stopped_plans, review_plans) = self.journal.plan_summary()?;
         let (expired_jobs, next_deadline_unix_ms) = self
@@ -415,6 +447,7 @@ impl TaskRuntime {
             waiting_time,
             waiting_event,
             next_wake_unix_ms,
+            recurring_checks,
             waiting_dependency,
             blocked_dependencies,
             capacity_used: self.journal.capacity(self.config.retry_failed_jobs())?,

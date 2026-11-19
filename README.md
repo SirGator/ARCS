@@ -43,7 +43,8 @@ dokumentiert Slice 21. Der [Inferenzbericht](docs/ZWISCHENBERICHT_2026-11-19_INF
 beschreibt den ausführbaren Modell- und Wiederaufnahmenachweis von Slice 22.
 Der [Bericht zu parallelen Quellenabfragen](docs/ZWISCHENBERICHT_2026-11-19_REQUESTS.md)
 ergänzt Slice 23. Der [Bericht zur Neuplanung](docs/ZWISCHENBERICHT_2026-11-19_REPLANNING.md)
-dokumentiert Slice 24. Die Berichte vom
+dokumentiert Slice 24. Der [Bericht zu wiederkehrenden Prüfungen](docs/ZWISCHENBERICHT_2026-11-19_RECURRENCE.md)
+dokumentiert Slice 25. Die Berichte vom
 [17. November](docs/ZWISCHENBERICHT_2026-11-17.md) und
 [16. November](docs/ZWISCHENBERICHT_2026-11-16.md) dokumentieren frühere
 Umsetzungsstände, Prüfergebnisse und offene Grenzen.

@@ -5,6 +5,7 @@ pub(super) mod dispatch;
 mod planning;
 mod queries;
 mod reasoning;
+mod recurrence;
 mod scheduling;
 pub(super) mod suspension;
 pub(super) use planning::capacity_query;
@@ -176,6 +177,7 @@ impl Journal {
         control::initialize(&connection)?;
         dispatch::initialize(&connection, config)?;
         deadlines::initialize(&connection)?;
+        recurrence::initialize(&connection)?;
         Ok(Self {
             connection,
             operator,

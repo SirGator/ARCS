@@ -48,7 +48,11 @@ impl TaskRuntime {
             }],
             target_schema_id: route.target_schema_id.clone(),
             allowed_capabilities: route.allowed_capabilities.clone(),
-            constraints: route.constraints.clone(),
+            constraints: if route.recurrence.is_some() {
+                self.recurring_constraints(sequence, &route.constraints)?
+            } else {
+                route.constraints.clone()
+            },
             budget: route.budget.clone(),
         };
         let Some(result) = self.reason_for_task(

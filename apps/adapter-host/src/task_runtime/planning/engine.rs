@@ -5,24 +5,12 @@ use arcs::core::Artifact;
 use arcs::reasoning::{ContextSelection, ReasoningRequestV2, ReasoningStatus};
 
 impl TaskRuntime {
-    pub(in crate::task_runtime) fn route_for_job(
+    pub(in crate::task_runtime) fn plan_step_route(
         &self,
         host: &Host,
         sequence: u64,
         id: &str,
     ) -> Result<ReasoningRoute, HostError> {
-        let route = self.raw_route_for_job(host, sequence, id)?;
-        self.apply_saved_reasoner(host, sequence, route)
-    }
-    pub(in crate::task_runtime) fn raw_route_for_job(
-        &self,
-        host: &Host,
-        sequence: u64,
-        id: &str,
-    ) -> Result<ReasoningRoute, HostError> {
-        if let Some(route) = self.config.routes.iter().find(|r| r.id == id) {
-            return Ok(route.clone());
-        }
         let (parent, version, node, input) = self
             .journal
             .dynamic_origin(sequence)?

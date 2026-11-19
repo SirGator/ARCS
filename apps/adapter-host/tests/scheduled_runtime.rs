@@ -79,6 +79,12 @@ impl Fixture {
     fn config(&self) -> RuntimeConfig {
         RuntimeConfig::load(self.directory.join("runtime.json")).unwrap()
     }
+    fn recurring(&self, occurrences: u32) {
+        let mut config = self.read("runtime.json");
+        config["routes"][0]["recurrence"] =
+            json!({"every_ms": MONTH, "max_occurrences": occurrences});
+        self.write("runtime.json", config);
+    }
     fn open(&self) -> (Host, TaskRuntime) {
         let host = Host::open(self.directory.join("host.json")).unwrap();
         let runtime = TaskRuntime::open(&host, self.config()).unwrap();
@@ -520,5 +526,237 @@ fn a_legacy_single_activation_journal_keeps_its_due_date_and_receipt_when_upgrad
     assert_eq!(f.invocations(), 1);
     assert!(runtime.scheduled_history(1, None, 0).is_err());
     assert!(runtime.scheduled_history(1, Some(0), 1).unwrap().is_empty());
+    host.shutdown().unwrap();
+}
+
+#[test]
+fn recurring_checks_resume_on_the_original_grid_and_coalesce_missed_dates() {
+    let f = Fixture::new(Value::Null);
+    f.recurring(5);
+    let (mut host, mut runtime) = f.open();
+    let first = runtime
+        .tick_at(&mut host, NOW)
+        .unwrap()
+        .ready_for_review
+        .remove(0);
+    assert_eq!(runtime.report(0).unwrap().capacity_used, 0);
+    assert_eq!(
+        runtime.report(0).unwrap().next_wake_unix_ms,
+        Some(NOW + MONTH)
+    );
+    host.shutdown().unwrap();
+    drop((runtime, host));
+
+    let (mut host, mut runtime) = f.open();
+    let late = NOW + 3 * MONTH + 11;
+    let third = runtime
+        .tick_at(&mut host, late)
+        .unwrap()
+        .ready_for_review
+        .remove(0);
+    assert_eq!(third.input_version_id, first.input_version_id);
+    assert_ne!(third.request_version_id, first.request_version_id);
+    let receipt = runtime
+        .check_occurrences_after(first.sequence, first.sequence, 1)
+        .unwrap()
+        .remove(0);
+    assert_eq!(receipt.occurrence, 3);
+    assert_eq!(receipt.sequence, third.sequence);
+    assert_eq!(receipt.due_unix_ms, NOW + 3 * MONTH);
+    assert_eq!(receipt.admitted_at_unix_ms, late);
+    assert_eq!(receipt.skipped_before, 2);
+    let request = host
+        .store()
+        .get(&third.request_version_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        request.payload["invocation"]["constraints"]["task_recurrence"],
+        json!(receipt)
+    );
+    for time in [late, NOW + MONTH, NOW + 4 * MONTH - 1] {
+        assert!(
+            runtime
+                .tick_at(&mut host, time)
+                .unwrap()
+                .ready_for_review
+                .is_empty()
+        );
+    }
+    assert_eq!(f.invocations(), 2);
+    let last = runtime
+        .tick_at(&mut host, NOW + 4 * MONTH)
+        .unwrap()
+        .ready_for_review
+        .remove(0);
+    let summary = runtime.report(0).unwrap();
+    assert_eq!(summary.next_wake_unix_ms, None);
+    assert_eq!(summary.recurring_checks[0].skipped_occurrences, 2);
+    assert_eq!(summary.recurring_checks[0].last_sequence, last.sequence);
+    assert_eq!(
+        runtime
+            .check_occurrences_after(first.sequence, 0, 10)
+            .unwrap()
+            .len(),
+        3
+    );
+    assert!(
+        runtime
+            .recurring_checks_after(first.sequence, 1)
+            .unwrap()
+            .is_empty()
+    );
+    assert_no_authority(&host);
+    host.shutdown().unwrap();
+    drop((runtime, host));
+
+    let (mut host, mut runtime) = f.open();
+    assert!(
+        runtime
+            .tick_at(&mut host, NOW + 8 * MONTH)
+            .unwrap()
+            .recurring_jobs
+            .is_empty()
+    );
+    assert_eq!(
+        runtime.completed_after(0, 10).unwrap(),
+        [first, third, last]
+    );
+    assert_eq!(f.invocations(), 3);
+    host.shutdown().unwrap();
+}
+
+#[test]
+fn recurring_admission_rolls_back_and_an_open_occurrence_blocks_the_next() {
+    let f = Fixture::new(Value::Null);
+    f.recurring(4);
+    let mut config = f.read("runtime.json");
+    config["max_pending_jobs"] = json!(2);
+    f.write("runtime.json", config);
+    let (mut host, mut runtime) = f.open();
+    let first = runtime
+        .tick_at(&mut host, NOW)
+        .unwrap()
+        .ready_for_review
+        .remove(0);
+    let db = f.db("runtime");
+    db.execute_batch(
+        "CREATE TRIGGER fail_occurrence BEFORE INSERT ON runtime_check_occurrences
+        WHEN NEW.occurrence>0 BEGIN SELECT RAISE(ABORT,'test occurrence admission failure'); END;",
+    )
+    .unwrap();
+    assert!(runtime.tick_at(&mut host, NOW + MONTH).is_err());
+    assert_eq!(
+        runtime.report(0).unwrap().next_wake_unix_ms,
+        Some(NOW + MONTH)
+    );
+    assert_eq!(runtime.report(0).unwrap().capacity_used, 0);
+    assert_eq!(f.invocations(), 1);
+    db.execute_batch(
+        "DROP TRIGGER fail_occurrence;
+        CREATE TRIGGER fail_completion BEFORE UPDATE ON runtime_jobs
+        WHEN NEW.route_id LIKE 'check:%' AND NEW.state='ready_for_review'
+        BEGIN SELECT RAISE(ABORT,'test operational completion failure'); END;",
+    )
+    .unwrap();
+    host.shutdown().unwrap();
+    drop((runtime, host));
+
+    let (mut host, mut runtime) = f.open();
+    assert!(runtime.tick_at(&mut host, NOW + MONTH).is_err());
+    let admitted = runtime
+        .check_occurrences_after(first.sequence, first.sequence, 10)
+        .unwrap();
+    assert_eq!(admitted.len(), 1);
+    assert_eq!(admitted[0].occurrence, 1);
+    assert_eq!(f.invocations(), 2);
+    host.shutdown().unwrap();
+    drop((runtime, host));
+    db.execute_batch("DROP TRIGGER fail_completion").unwrap();
+
+    let (mut host, mut runtime) = f.open();
+    let recovered = runtime.tick_at(&mut host, NOW + 3 * MONTH).unwrap();
+    assert!(recovered.recurring_jobs.is_empty());
+    assert_eq!(recovered.ready_for_review[0].sequence, admitted[0].sequence);
+    assert_eq!(f.invocations(), 2);
+    let next = runtime.tick_at(&mut host, NOW + 3 * MONTH).unwrap();
+    assert_eq!(next.ready_for_review.len(), 1);
+    let history = runtime
+        .check_occurrences_after(first.sequence, 0, 10)
+        .unwrap();
+    assert_eq!(
+        history.iter().map(|row| row.occurrence).collect::<Vec<_>>(),
+        [0, 1, 3]
+    );
+    assert_eq!(history[2].skipped_before, 1);
+    assert_eq!(f.invocations(), 3);
+    host.shutdown().unwrap();
+}
+
+#[test]
+fn new_tasks_and_recurring_checks_share_a_single_queue_slot_across_restart() {
+    let f = Fixture::new(Value::Null);
+    f.recurring(5);
+    let (mut host, mut runtime) = f.open();
+    let first = runtime
+        .tick_at(&mut host, NOW)
+        .unwrap()
+        .ready_for_review
+        .remove(0);
+    f.enqueue("input", "second", "project:second");
+    let second = runtime.tick_at(&mut host, NOW + MONTH).unwrap();
+    assert!(second.recurring_jobs.is_empty());
+    assert_eq!(second.ready_for_review.len(), 1);
+    assert_ne!(
+        second.ready_for_review[0].input_version_id,
+        first.input_version_id
+    );
+    host.shutdown().unwrap();
+    drop((runtime, host));
+
+    let (mut host, mut runtime) = f.open();
+    f.enqueue("input", "third", "project:third");
+    let recurrence = runtime.tick_at(&mut host, NOW + 2 * MONTH).unwrap();
+    assert_eq!(recurrence.recurring_jobs.len(), 1);
+    assert_eq!(recurrence.ready_for_review.len(), 1);
+    assert_eq!(
+        recurrence.ready_for_review[0].input_version_id,
+        first.input_version_id
+    );
+    let third = runtime.tick_at(&mut host, NOW + 2 * MONTH).unwrap();
+    assert_eq!(third.discovered_jobs, 1);
+    assert!(third.recurring_jobs.is_empty());
+    assert_eq!(third.ready_for_review.len(), 1);
+    assert_eq!(runtime.recurring_checks_after(0, 10).unwrap().len(), 3);
+    assert_eq!(f.invocations(), 4);
+    host.shutdown().unwrap();
+}
+
+#[test]
+fn invalid_recurrence_is_rejected_before_any_work_is_admitted() {
+    let f = Fixture::new(Value::Null);
+    f.recurring(4);
+    let config = f.read("runtime.json");
+    let mut host = Host::open(f.directory.join("host.json")).unwrap();
+    for (field, value) in [
+        ("recurrence", json!({"every_ms":0,"max_occurrences":4})),
+        (
+            "recurrence",
+            json!({"every_ms":MONTH,"max_occurrences":10_001}),
+        ),
+        ("activation", json!({"kind":"after_delay","delay_ms":1})),
+        (
+            "allowed_capabilities",
+            json!([{"adapter_id":"example.solver","capability_id":"solution.propose"}]),
+        ),
+        ("constraints", json!({"task_recurrence":null})),
+    ] {
+        let mut invalid = config.clone();
+        invalid["routes"][0][field] = value;
+        f.write("runtime.json", invalid);
+        assert!(TaskRuntime::open(&host, f.config()).is_err(), "{field}");
+        assert!(!f.directory.join("runtime.sqlite").exists());
+    }
+    assert_eq!(f.invocations(), 0);
     host.shutdown().unwrap();
 }

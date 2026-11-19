@@ -1,4 +1,7 @@
 //! Zeit- und Ereignisaktivierung derselben Runtime; keine eigenen Worker.
+mod recurrence;
+pub(super) use recurrence::occurrence_route_id;
+pub use recurrence::{CheckOccurrence, CheckSeries, Recurrence};
 use std::collections::BTreeMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 

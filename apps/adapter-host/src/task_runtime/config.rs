@@ -83,6 +83,8 @@ pub struct ReasoningRoute {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub activation: Option<super::scheduler::Activation>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recurrence: Option<super::scheduler::Recurrence>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub memory: Option<arcs::reasoning::context::MemoryPolicy>,
     /// Ohne diese Option bleibt die Route eine reine Reasoning-/Review-Route.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -164,6 +166,9 @@ impl RuntimeConfig {
                 ));
             }
             validate_route_contract(host, route, &mut manifests)?;
+            if let Some(recurrence) = &route.recurrence {
+                recurrence.validate(route)?;
+            }
             if let Some(plan) = &route.plan {
                 plan.validate(host, route, &mut manifests)?;
             }

@@ -51,6 +51,7 @@ impl PlanningConfig {
         for template in &self.templates {
             let route = &template.route;
             if route.plan.is_some()
+                || route.recurrence.is_some()
                 || !route.dependencies.is_empty()
                 || (route.goal.is_none() && !route.allowed_capabilities.is_empty())
                 || !ids.insert(&route.id)
