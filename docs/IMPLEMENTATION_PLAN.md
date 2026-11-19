@@ -301,6 +301,22 @@
 > Konsolidierung, kalibrierte Unsicherheit, Widerruf laufender Aktionen und
 > allgemeine Neuplanung bleiben offen; die Phasen sind damit nicht abgenommen.
 
+> Zweiundzwanzigster Slice gemäß v3 §12 RSN-01/LNG-01, §13 TEST-04/TEST-05
+> und v2 RSN-01/LNG-04/LNG-08: Ein ausführbarer Anwendungsnachweis verbindet
+> echte externe Modellinferenz, begrenzten Gedächtnisabruf, zwei einzelne
+> Testfreigaben, einen simulierten Abstand von 90 Tagen und vier Host-Neustarts.
+> Ein vollständiger Lauf mit Qwen2.5 14,8B besteht mit sechs Modellaufrufen,
+> genau zwei Simulatorwirkungen und unverändertem abgeschlossenen Replay.
+> Fünf vorangegangene Modellfehlversuche bleiben dokumentiert. Die Vorabprüfung
+> begrenzt die Testfreigaben auf das bekannte Simulatorprogramm. Inferenz bleibt
+> außerhalb des Core. Der externe Adapter bindet ausdrücklich konfigurierte
+> Referenzmetadaten aus dem gelieferten Kontext; fachliche Aussagen bleiben
+> Modellantworten. Fünf Prozess-Tests sichern den Runner mit deterministischen
+> externen Reasonern ab. v2 RSN-01 ist damit abgenommen; die weiteren genannten
+> Anforderungen bleiben teilweise umgesetzt. Allgemeine Modellqualität,
+> unbekannte Aufgaben ohne Routen, langfristiger realer Betrieb und autonome
+> Drohnensuche bleiben eigene Abnahmen.
+
 **Leitbild:** ARCS ist ein universeller Agent. Es soll sich einfach bedienen lassen, beliebige kompatible Systeme verbinden, eigenständig Probleme lösen und langfristige Aufgaben über Monate verfolgen.
 
 ## 1. Verbindliche Architekturregeln
@@ -399,7 +415,7 @@ Ziel: Der Artifact Store wird nicht durch ein zweites Memory-System ersetzt, son
 
 Ziel: ARCS verwendet unterschiedliche Lösungsverfahren zweckmäßig.
 
-- [ ] **RSN-01:** Ein echtes lokales LLM mit ungefähr 14B Parametern über Reasoning V2 testen.
+- [x] **RSN-01:** Ein echtes lokales LLM mit ungefähr 14B Parametern über Reasoning V2 testen. Nachweis: [14,8B-Inferenzbericht](ZWISCHENBERICHT_2026-11-19_INFERENCE.md).
 - [ ] **RSN-02:** Jev beziehungsweise das gewählte entscheidungsorientierte Modell als unabhängigen Adapter integrieren.
 - [ ] **RSN-03:** Deterministische Solver und Regeln als gleichwertige Alternativen erhalten.
 - [ ] **RSN-04:** Einheitliche strukturierte Ergebnisse, Fehlermeldungen und Herkunftsinformationen verwenden.

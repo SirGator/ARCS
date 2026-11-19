@@ -1,0 +1,15 @@
+{
+  "adapter_id": "llm.text",
+  "capability_id": "llm.submit",
+  "schema_id": "arcs.input.v1",
+  "events": [
+    {
+      "id": "live-two-step",
+      "subject": "live-two-step",
+      "reference": "live-two-step",
+      "payload": {
+        "raw_text": "Schalte den Lüfter ein und dann wieder aus."
+      }
+    }
+  ]
+}

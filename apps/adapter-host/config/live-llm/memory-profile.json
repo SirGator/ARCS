@@ -1,0 +1,16 @@
+{
+  "adapter_id": "memory.input",
+  "capability_id": "memory.capture",
+  "schema_id": "arcs.note.project_memory.v1",
+  "events": [
+    {
+      "id": "live-memory",
+      "subject": "live-qualification",
+      "reference": "live-memory:1",
+      "payload": {
+        "body": "Betreiberhinweis zum Simulator: actuation_count zählt Zustandswechsel. Erfolg muss mit frischen Vorher-/Nachherdaten belegt werden.",
+        "private_note": "LIVE_PRIVATE_NOTE_MUST_STAY_LOCAL"
+      }
+    }
+  ]
+}

@@ -1,0 +1,387 @@
+diff --git a/README.md b/README.md
+index aaa89f7..e7b75a5 100644
+--- a/README.md
++++ b/README.md
+@@ -129,6 +129,53 @@ Tool-Aufrufe, Refusals, fehlende Tokenmessung und Budgetüberschreitungen werden
+ abgewiesen. Eine normale `no_solution`-Antwort hält das Ziel ohne Aktion an.
+ Das Modell bekommt keine Freigabe oder unmittelbare Ausführungsmöglichkeit.
+
++Optional kann ein Profil `"reference_policy": "deduplicate"` setzen. Dann
++werden wiederholte Nennungen derselben bereits erlaubten Version in
++`candidate.referenced_versions` zu einer geordneten eindeutigen Liste
++kanonisiert. Der Adapter prüft zuerst jede ID gegen den gelieferten Kontext.
++Unbekannte IDs, ungültige Typen und doppelte Fähigkeiten bleiben Fehler;
++Payloads und darin enthaltene Evidenzlisten werden nicht verändert. Die
++Anzahl entfernter Wiederholungen steht unter
++`trace.details.adapter_normalization.duplicate_reference_mentions_removed`.
++Die Policy gehört zur Journalidentität; für einen Wechsel neue Journale
++verwenden. Ohne diese Option bleibt der bisherige strikte Vertrag erhalten.
++
++Mit `"reference_policy": "context"` liefert das Modell keine
++`candidate.referenced_versions`. Der Adapter trägt dort die tatsächlichen
++Kontextversionen als Transport-Provenienz ein. Das ist keine Behauptung, das
++Modell habe jede Quelle inhaltlich bestätigt. Für ausdrücklich deklarierte
++Referenz-Metadaten im Payload unterstützt das Profil zusätzlich:
++
++```json
++{
++  "reference_policy": "context",
++  "context_reference_fields": {
++    "arcs.goal_assessment_candidate.v1": {
++      "evidence_version_ids": [
++        "/constraints/goal_runtime/before",
++        "/constraints/goal_runtime/after"
++      ]
++    }
++  }
++}
++```
++
++Die Bindungen lesen Objektpfade unter `constraints`; am Ziel sind eine
++Versions-ID, eine Liste oder ein Objekt mit Versions-IDs erlaubt. Jede ID muss
++bereits im gelieferten Kontext stehen. Nur vorhandene Top-Level-Schemafelder
++vom Typ Array von Strings sind zulässig; Kardinalität und ein vorhandenes
++Item-Enum werden geprüft. Semantische Skalare wie `effect`, `goal_status`
++oder ein boolescher Gerätebefehl können nicht gebunden werden.
++
++Gebundene Felder werden aus einer Kopie des dem Modell gezeigten Schemas
++entfernt und nach der Antwort aus den geprüften Eingaben ergänzt. Das Modell
++muss diese Metadaten weglassen; ein eigener Wert wird abgewiesen. Alle
++fachlichen Felder und angeforderten Fähigkeiten bleiben Modellantworten.
++Der Trace kennzeichnet `adapter_bound_context_references` und die tatsächlichen
++`adapter_bound_reference_fields`. Das Originalschema und die verbindliche
++Core-Prüfung bleiben bestehen. Auch diese Einstellungen gehören zur
++Journalidentität und erfordern bei einem Wechsel neue Journale.
++
+ Bei Ollama übergibt der Adapter zusätzlich einen aus dem Auftrag gebildeten
+ Antwortvertrag an die [strukturierte JSON-Ausgabe](https://docs.ollama.com/capabilities/structured-outputs).
+ Er begrenzt das Antwortformat, die zulässigen Fähigkeiten und Kontext-IDs;
+diff --git a/llm_api/adapter.py b/llm_api/adapter.py
+index 05d7f3f..c14a4a7 100644
+--- a/llm_api/adapter.py
++++ b/llm_api/adapter.py
+@@ -8,6 +8,7 @@ import sys
+ import time
+
+ from . import VERSION
++from .references import validate_fields, prepare as prepare_references
+ from .providers import PROVIDERS, ProviderError, build_request, parse_response
+ from .transport import TransportError, post, validate_endpoint
+
+@@ -56,7 +57,7 @@ def decode(value):
+     return json.loads(value, object_pairs_hook=_pairs, parse_constant=invalid)
+
+
+-def response_contract(invocation, target_schema):
++def response_contract(invocation, target_schema, context_references=False):
+     """Decoder-Vertrag für lokale Modelle, ohne fachliche Entscheidungen."""
+     versions = [item["version_id"] for item in invocation["context"]]
+     capabilities = invocation["allowed_capabilities"]
+@@ -68,6 +69,9 @@ def response_contract(invocation, target_schema):
+                  "required": ["payload", "required_capabilities", "referenced_versions"],
+                  "properties": {"payload": target_schema, "required_capabilities": permissions,
+                                 "referenced_versions": references}}
++    if context_references:
++        candidate["required"].remove("referenced_versions")
++        del candidate["properties"]["referenced_versions"]
+     return {"type": "object", "additionalProperties": False,
+             "required": ["status", "explanation", "candidates"],
+             "properties": {"status": {"type": "string", "enum": ["solved", "no_solution"]},
+@@ -93,7 +97,7 @@ def setting(value):
+ def load_profile(path):
+     path = Path(path).resolve()
+     profile = decode(path.read_bytes())
+-    allowed = {"adapter_id", "provider", "model", "endpoint", "api_key_env", "target_schemas", "instructions_file", "provider_options", "max_api_response_bytes"}
++    allowed = {"adapter_id", "provider", "model", "endpoint", "api_key_env", "target_schemas", "instructions_file", "provider_options", "max_api_response_bytes", "reference_policy", "context_reference_fields"}
+     if not isinstance(profile, dict) or set(profile) - allowed:
+         raise ValueError("Invalid profile fields")
+     for field in ("adapter_id", "provider", "model"):
+@@ -109,6 +113,9 @@ def load_profile(path):
+     profile["api_key_env"] = profile.get("api_key_env", KEY_ENVS[profile["provider"]])
+     if profile["api_key_env"] is not None and (not isinstance(profile["api_key_env"], str) or not profile["api_key_env"].isidentifier()):
+         raise ValueError("api_key_env must name an environment variable, never contain a key")
++    reference_policy = profile.get("reference_policy", "strict")
++    if not isinstance(reference_policy, str) or reference_policy not in ("strict", "deduplicate", "context"):
++        raise ValueError("reference_policy must be strict, deduplicate or context")
+     instructions = profile.pop("instructions_file", None)
+     profile["instructions"] = (path.parent / instructions).read_text(encoding="utf-8") if instructions else ""
+     schemas = profile.get("target_schemas")
+@@ -123,6 +130,7 @@ def load_profile(path):
+     options = profile.setdefault("provider_options", {})
+     if not isinstance(options, dict) or set(options) - {"token_field", "json_mode", "api_version"}:
+         raise ValueError("Invalid provider options")
++    validate_fields(profile)
+     return profile
+
+
+@@ -199,6 +207,10 @@ class Reasoner:
+             raise AdapterError("Context exceeds reasoning budget")
+         if not isinstance(inv.get("allowed_capabilities"), list):
+             raise AdapterError("Missing allowed capabilities")
++        try:
++            prepare_references(self.profile, inv)
++        except ValueError as failure:
++            raise AdapterError(str(failure)) from failure
+
+     def call(self, inv):
+         started = time.monotonic()
+@@ -207,13 +219,21 @@ class Reasoner:
+         key = os.environ.get(key_env, "") if key_env else None
+         if key_env and (not key or any(ord(c) < 32 or ord(c) == 127 for c in key)):
+             raise AdapterError("Missing or invalid API credential in environment variable " + key_env, "unavailable")
+-        system = SYSTEM + "\nOperator's task-domain instructions:\n" + profile["instructions"]
++        target_schema, bound_fields = prepare_references(profile, inv)
++        context_references = profile.get("reference_policy") == "context"
++        system = SYSTEM
++        if context_references:
++            system = system.replace(',"referenced_versions":["..."]', '')
++            system += "\nThe adapter attaches transport provenance. OMIT candidate.referenced_versions."
++        if bound_fields:
++            system += "\nThe adapter binds these payload reference arrays: " + ", ".join(bound_fields) + ". OMIT them; do not supply or invent their values."
++        system += "\nOperator's task-domain instructions:\n" + profile["instructions"]
+         user = encode({"objective": inv["objective"], "context": inv["context"], "constraints": inv["constraints"],
+-                       "target_schema": profile["target_schemas"][inv["target_schema_id"]],
++                       "target_schema": target_schema,
+                        "allowed_capabilities": inv["allowed_capabilities"], "max_candidates": budget["max_candidates"]})
+         endpoint, headers, body = build_request(profile["provider"], profile["model"], profile["endpoint"], system, user,
+                                                budget["max_output_tokens"], key, profile["provider_options"],
+-                                               response_schema=response_contract(inv, profile["target_schemas"][inv["target_schema_id"]])
++                                               response_schema=response_contract(inv, target_schema, context_references)
+                                                if profile["provider"] == "ollama" else None)
+         timeout = budget["max_runtime_ms"] - int((time.monotonic() - started) * 1000)
+         if timeout <= 0:
+@@ -242,19 +262,42 @@ class Reasoner:
+             raise ProviderError("Invalid LLM explanation")
+         versions = {item["version_id"] for item in inv["context"]}
+         allowed = {encode(cap) for cap in inv["allowed_capabilities"]}
++        context_references = self.profile.get("reference_policy") == "context"
++        _, bound_fields = prepare_references(self.profile, inv)
+         proposals = []
++        duplicates_removed = 0
+         for candidate in candidates:
+-            if not isinstance(candidate, dict) or set(candidate) != {"payload", "required_capabilities", "referenced_versions"}:
++            expected_fields = {"payload", "required_capabilities"} if context_references else {"payload", "required_capabilities", "referenced_versions"}
++            if not isinstance(candidate, dict) or set(candidate) != expected_fields:
+                 raise ProviderError("Invalid LLM candidate fields")
+-            refs, caps = candidate["referenced_versions"], candidate["required_capabilities"]
+-            if not isinstance(refs, list) or any(not isinstance(ref, str) or ref not in versions for ref in refs) or len(set(refs)) != len(refs):
+-                raise ProviderError("LLM cited unknown or duplicate context versions")
++            refs = [item["version_id"] for item in inv["context"]] if context_references else candidate["referenced_versions"]
++            caps = candidate["required_capabilities"]
++            payload = candidate["payload"]
++            if bound_fields:
++                if not isinstance(payload, dict) or any(field in payload for field in bound_fields):
++                    raise ProviderError("Model supplied adapter-bound reference fields")
++                payload = {**payload, **bound_fields}
++            if not isinstance(refs, list) or any(not isinstance(ref, str) or ref not in versions for ref in refs):
++                raise ProviderError("LLM cited an unknown context version")
++            if len(set(refs)) != len(refs):
++                if self.profile.get("reference_policy", "strict") != "deduplicate":
++                    raise ProviderError("LLM cited duplicate context versions")
++                unique_refs = list(dict.fromkeys(refs))
++                duplicates_removed += len(refs) - len(unique_refs)
++                refs = unique_refs
+             if not isinstance(caps, list) or any(encode(cap) not in allowed for cap in caps) or len({encode(cap) for cap in caps}) != len(caps):
+                 raise ProviderError("LLM requested unavailable or duplicate capabilities")
+-            proposals.append({"schema_id": inv["target_schema_id"], **candidate})
++            proposals.append({"schema_id": inv["target_schema_id"], **candidate, "payload": payload, "referenced_versions": refs})
++        details = {"model": self.profile["model"], "explanation": explanation}
++        if context_references:
++            details["adapter_bound_context_references"] = True
++        if bound_fields:
++            details["adapter_bound_reference_fields"] = bound_fields
++        if duplicates_removed:
++            details["adapter_normalization"] = {"duplicate_reference_mentions_removed": duplicates_removed}
+         return {"invocation_id": inv["invocation_id"], "request_id": inv["request_id"], "status": status, "candidates": proposals,
+                 "trace": {"method": "llm", "implementation": "external-llm-api/" + self.profile["provider"], "version": VERSION,
+-                          "iterations": None, "output_tokens": tokens, "details": {"model": self.profile["model"], "explanation": explanation}}}
++                          "iterations": None, "output_tokens": tokens, "details": details}}
+
+
+ def serve(reasoner, reader, writer):
+diff --git a/llm_api/references.py b/llm_api/references.py
+new file mode 100644
+index 0000000..2532754
+--- /dev/null
++++ b/llm_api/references.py
+@@ -0,0 +1,60 @@
++"""Explicit transport provenance from supplied context, never semantic verdicts."""
++import copy
++import re
++
++
++def validate_fields(profile):
++    bindings = profile.get("context_reference_fields", {})
++    if not isinstance(bindings, dict) or len(bindings) > 16:
++        raise ValueError("Invalid context reference fields")
++    if bindings and profile.get("reference_policy") != "context":
++        raise ValueError("Context reference fields require reference_policy context")
++    for schema_id, fields in bindings.items():
++        schema = profile["target_schemas"].get(schema_id)
++        if not schema or not isinstance(fields, dict) or not 1 <= len(fields) <= 16:
++            raise ValueError("Invalid reference binding schema")
++        for field, pointers in fields.items():
++            definition = schema.get("properties", {}).get(field, {})
++            if (not isinstance(field, str) or not field or len(field) > 128
++                    or definition.get("type") != "array" or definition.get("items", {}).get("type") != "string"
++                    or not isinstance(pointers, list) or not 1 <= len(pointers) <= 8
++                    or any(not isinstance(p, str) or not p.startswith("/constraints/") or len(p) > 512
++                           or re.search(r"~(?![01])", p) for p in pointers)):
++                raise ValueError("Bindings only support declared reference arrays and constraint pointers")
++
++
++def prepare(profile, invocation):
++    """Remove only explicitly bound metadata fields from the model's schema.
++
++    Their values must be exact versions already in context. The model still
++    produces every semantic field, including effect, goal status and actions.
++    """
++    schema = copy.deepcopy(profile["target_schemas"][invocation["target_schema_id"]])
++    bound = {}
++    versions = {item["version_id"] for item in invocation["context"]}
++    for field, pointers in profile.get("context_reference_fields", {}).get(invocation["target_schema_id"], {}).items():
++        values = []
++        for pointer in pointers:
++            value = invocation
++            try:
++                for part in pointer.split("/")[1:]:
++                    value = value[part.replace("~1", "/").replace("~0", "~")]
++            except (KeyError, TypeError):
++                raise ValueError("Missing reference binding input") from None
++            items = list(value.values()) if isinstance(value, dict) else value if isinstance(value, list) else [value]
++            for item in items:
++                if not isinstance(item, str) or item not in versions:
++                    raise ValueError("Reference binding points outside supplied context")
++                if item not in values:
++                    values.append(item)
++        definition = schema["properties"][field]
++        if len(values) < definition.get("minItems", 0) or len(values) > definition.get("maxItems", len(versions)):
++            raise ValueError("Reference binding violates target cardinality")
++        allowed = definition.get("items", {}).get("enum")
++        if allowed is not None and any(item not in allowed for item in values):
++            raise ValueError("Reference binding violates target enum")
++        bound[field] = values
++        del schema["properties"][field]
++        if field in schema.get("required", []):
++            schema["required"].remove(field)
++    return schema, bound
+diff --git a/tests/test_adapter.py b/tests/test_adapter.py
+index b82a8bb..1ef1201 100644
+--- a/tests/test_adapter.py
++++ b/tests/test_adapter.py
+@@ -147,6 +147,115 @@ class AdapterTests(unittest.TestCase):
+                     self.assertEqual(fields["referenced_versions"]["items"]["enum"], ["v1"])
+                     self.assertEqual(body["options"]["temperature"], 0)
+
++    def test_duplicate_reference_normalization_is_opt_in_and_preserves_order_payload_and_replay(self):
++        value = answer(); value["candidates"][0]["referenced_versions"] = ["v1", "v2", "v1", "v2"]
++        original = copy.deepcopy(value)
++        server = self.server(result=value)
++        profile = self.profile(server)
++        with self.assertRaisesRegex(AdapterError, "duplicate context"):
++            self.reasoner(profile, "strict.sqlite").reason(self.with_two_versions())
++        profile = {**profile, "reference_policy": "deduplicate"}
++        reasoner = self.reasoner(profile, "normalized.sqlite")
++        response = reasoner.reason(self.with_two_versions())
++        self.assertEqual(response["candidates"][0]["referenced_versions"], ["v1", "v2"])
++        self.assertEqual(response["candidates"][0]["payload"], original["candidates"][0]["payload"])
++        self.assertEqual(response["trace"]["details"]["adapter_normalization"], {"duplicate_reference_mentions_removed": 2})
++        count = len(server.requests)
++        self.assertEqual(reasoner.reason(self.with_two_versions()), response)
++        self.assertEqual(len(server.requests), count)
++        self.assertEqual(value, original)
++
++    def with_two_versions(self):
++        inv = invocation(); item = copy.deepcopy(inv["context"][0]); item["version_id"] = "v2"; inv["context"].append(item)
++        return inv
++
++    def test_normalization_never_admits_unknown_nonstring_or_duplicate_capabilities(self):
++        for refs, caps in [(["v1", "v1", "invented"], []), (["v1", {}], []), (["v1"], [{"adapter_id":"x","capability_id":"y"}]*2), (["v1"], [{"adapter_id":"x","capability_id":"y"}])]:
++            value = answer(); value["candidates"][0].update(referenced_versions=refs, required_capabilities=caps)
++            server = self.server(result=value)
++            profile = {**self.profile(server), "reference_policy": "deduplicate"}
++            inv = invocation()
++            if len(caps) == 2:
++                inv["allowed_capabilities"] = [caps[0]]
++            with self.assertRaises(AdapterError):
++                self.reasoner(profile, str(len(self.reasoners))+".sqlite").reason(inv)
++
++    def test_reference_policy_configuration_is_validated_without_adding_an_implicit_default(self):
++        (self.directory / "schema.json").write_text(encode(SCHEMA))
++        config = {"adapter_id":"test.llm", "provider":"ollama", "model":"local-model",
++                  "target_schemas":{SCHEMA["$id"]:"schema.json"}}
++        path = self.directory / "profile.json"; path.write_text(encode(config))
++        self.assertNotIn("reference_policy", load_profile(path))
++        for invalid in (None, True, 1, [], "unknown"):
++            path.write_text(encode({**config, "reference_policy":invalid}))
++            with self.assertRaisesRegex(ValueError, "reference_policy"):
++                load_profile(path)
++        for valid in ("strict", "deduplicate", "context"):
++            path.write_text(encode({**config, "reference_policy":valid}))
++            self.assertEqual(load_profile(path)["reference_policy"], valid)
++
++    def bound_profile(self, server):
++        schema = copy.deepcopy(SCHEMA)
++        schema["properties"]["evidence"] = {"type":"array","minItems":1,"items":{"type":"string"}}
++        schema["required"].append("evidence")
++        return {**self.profile(server, "ollama"), "reference_policy":"context",
++                "target_schemas":{SCHEMA["$id"]:schema},
++                "context_reference_fields":{SCHEMA["$id"]:{"evidence":["/constraints/before","/constraints/after"]}}}
++
++    def bound_invocation(self):
++        inv = self.with_two_versions(); inv["constraints"] = {"before":{"source":"v1"},"after":{"source":"v2"}}
++        return inv
++
++    def test_bound_references_are_derived_only_from_context_without_altering_semantic_values(self):
++        value = answer(); del value["candidates"][0]["referenced_versions"]
++        server = self.server("ollama", result=value); profile = self.bound_profile(server)
++        reasoner = self.reasoner(profile)
++        result = reasoner.reason(self.bound_invocation())
++        self.assertEqual(result["candidates"][0]["payload"], {"value":True,"evidence":["v1","v2"]})
++        self.assertEqual(result["candidates"][0]["referenced_versions"], ["v1","v2"])
++        self.assertTrue(result["trace"]["details"]["adapter_bound_context_references"])
++        fields = server.requests[0][2]["format"]["properties"]["candidates"]["items"]
++        self.assertNotIn("referenced_versions", fields["properties"])
++        self.assertNotIn("evidence", fields["properties"]["payload"]["properties"])
++        self.assertIn("evidence", profile["target_schemas"][SCHEMA["$id"]]["properties"])
++        count = len(server.requests); self.assertEqual(reasoner.reason(self.bound_invocation()), result)
++        self.assertEqual(len(server.requests), count)
++
++    def test_model_cannot_override_bound_reference_metadata_or_gain_capabilities(self):
++        for mutation in ("payload", "wrapper", "capability"):
++            value = answer(); candidate = value["candidates"][0]; del candidate["referenced_versions"]
++            if mutation == "payload": candidate["payload"]["evidence"] = ["invented"]
++            if mutation == "wrapper": candidate["referenced_versions"] = ["invented"]
++            if mutation == "capability": candidate["required_capabilities"] = [{"adapter_id":"x","capability_id":"act"}]
++            server = self.server("ollama", result=value)
++            with self.assertRaises(AdapterError):
++                self.reasoner(self.bound_profile(server), mutation+".sqlite").reason(self.bound_invocation())
++
++    def test_missing_unknown_and_cardinality_violating_bindings_fail_before_api(self):
++        server = self.server("ollama"); profile = self.bound_profile(server)
++        for index, constraints in enumerate(({}, {"before":{"source":"invented"},"after":{}}, {"before":{},"after":{}})):
++            inv = self.bound_invocation(); inv["constraints"] = constraints
++            with self.assertRaises(AdapterError):
++                self.reasoner(profile, str(index)+".sqlite").reason(inv)
++        self.assertFalse(server.requests)
++
++    def test_binding_declarations_cannot_write_semantic_scalar_fields(self):
++        from llm_api.references import validate_fields
++        server = self.server("ollama"); profile = self.bound_profile(server)
++        for fields in ({"value":["/constraints/before"]}, {"missing":["/constraints/before"]}, {"evidence":["/context"]}, {"evidence":["/constraints/~bad"]}):
++            invalid = copy.deepcopy(profile); invalid["context_reference_fields"][SCHEMA["$id"]] = fields
++            with self.assertRaises(ValueError): validate_fields(invalid)
++        invalid = copy.deepcopy(profile); invalid["reference_policy"] = "strict"
++        with self.assertRaises(ValueError): validate_fields(invalid)
++
++    def test_reference_policy_is_part_of_journal_identity_without_changing_old_profiles(self):
++        server = self.server(); profile = self.profile(server)
++        self.assertNotIn("reference_policy", profile)
++        self.reasoner(profile).reason(invocation())
++        with self.assertRaisesRegex(ValueError, "identity conflict"):
++            self.reasoner({**profile, "reference_policy":"deduplicate"})
++        self.assertNotIn("reference_policy", profile)
++
+     def test_replay_survives_restart_without_another_api_call_and_conflicts_fail(self):
+         server = self.server()
+         profile = self.profile(server)

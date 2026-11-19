@@ -1,0 +1,27 @@
+{
+  "adapter_id": "llm.assessor",
+  "provider": "ollama",
+  "model": {
+    "env": "ARCS_LLM_MODEL",
+    "default": "qwen2.5:14b"
+  },
+  "endpoint": {
+    "env": "ARCS_LLM_ENDPOINT",
+    "default": "http://127.0.0.1:11434/api/chat"
+  },
+  "api_key_env": null,
+  "target_schemas": {
+    "arcs.fan_candidate.v1": "../../../../../llm-api/examples/fan/fan-candidate.schema.json",
+    "arcs.goal_assessment_candidate.v1": "../../../../../llm-api/examples/fan/assessment.schema.json"
+  },
+  "instructions_file": "assessor-instructions.md",
+  "reference_policy": "context",
+  "context_reference_fields": {
+    "arcs.goal_assessment_candidate.v1": {
+      "evidence_version_ids": [
+        "/constraints/goal_runtime/before",
+        "/constraints/goal_runtime/after"
+      ]
+    }
+  }
+}

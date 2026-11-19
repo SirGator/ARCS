@@ -1,0 +1,135 @@
+{
+  "config_version": 1,
+  "runtime_id": "live-llm-qualification",
+  "journal": "../../../../var/live-llm/14b-bound/runtime.sqlite",
+  "interval_ms": 20,
+  "max_events_per_tick": 1000,
+  "max_jobs_per_tick": 4,
+  "max_pending_jobs": 100,
+  "routes": [
+    {
+      "id": "text-task",
+      "source": {
+        "adapter_id": "llm.text",
+        "capability_id": "llm.submit"
+      },
+      "input_schema_id": "arcs.input.v1",
+      "payload_fields": [
+        "raw_text"
+      ],
+      "reasoner": {
+        "adapter_id": "llm.planner",
+        "capability_id": "solution.propose"
+      },
+      "method": "llm",
+      "objective": "Interpretiere die originale Textaufgabe anhand des verfügbaren Kontexts. Schlage genau einen erlaubten Schritt zum Ziel vor oder melde no_solution.",
+      "target_schema_id": "arcs.fan_candidate.v1",
+      "allowed_capabilities": [
+        {
+          "adapter_id": "llm.fan",
+          "capability_id": "fan.set"
+        }
+      ],
+      "constraints": {},
+      "budget": {
+        "max_context_items": 16,
+        "max_context_bytes": 32768,
+        "max_output_bytes": 8192,
+        "max_candidates": 1,
+        "max_runtime_ms": 300000,
+        "max_iterations": null,
+        "max_output_tokens": 2048
+      },
+      "goal": {
+        "max_rounds": 2,
+        "max_wait_ticks": 100,
+        "sources": [
+          {
+            "id": "fan-state",
+            "capability": {
+              "adapter_id": "llm.fan",
+              "capability_id": "fan.read"
+            },
+            "schema_id": "arcs.state.fan.v1",
+            "payload_fields": [
+              "device_id",
+              "enabled",
+              "actuation_count"
+            ],
+            "query": {
+              "schema_id": "arcs.request.fan.v1",
+              "payload": {
+                "device_id": "fan-01"
+              }
+            }
+          }
+        ],
+        "actions": [
+          {
+            "capability": {
+              "adapter_id": "llm.fan",
+              "capability_id": "fan.set"
+            },
+            "verification_schema_id": "arcs.policy_candidate.fan_cycle.v1"
+          }
+        ],
+        "approval": {
+          "mode": "manual"
+        },
+        "assessment": {
+          "capability": {
+            "adapter_id": "llm.assessor",
+            "capability_id": "solution.propose"
+          },
+          "method": "llm",
+          "objective": "Prüfe zuerst, ob die Textaufgabe bereits erfüllt ist. Nach einer Aktion bewerte die tatsächliche Wirkung und das Ziel anhand der frischen Quellen.",
+          "constraints": {},
+          "budget": {
+            "max_context_items": 16,
+            "max_context_bytes": 32768,
+            "max_output_bytes": 8192,
+            "max_candidates": 1,
+            "max_runtime_ms": 300000,
+            "max_iterations": null,
+            "max_output_tokens": 2048
+          }
+        },
+        "execution_payload_fields": [
+          "result"
+        ],
+        "initial_assessment": true,
+        "between_rounds": {
+          "kind": "after_delay",
+          "delay_ms": 7776000000
+        },
+        "exclusive_resources": [
+          "qualification.simulated-fan"
+        ]
+      },
+      "max_lifetime_ms": 10368000000,
+      "memory": {
+        "scopes": [
+          {
+            "filter": {
+              "schema_id": "arcs.note.project_memory.v1",
+              "subject": "input:12:memory.input:14:memory.capture:18:live-qualification"
+            },
+            "payload_fields": [
+              "body"
+            ]
+          }
+        ],
+        "relations": [],
+        "search": {
+          "max_depth": 0,
+          "max_visited": 16,
+          "max_edges": 16,
+          "max_candidates": 4
+        },
+        "max_items": 1,
+        "max_bytes": 2048
+      }
+    }
+  ],
+  "max_concurrent_reasoning": 2
+}

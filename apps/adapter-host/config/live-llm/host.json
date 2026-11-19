@@ -1,0 +1,91 @@
+{
+  "config_version": 1,
+  "database": "../../../../var/live-llm/14b-bound/core.sqlite",
+  "node_id": "live-llm-qualification",
+  "schemas": [
+    "../../../../adapters/simulated-fan/schemas/temperature.schema.json",
+    "../../../../adapters/simulated-fan/schemas/request-temperature.schema.json",
+    "../../../../adapters/simulated-fan/schemas/request-fan.schema.json",
+    "../../../../adapters/simulated-fan/schemas/fan-candidate.schema.json",
+    "../../../../adapters/simulated-fan/schemas/fan-state.schema.json",
+    "../../../../adapters/simulated-fan/schemas/fan-execution-result.schema.json",
+    "../llm-tasks/policy.schema.json",
+    "../memory/note.schema.json"
+  ],
+  "adapters": [
+    {
+      "program": "../../../../target/debug/arcs-json-input",
+      "profile": "memory-profile.json",
+      "args": [
+        {
+          "path": "../../../../var/live-llm/14b-bound/notes.sqlite"
+        }
+      ],
+      "grant_file": "../memory/memory-grant.json",
+      "timeout_ms": 15000
+    },
+    {
+      "program": "../../../../target/debug/arcs-json-input",
+      "profile": "input-profile.json",
+      "args": [
+        {
+          "path": "../../../../var/live-llm/14b-bound/input.sqlite"
+        }
+      ],
+      "grant_file": "../llm-tasks/input-grant.json",
+      "timeout_ms": 15000
+    },
+    {
+      "program": "../../../../target/debug/arcs-simulated-fan",
+      "profile": "../llm-tasks/fan-profile.json",
+      "args": [
+        {
+          "path": "../../../../var/live-llm/14b-bound/fan.sqlite"
+        },
+        "--adapter-id",
+        "llm.fan"
+      ],
+      "grant_file": "../llm-tasks/fan-grant.json",
+      "timeout_ms": 15000
+    },
+    {
+      "program": "../../../../../llm-api/arcs-llm-api",
+      "profile": "planner-profile.json",
+      "args": [
+        {
+          "path": "../../../../var/live-llm/14b-bound/planner.sqlite"
+        }
+      ],
+      "grant_file": "planner-grant.json",
+      "timeout_ms": 305000,
+      "inherit_env": [
+        "ARCS_LLM_MODEL",
+        "ARCS_LLM_ENDPOINT"
+      ],
+      "reasoning_resources": {
+        "local-llm": 1
+      }
+    },
+    {
+      "program": "../../../../../llm-api/arcs-llm-api",
+      "profile": "assessor-profile.json",
+      "args": [
+        {
+          "path": "../../../../var/live-llm/14b-bound/assessor.sqlite"
+        }
+      ],
+      "grant_file": "assessor-grant.json",
+      "timeout_ms": 305000,
+      "inherit_env": [
+        "ARCS_LLM_MODEL",
+        "ARCS_LLM_ENDPOINT"
+      ],
+      "reasoning_resources": {
+        "local-llm": 1
+      }
+    }
+  ],
+  "resource_pools": {
+    "local-llm": 1
+  }
+}

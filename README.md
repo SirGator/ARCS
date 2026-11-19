@@ -39,7 +39,8 @@ ergänzt Slice 18. Der
 dokumentiert Slice 19; der
 [Bericht zur Wiederverbindung](docs/ZWISCHENBERICHT_2026-11-18_RECONNECT.md)
 ergänzt Slice 20. Der [Bericht zu Gedächtnisbewertungen](docs/ZWISCHENBERICHT_2026-11-18_EPISTEMIC.md)
-dokumentiert Slice 21. Die Berichte vom
+dokumentiert Slice 21. Der [Inferenzbericht](docs/ZWISCHENBERICHT_2026-11-19_INFERENCE.md)
+beschreibt den ausführbaren Modell- und Wiederaufnahmenachweis von Slice 22. Die Berichte vom
 [17. November](docs/ZWISCHENBERICHT_2026-11-17.md) und
 [16. November](docs/ZWISCHENBERICHT_2026-11-16.md) dokumentieren frühere
 Umsetzungsstände, Prüfergebnisse und offene Grenzen.
@@ -105,6 +106,11 @@ Task-Versuche und Freigaben bleiben erhalten.
 halten Gültigkeitszeiträume, strittige Aussagen, Widerrufe und Ersatzversionen
 im gemeinsamen Artifact-Netz fest. Eine optionale Abrufpolicy berücksichtigt
 diese Bewertungen mit dauerhaft belegten Kontextentscheidungen.
+
+[Persistente Ziele mit echter Inferenz](apps/adapter-host/examples/persistent-goal.md)
+verbinden lokale Modelle mit zwei einzeln freigegebenen Simulatorschritten,
+Erinnerungskontext, simulierten 90 Tagen und wiederholten Host-Neustarts.
+Der Runner bewahrt auch fehlgeschlagene Modellversuche auf.
 
 ## Projektstruktur
 
