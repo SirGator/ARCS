@@ -1,4 +1,6 @@
-//! Lokale JSON-Lines-Statusausgabe für Desktop-Bedienung; keine neue Effekt-API.
+//! Local JSON Lines status and optional operator control for the running host.
+mod control;
+pub use control::MonitorControl;
 use std::io::Write;
 use std::path::Path;
 use std::thread;
@@ -26,12 +28,26 @@ fn summary(artifact: Artifact) -> Value {
 /// Stop wird zwischen den begrenzten Host-Runden und während der Pausen
 /// geprüft. Laufende Adapterdialoge behalten ihre bisherigen Deadlines.
 pub fn run(
-    mut host: Host,
+    host: Host,
     runtime: Option<RuntimeConfig>,
     stop_file: &Path,
     max_ticks: Option<u64>,
     writer: &mut impl Write,
 ) -> Result<(), String> {
+    run_with_control(host, runtime, stop_file, max_ticks, None, writer)
+}
+
+pub fn run_with_control(
+    mut host: Host,
+    runtime: Option<RuntimeConfig>,
+    stop_file: &Path,
+    max_ticks: Option<u64>,
+    control: Option<&MonitorControl>,
+    writer: &mut impl Write,
+) -> Result<(), String> {
+    if control.is_some() && runtime.is_none() {
+        return Err("monitor control requires a task runtime".into());
+    }
     let interval = runtime
         .as_ref()
         .map(|config| config.interval_ms)
@@ -57,10 +73,11 @@ pub fn run(
                 "max_external_reference_bytes":adapter.grant().max_external_reference_bytes}));
         }
     }
-    emit(
-        writer,
-        json!({"event":"ready","catalog":host.adapter_catalog(),"has_runtime":runtime.is_some(),"input_contracts":input_contracts}),
-    )?;
+    let mut ready = json!({"event":"ready","catalog":host.adapter_catalog(),"has_runtime":runtime.is_some(),"input_contracts":input_contracts});
+    if let Some(control) = control {
+        ready["control"] = control.description();
+    }
+    emit(writer, ready)?;
     let outcome = (|| {
         if runtime.is_none() && !stop_file.exists() {
             host.run_configured_operations().map_err(fail)?;
@@ -76,6 +93,15 @@ pub fn run(
             .checked_sub(Duration::from_secs(1))
             .unwrap_or_else(Instant::now);
         while !stop_file.exists() && max_ticks.is_none_or(|max| ticks < max) {
+            let controlled = match (control, runtime.as_mut()) {
+                (Some(control), Some(runtime)) => {
+                    control.apply_pending(&mut host, runtime, writer)?
+                }
+                _ => false,
+            };
+            if stop_file.exists() {
+                break;
+            }
             let completed = if let Some(runtime) = &mut runtime {
                 runtime
                     .tick(&mut host)
@@ -89,6 +115,7 @@ pub fn run(
             };
             ticks += 1;
             if last_snapshot.elapsed() >= Duration::from_secs(1)
+                || controlled
                 || completed > 0
                 || max_ticks == Some(ticks)
             {

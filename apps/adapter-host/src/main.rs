@@ -2,45 +2,16 @@ use std::ffi::OsString;
 use std::io::Read;
 use std::path::PathBuf;
 
-use arcs::approval::ApprovalDecision;
-use arcs::core::{Actor, ActorType, VersionId};
 use arcs_host::Host;
 use arcs_host::memory::MemoryCommand;
+use arcs_host::monitor::MonitorControl;
+use arcs_host::operator_command::{CommandReceipt, GoalCommand, OperatorCommand, PlanCommand};
 use arcs_host::task_runtime::scheduler::SeriesControlCommand;
 use arcs_host::task_runtime::suspension::TaskControlCommand;
 use arcs_host::task_runtime::{RuntimeConfig, TaskRuntime};
 use serde::Deserialize;
 
-const USAGE: &str = "usage: arcs-host --config <host.json> [--list-adapters | --find-capabilities <query.json> | --reasoning-attempts <query.json> | --memory-command <command.json> | [--monitor --stop-file <path>] [--runtime <runtime.json>] [--ticks <count>] [--stop-file <path>] | --runtime <runtime.json> [--goal-command <command.json> | --plan-command <command.json> | --task-command <command.json> | --series-command <command.json>]]";
-
-#[derive(Deserialize)]
-#[serde(tag = "command", rename_all = "snake_case", deny_unknown_fields)]
-enum PlanCommand {
-    Cancel { sequence: u64, reason: String },
-}
-
-#[derive(Deserialize)]
-#[serde(tag = "command", rename_all = "snake_case", deny_unknown_fields)]
-enum GoalCommand {
-    ReleaseResources {
-        sequence: u64,
-        reservation_versions: Vec<VersionId>,
-        evidence_versions: Vec<VersionId>,
-        operator_id: String,
-        reason: String,
-    },
-    Review {
-        sequence: u64,
-        candidate_version_id: VersionId,
-        decision: ApprovalDecision,
-        operator_id: String,
-        reason: String,
-    },
-    Cancel {
-        sequence: u64,
-        reason: String,
-    },
-}
+const USAGE: &str = "usage: arcs-host --config <host.json> [--list-adapters | --find-capabilities <query.json> | --reasoning-attempts <query.json> | --memory-command <command.json> | [--monitor --stop-file <path> [--control-stdin]] [--runtime <runtime.json>] [--ticks <count>] [--stop-file <path>] | --runtime <runtime.json> [--goal-command <command.json> | --plan-command <command.json> | --task-command <command.json> | --series-command <command.json>]]";
 
 fn read_control_command<T: serde::de::DeserializeOwned>(
     path: PathBuf,
@@ -97,6 +68,7 @@ fn run() -> Result<(), String> {
     let mut stop_file = None;
     let mut list_adapters = false;
     let mut monitor = false;
+    let mut control_stdin = false;
     let mut goal_command = None;
     let mut plan_command = None;
     let mut task_command = None;
@@ -112,6 +84,10 @@ fn run() -> Result<(), String> {
         }
         if argument == "--monitor" && !monitor {
             monitor = true;
+            continue;
+        }
+        if argument == "--control-stdin" && !control_stdin {
+            control_stdin = true;
             continue;
         }
         let value = args.next().ok_or(USAGE)?;
@@ -147,6 +123,9 @@ fn run() -> Result<(), String> {
         }
     }
     let config = config.ok_or(USAGE)?;
+    if control_stdin && (!monitor || runtime.is_none()) {
+        return Err(USAGE.into());
+    }
     let runtime_commands = [&goal_command, &plan_command, &task_command, &series_command]
         .into_iter()
         .filter(|command| command.is_some())
@@ -281,11 +260,16 @@ fn run() -> Result<(), String> {
         .map_err(|e| e.to_string())?;
     let mut host = Host::open(config).map_err(|e| e.to_string())?;
     if monitor {
-        return arcs_host::monitor::run(
+        let control = control_stdin
+            .then(MonitorControl::from_stdin)
+            .transpose()
+            .map_err(|error| error.to_string())?;
+        return arcs_host::monitor::run_with_control(
             host,
             runtime,
             stop_file.as_deref().unwrap(),
             ticks,
+            control.as_ref(),
             &mut std::io::stdout().lock(),
         );
     }
@@ -317,73 +301,23 @@ fn run() -> Result<(), String> {
         serde_json::to_value(catalog)
     } else if let Some(config) = runtime {
         let mut runtime = TaskRuntime::open(&host, config).map_err(|e| e.to_string())?;
-        let series_receipt = series_command
-            .map(|command| {
-                runtime
-                    .control_check_series(&mut host, command)
-                    .map_err(|e| e.to_string())
-            })
-            .transpose()?;
-        let report = if series_receipt.is_some() {
-            runtime.report(0).map_err(|e| e.to_string())?
-        } else if let Some(command) = task_command {
-            runtime
-                .control_task(&mut host, command)
+        let command = task_command
+            .map(OperatorCommand::Task)
+            .or_else(|| series_command.map(OperatorCommand::Series))
+            .or_else(|| plan_command.map(OperatorCommand::Plan))
+            .or_else(|| goal_command.map(OperatorCommand::Goal));
+        let (report, receipt) = if let Some(command) = command {
+            let receipt = command
+                .apply(&mut runtime, &mut host)
                 .map_err(|e| e.to_string())?;
-            runtime.report(0).map_err(|e| e.to_string())?
-        } else if let Some(PlanCommand::Cancel { sequence, reason }) = plan_command {
-            runtime
-                .cancel_plan(&mut host, sequence, reason)
-                .map_err(|e| e.to_string())?;
-            runtime.report(0).map_err(|e| e.to_string())?
-        } else if let Some(command) = goal_command {
-            match command {
-                GoalCommand::ReleaseResources {
-                    sequence,
-                    reservation_versions,
-                    evidence_versions,
-                    operator_id,
-                    reason,
-                } => runtime.reconcile_goal_resources(
-                    &host,
-                    sequence,
-                    &reservation_versions,
-                    &evidence_versions,
-                    Actor {
-                        actor_type: ActorType::Human,
-                        id: operator_id,
-                    },
-                    reason,
-                ),
-                GoalCommand::Review {
-                    sequence,
-                    candidate_version_id,
-                    decision,
-                    operator_id,
-                    reason,
-                } => runtime.review_goal(
-                    &host,
-                    sequence,
-                    &candidate_version_id,
-                    decision,
-                    Actor {
-                        actor_type: ActorType::Human,
-                        id: operator_id,
-                    },
-                    reason,
-                ),
-                GoalCommand::Cancel { sequence, reason } => {
-                    runtime.cancel_goal(&host, sequence, reason)
-                }
-            }
-            .map_err(|e| e.to_string())?;
-            runtime.report(0).map_err(|e| e.to_string())?
+            (runtime.report(0).map_err(|e| e.to_string())?, receipt)
         } else {
-            runtime
+            let report = runtime
                 .run(&mut host, ticks, || {
                     stop_file.as_ref().is_some_and(|path| path.exists())
                 })
-                .map_err(|e| e.to_string())?
+                .map_err(|e| e.to_string())?;
+            (report, None)
         };
         let reservations = runtime
             .exclusive_resources(&host)
@@ -397,7 +331,7 @@ fn run() -> Result<(), String> {
         let reconnects = host.adapter_reconnections().map_err(|e| e.to_string())?;
         host.shutdown().map_err(|e| e.to_string())?;
         serde_json::to_value(report).map(|mut value| {
-            if let Some(receipt) = series_receipt {
+            if let Some(CommandReceipt::Series(receipt)) = receipt {
                 value["series_control"] =
                     serde_json::to_value(receipt).expect("series control receipt serialization");
             }

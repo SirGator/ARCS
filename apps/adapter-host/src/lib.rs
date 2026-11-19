@@ -4,6 +4,7 @@ pub mod config;
 mod error;
 pub mod memory;
 pub mod monitor;
+pub mod operator_command;
 pub mod pipeline;
 mod process_environment;
 pub mod resource_policy;

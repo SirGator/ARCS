@@ -572,6 +572,8 @@ fn invalid_monitor_start_does_not_create_a_store_or_remove_an_existing_stop_file
         vec!["--monitor"],
         vec!["--monitor", "--monitor", "--stop-file", "missing"],
         vec!["--monitor", "--list-adapters", "--stop-file", "missing"],
+        vec!["--control-stdin", "--runtime", "missing"],
+        vec!["--monitor", "--control-stdin", "--stop-file", "missing"],
     ] {
         let output = Command::new(env!("CARGO_BIN_EXE_arcs-host"))
             .arg("--config")

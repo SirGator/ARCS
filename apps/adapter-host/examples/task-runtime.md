@@ -104,6 +104,61 @@ Adapter und gibt seinen Bericht aus. Vor einem weiteren Dauerlauf muss die
 von dir erzeugte Stop-Datei wieder entfernt werden. Ein harter Prozessabbruch
 unterbricht den aktuellen Dialog; die gespeicherte Aufgabe bleibt wiederaufnehmbar.
 
+## Steuerung im laufenden Host
+
+Starte den lokalen Monitor mit `--control-stdin`, um Betreiberbefehle während
+der Ausführung an seinen Prozess zu senden.
+
+```bash
+./target/debug/arcs-host --config host.json --runtime runtime.json \
+  --monitor --control-stdin --stop-file /tmp/arcs-live.stop
+```
+
+Das Ereignis `ready` enthält dann das Feld `control` mit `protocol_version: 1`.
+Sobald der Snapshot eine Serie mit Sequenz `1` und `control_revision` `0`
+zeigt, kann der Betreiber beispielsweise diese einzelne, mit Enter
+abgeschlossene Zeile an die Standardeingabe senden. Sequenz und Revision
+müssen zur angezeigten Serie passen.
+
+```json
+{"request_id":"pause-1","control":{"kind":"series","command":{"sequence":1,"expected_revision":0,"command_id":"maintenance-pause-1","operator":{"actor_type":"human","id":"operator.simon"},"reason":"Wartung","change":"pause"}}}
+```
+
+Unter `command` steht derselbe Inhalt wie in der Datei des jeweiligen
+CLI-Befehls.
+
+| `kind` | CLI-Befehl | Operationen |
+| --- | --- | --- |
+| `task` | `--task-command` | Aufgabe pausieren oder fortsetzen |
+| `series` | `--series-command` | Prüfserie pausieren, fortsetzen oder abbrechen |
+| `plan` | `--plan-command` | Plan abbrechen |
+| `goal` | `--goal-command` | Goal-Vorschlag freigeben oder ablehnen, Goal abbrechen oder Ressourcen anhand von Belegen klären |
+
+Die Antwort `control_result` erscheint im selben JSON-Lines-Strom wie die
+Snapshots. `request_id` korreliert sie mit der Eingabe. `ok: true` bestätigt
+den angenommenen Befehl und gibt bei Aufgabe oder Serie den gespeicherten
+`receipt` zurück. Die weitere Verarbeitung und ihre Ergebnisse stehen in den
+Snapshots. `ok: false` enthält einen Fehlercode und eine Meldung. Bei nicht
+zuordenbaren Zeilen ist `request_id` `null`. Wer einen Aufgaben- oder
+Serienbefehl nach einem verlorenen Beleg wiederholt, verwendet dessen
+unveränderte `command_id`. Für Goal-Freigaben nennt der Befehl weiterhin die
+konkrete aktuelle Candidate-Version.
+
+Der Monitor nimmt vollständige Zeilen bis 65.536 Byte an. Die interne Queue
+fasst 16 Zeilen und der Host verarbeitet bis zu acht davon vor einer Runde.
+Bei gefüllter Eingabequeue setzt der lokale Schreibkanal den Schreibenden unter
+Backpressure. Ein Programm, das den Monitor über Pipes startet, liest dessen
+Ausgabe nebenläufig zu seiner Eingabe. Beim Schließen der Standardeingabe
+werden vollständige bereits gepufferte Befehle weiter verarbeitet. Der
+Monitor arbeitet bis zur Stop-Datei oder einer gesetzten Tickgrenze weiter.
+Die Reaktionszeit richtet sich nach dem Tickintervall und den laufenden
+synchronen Adapterdialogen.
+
+Die Standardeingabe des Host-Prozesses ist der lokale Betreiberkanal. Eine
+startende Anwendung entscheidet, wer darauf schreiben darf, und authentifiziert
+ihre Betreiber. Adapter haben ihre eigenen Protokollkanäle. Die CLI ohne
+`--control-stdin` bietet die bisherige reine Statusausgabe.
+
 ## Konfiguration und Grenzen
 
 Die Runtime-Konfiguration ist separat von der Anschlusskonfiguration des Hosts.

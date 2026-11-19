@@ -364,6 +364,14 @@
 > können in der Pause gespeichert werden. Beim Abbruch committen Serienzustand,
 > Auftragsabbruch und Beleg gemeinsam, bevor der Host eine späte Antwort verwirft.
 
+> Siebenundzwanzigster Schritt gemäß v3 §7.2 PAR-07/PAR-08/PAR-11 und §8.2
+> LNG-05/LNG-08/LNG-10. Der lokale Monitor kann Aufgaben-, Serien-, Plan- und
+> Goal-Befehle über seine Standardeingabe empfangen. Der vorhandene Host
+> verarbeitet höchstens acht Befehle vor jeder Runde und gibt ihre Belege im
+> Statusstrom aus. Die Befehle verwenden dieselben Runtime-Methoden wie die
+> einzelnen CLI-Kommandos. Die Laufzeitprüfung umfasst fehlerhafte Eingaben,
+> dauerhaft gespeicherte Pausen und eine versionsgebundene Simulatorfreigabe.
+
 **Leitbild:** ARCS ist ein universeller Agent. Es soll sich einfach bedienen lassen, beliebige kompatible Systeme verbinden, eigenständig Probleme lösen und langfristige Aufgaben über Monate verfolgen.
 
 ## 1. Verbindliche Architekturregeln

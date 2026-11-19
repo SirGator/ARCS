@@ -210,12 +210,13 @@ entspricht der angezeigten `control_revision` und beginnt bei 0.
 ```
 
 Die CLI übernimmt die Änderung bei gestoppter Runtime und gibt ihren Beleg
-unter `series_control` aus. Eine Anwendung, die den laufenden Host besitzt,
-kann `TaskRuntime::control_check_series` zwischen Ticks aufrufen. Für die
+unter `series_control` aus. Im laufenden Host steht die lokale Monitorsteuerung
+zur Verfügung. Eine Anwendung, die den Host besitzt, kann alternativ
+`TaskRuntime::control_check_series` zwischen Ticks aufrufen. Für die
 nächste Änderung wird eine neue `command_id` mit der aktuellen Revision
 verwendet. Dieselbe unveränderte Anweisung liefert auch nach einem Neustart
 ihren ursprünglichen Beleg. `series_control_history` liest die Belege mit
-Betreiber und Begründung seitenweise.
+Betreiber und Begründung seitenweise. [Steuerung im laufenden Host](task-runtime.md#steuerung-im-laufenden-host)
 
 - `pause` verhindert neue Termine und hält die noch offene Prüfung an.
   Eine laufende Reasoning-Antwort kann gespeichert werden. Eine Aufgabe
