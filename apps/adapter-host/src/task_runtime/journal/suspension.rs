@@ -1,5 +1,5 @@
 //! Revision-checked task control and checkpoint changes commit together.
-use super::{Journal, db};
+use super::{Journal, db, runnable};
 use crate::{
     HostError,
     task_runtime::{
@@ -13,7 +13,11 @@ use std::collections::BTreeMap;
 
 // Plans currently have a single level of generated children (nested plans are
 // rejected). This predicate automatically covers children admitted after pause.
-pub(in crate::task_runtime) const PAUSED: &str = "EXISTS(SELECT 1 FROM runtime_task_controls c WHERE c.paused=1 AND (c.sequence=j.sequence OR c.sequence=(SELECT parent_sequence FROM runtime_plan_steps WHERE sequence=j.sequence)))";
+pub(in crate::task_runtime) const PAUSED: &str = "(
+    EXISTS(SELECT 1 FROM runtime_task_controls c WHERE c.paused=1 AND
+        (c.sequence=j.sequence OR c.sequence=(SELECT parent_sequence FROM runtime_plan_steps WHERE sequence=j.sequence)))
+    OR EXISTS(SELECT 1 FROM runtime_check_occurrences o JOIN runtime_check_series s ON s.sequence=o.series
+        WHERE o.sequence=j.sequence AND s.control_state='paused'))";
 
 pub(super) fn initialize(connection: &Connection) -> Result<(), HostError> {
     connection.execute_batch("CREATE TABLE IF NOT EXISTS runtime_task_controls(
@@ -114,7 +118,9 @@ impl Journal {
             }
             return serde_json::from_str(&receipt).map_err(|e| invalid(e.to_string()));
         }
-        let active:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM runtime_jobs WHERE (sequence=?1 OR sequence IN (SELECT sequence FROM runtime_plan_steps WHERE parent_sequence=?1)) AND state IN ('pending','running','failed','awaiting_approval'))",[command.sequence as i64],|row|row.get(0)).map_err(db)?;
+        let active: bool = tx.query_row(&format!("SELECT EXISTS(SELECT 1 FROM runtime_jobs j
+            WHERE (j.sequence=?1 OR j.sequence IN (SELECT sequence FROM runtime_plan_steps WHERE parent_sequence=?1)) AND {})", runnable("j", true)),
+            [command.sequence as i64], |row| row.get(0)).map_err(db)?;
         if !active {
             return Err(invalid("task control requires unfinished work"));
         }
@@ -286,7 +292,16 @@ impl Journal {
             .map(|value| value.unwrap_or(false))
     }
     pub(in crate::task_runtime) fn paused_count(&self) -> Result<u64, HostError> {
-        self.connection.query_row(&format!("SELECT COUNT(*) FROM runtime_jobs j WHERE j.state IN ('pending','running','failed','awaiting_approval') AND {PAUSED}"),[],|row|row.get::<_,i64>(0).map(|n|n as u64)).map_err(db)
+        self.connection
+            .query_row(
+                &format!(
+                    "SELECT COUNT(*) FROM runtime_jobs j WHERE {} AND {PAUSED}",
+                    runnable("j", true)
+                ),
+                [],
+                |row| row.get::<_, i64>(0).map(|n| n as u64),
+            )
+            .map_err(db)
     }
     pub(in crate::task_runtime) fn task_controls_after(
         &self,

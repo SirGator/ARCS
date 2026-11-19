@@ -2,6 +2,10 @@
 mod recurrence;
 pub(super) use recurrence::occurrence_route_id;
 pub use recurrence::{CheckOccurrence, CheckSeries, Recurrence};
+mod series_control;
+pub use series_control::{
+    SeriesChange, SeriesControlCommand, SeriesControlEvent, SeriesControlReceipt, SeriesState,
+};
 use std::collections::BTreeMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 

@@ -396,7 +396,8 @@ impl TaskRuntime {
         let (waiting_time, waiting_event, next_wake_unix_ms) = self.journal.schedule_summary()?;
         let (recurring_checks, next_check) = if self.has_recurrence {
             (
-                self.journal.recurring_checks_for_report()?,
+                self.journal
+                    .recurring_checks_for_report(self.config.retry_failed_jobs())?,
                 self.journal.next_check()?,
             )
         } else {

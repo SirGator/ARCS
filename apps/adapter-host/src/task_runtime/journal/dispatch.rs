@@ -144,12 +144,8 @@ fn select(
             |row| row.get::<_, i64>(0).map(|n| n as usize),
         )
         .map_err(db)?;
-    let states = if include_failed {
-        "('pending','running','failed','awaiting_approval')"
-    } else {
-        "('pending','running','awaiting_approval')"
-    };
-    let sql = format!("SELECT j.sequence,j.route_id,j.input_version FROM runtime_job_priorities p JOIN runtime_jobs j ON j.sequence=p.sequence WHERE p.priority=?1 AND j.state IN {states}
+    let runnable = super::runnable("j", include_failed);
+    let sql = format!("SELECT j.sequence,j.route_id,j.input_version FROM runtime_job_priorities p JOIN runtime_jobs j ON j.sequence=p.sequence WHERE p.priority=?1 AND {runnable}
         AND NOT EXISTS(SELECT 1 FROM runtime_dispatch_visited v WHERE v.sequence=j.sequence)
         AND NOT EXISTS(SELECT 1 FROM runtime_job_schedules s WHERE s.sequence=j.sequence AND s.released_at IS NULL)
         AND NOT EXISTS(SELECT 1 FROM runtime_job_joins d WHERE d.sequence=j.sequence AND d.state!='ready')

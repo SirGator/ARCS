@@ -12,6 +12,7 @@ fn setup() -> Connection {
     .unwrap();
     super::super::reasoning::initialize(&connection).unwrap();
     super::super::suspension::initialize(&connection).unwrap();
+    super::super::recurrence::initialize(&connection).unwrap();
     initialize(&connection, &config).unwrap();
     connection
 }

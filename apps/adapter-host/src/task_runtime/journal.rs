@@ -51,10 +51,21 @@ pub(super) fn active(include_failed: bool) -> &'static str {
         "state IN ('pending','running','awaiting_approval')"
     }
 }
+pub(super) fn runnable(job: &str, include_failed: bool) -> String {
+    let states = active(include_failed).replace("state", &format!("{job}.state"));
+    if !include_failed {
+        return states;
+    }
+    // A runtime may reopen in synchronous retry mode after a series advanced
+    // past a failure in parallel mode. Historical failures stay terminal.
+    format!("({states} AND ({job}.state<>'failed' OR NOT EXISTS(
+        SELECT 1 FROM runtime_check_occurrences occurrence JOIN runtime_check_series series ON series.sequence=occurrence.series
+        WHERE occurrence.sequence={job}.sequence AND (series.last_job<>{job}.sequence OR series.control_state='cancelled'))))")
+}
 pub(super) fn pending_query(include_failed: bool) -> String {
     format!(
-        "SELECT COUNT(*) FROM runtime_jobs WHERE {}",
-        active(include_failed)
+        "SELECT COUNT(*) FROM runtime_jobs j WHERE {}",
+        runnable("j", include_failed)
     )
 }
 impl Journal {
@@ -191,6 +202,18 @@ impl Journal {
                 row.get::<_, i64>(0)
             })
             .map(|count| count as usize)
+            .map_err(db)
+    }
+    pub fn job_is_runnable(&self, sequence: u64, include_failed: bool) -> Result<bool, HostError> {
+        self.connection
+            .query_row(
+                &format!(
+                    "SELECT {} FROM runtime_jobs j WHERE sequence=?1",
+                    runnable("j", include_failed)
+                ),
+                [sequence as i64],
+                |row| row.get(0),
+            )
             .map_err(db)
     }
     pub fn start(&self, sequence: u64) -> Result<(), HostError> {

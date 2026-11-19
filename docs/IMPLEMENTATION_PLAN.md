@@ -354,8 +354,15 @@
 > gleichzeitig aus, fasst verpasste Termine zusammen und protokolliert ihre
 > Anzahl. Jeder ausgeführte Termin erhält eine eigene Reasoning-Identität.
 > Prüftermine und neue Eingaben wechseln sich bei der bevorzugten Aufnahme ab.
-> Kalenderregeln, Steuerung ganzer Serien und die Langzeitabnahme im Betrieb
-> bleiben offen.
+> Kalenderregeln und die Langzeitabnahme im Betrieb bleiben offen.
+
+> Sechsundzwanzigster Schritt gemäß v3 §7.2 PAR-07/PAR-10 und §8.2
+> LNG-04/LNG-05. Betreiber können eine ganze Prüfserie über die Host-API
+> oder `--series-command` pausieren, fortsetzen oder endgültig abbrechen.
+> Steuerungsbelege sind revisionsgebunden und wiederholbar. Eine Serienpause
+> hält verfügbare Termine und die noch offene Prüfung an. Laufende Antworten
+> können in der Pause gespeichert werden. Beim Abbruch committen Serienzustand,
+> Auftragsabbruch und Beleg gemeinsam, bevor der Host eine späte Antwort verwirft.
 
 **Leitbild:** ARCS ist ein universeller Agent. Es soll sich einfach bedienen lassen, beliebige kompatible Systeme verbinden, eigenständig Probleme lösen und langfristige Aufgaben über Monate verfolgen.
 

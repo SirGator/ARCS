@@ -109,7 +109,10 @@ impl TaskRuntime {
         };
         let (result_version_id, versions, producer, schema) = match parent.state.as_str() {
             "pending" | "running" | "awaiting_approval" => return Ok(ParentResult::Waiting),
-            "failed" if self.config.retry_failed_jobs() => {
+            "failed"
+                if self.config.retry_failed_jobs()
+                    && self.journal.job_is_runnable(parent.sequence, true)? =>
+            {
                 return Ok(ParentResult::Waiting);
             }
             "failed" | "blocked" | "rejected" | "budget_exhausted" | "cancelled" => {

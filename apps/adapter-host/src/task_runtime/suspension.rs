@@ -54,32 +54,41 @@ pub struct TaskControlStatus {
 
 impl TaskControlCommand {
     pub fn validate(&self) -> Result<(), HostError> {
-        if self.sequence == 0
-            || self.sequence > i64::MAX as u64
-            || self.expected_revision >= i64::MAX as u64
-            || self.command_id.is_empty()
-            || self.command_id.len() > 128
-            || !self
-                .command_id
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || b"._:-".contains(&b))
-            || self.reason.trim().is_empty()
-            || self.reason.len() > 2000
-            || self.reason.chars().any(char::is_control)
-            || self.operator.id.trim().is_empty()
-            || self.operator.id.len() > 128
-            || self.operator.id.chars().any(char::is_control)
-            || !matches!(
-                self.operator.actor_type,
-                ActorType::Human | ActorType::System
-            )
-        {
+        if !valid_control_fields(
+            self.sequence,
+            self.expected_revision,
+            &self.command_id,
+            &self.operator,
+            &self.reason,
+        ) {
             return Err(invalid(
                 "invalid task control identity, actor, revision or reason",
             ));
         }
         Ok(())
     }
+}
+
+pub(super) fn valid_control_fields(
+    sequence: u64,
+    expected_revision: u64,
+    command_id: &str,
+    operator: &Actor,
+    reason: &str,
+) -> bool {
+    (1..=i64::MAX as u64).contains(&sequence)
+        && expected_revision < i64::MAX as u64
+        && (1..=128).contains(&command_id.len())
+        && command_id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"._:-".contains(&byte))
+        && !reason.trim().is_empty()
+        && reason.len() <= 2000
+        && !reason.chars().any(char::is_control)
+        && !operator.id.trim().is_empty()
+        && operator.id.len() <= 128
+        && !operator.id.chars().any(char::is_control)
+        && matches!(operator.actor_type, ActorType::Human | ActorType::System)
 }
 
 impl TaskRuntime {

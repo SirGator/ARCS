@@ -1,4 +1,5 @@
 //! Operational time grid and occurrence receipts. Reasoning evidence stays in Core.
+mod control;
 use arcs::core::VersionId;
 use rusqlite::{Connection, Row, Transaction, params};
 
@@ -7,7 +8,7 @@ use crate::HostError;
 use crate::task_runtime::{
     RuntimeConfig,
     config::invalid,
-    scheduler::{CheckOccurrence, CheckSeries, Recurrence, occurrence_route_id},
+    scheduler::{CheckOccurrence, CheckSeries, Recurrence, SeriesState, occurrence_route_id},
 };
 
 pub(super) fn initialize(connection: &Connection) -> Result<(), HostError> {
@@ -21,8 +22,10 @@ pub(super) fn initialize(connection: &Connection) -> Result<(), HostError> {
             next_due INTEGER CHECK(next_due>anchor_at),
             skipped INTEGER NOT NULL DEFAULT 0 CHECK(skipped>=0),
             last_job INTEGER NOT NULL REFERENCES runtime_jobs(sequence),
+            control_revision INTEGER NOT NULL DEFAULT 0 CHECK(control_revision>=0),
+            control_state TEXT NOT NULL DEFAULT 'active' CHECK(control_state IN ('active','paused','cancelled')),
+            control_reason TEXT,
             CHECK((next_due IS NULL)=(next_occurrence=max_occurrences)));
-        CREATE INDEX IF NOT EXISTS runtime_check_due ON runtime_check_series(next_due,sequence);
         CREATE TABLE IF NOT EXISTS runtime_check_occurrences(
             sequence INTEGER PRIMARY KEY REFERENCES runtime_jobs(sequence),
             series INTEGER NOT NULL REFERENCES runtime_check_series(sequence),
@@ -36,15 +39,33 @@ pub(super) fn initialize(connection: &Connection) -> Result<(), HostError> {
             singleton INTEGER PRIMARY KEY CHECK(singleton=1),
             checks_first INTEGER NOT NULL CHECK(checks_first IN (0,1)));
         INSERT OR IGNORE INTO runtime_check_admission VALUES(1,0);
-        COMMIT;").map_err(db)
+        COMMIT;").map_err(db)?;
+    control::initialize(connection)
 }
 
-const SERIES_SELECT: &str = "SELECT s.sequence, origin.route_id, origin.input_version,
-    s.anchor_at,s.every_ms,s.max_occurrences,s.next_due,s.skipped,s.last_job,last.state
-    FROM runtime_check_series s JOIN runtime_jobs origin ON origin.sequence=s.sequence
-    JOIN runtime_jobs last ON last.sequence=s.last_job";
+const SERIES_ENABLED: &str = "s.control_state='active'";
+
+fn series_select(include_failed: bool) -> String {
+    let last_active = active(include_failed).replace("state", "last.state");
+    format!(
+        "SELECT s.sequence, origin.route_id, origin.input_version,
+        s.anchor_at,s.every_ms,s.max_occurrences,s.next_due,s.skipped,s.last_job,last.state,
+        s.control_state,s.control_revision,s.control_reason,{last_active}
+        FROM runtime_check_series s JOIN runtime_jobs origin ON origin.sequence=s.sequence
+        JOIN runtime_jobs last ON last.sequence=s.last_job"
+    )
+}
 
 fn read_series(row: &Row<'_>) -> rusqlite::Result<CheckSeries> {
+    let next_due = row.get::<_, Option<i64>>(6)?.map(|due| due as u64);
+    let unfinished = next_due.is_some() || row.get::<_, bool>(13)?;
+    let state = match row.get::<_, String>(10)?.as_str() {
+        "cancelled" => SeriesState::Cancelled,
+        "active" | "paused" if !unfinished => SeriesState::Exhausted,
+        "active" => SeriesState::Active,
+        "paused" => SeriesState::Paused,
+        _ => return Err(rusqlite::Error::InvalidQuery),
+    };
     Ok(CheckSeries {
         sequence: row.get::<_, i64>(0)? as u64,
         route_id: row.get(1)?,
@@ -52,10 +73,13 @@ fn read_series(row: &Row<'_>) -> rusqlite::Result<CheckSeries> {
         anchor_unix_ms: row.get::<_, i64>(3)? as u64,
         every_ms: row.get::<_, i64>(4)? as u64,
         max_occurrences: row.get(5)?,
-        next_due_unix_ms: row.get::<_, Option<i64>>(6)?.map(|due| due as u64),
+        next_due_unix_ms: next_due.filter(|_| state != SeriesState::Cancelled),
         skipped_occurrences: row.get(7)?,
         last_sequence: row.get::<_, i64>(8)? as u64,
         last_state: row.get(9)?,
+        state,
+        control_revision: row.get::<_, i64>(11)? as u64,
+        control_reason: row.get(12)?,
     })
 }
 
@@ -127,13 +151,16 @@ impl Journal {
         }
         let due = {
             let active_last = active(include_failed).replace("state", "last.state");
-            let mut query = tx.prepare(&format!(
-                "SELECT s.sequence,origin.route_id,origin.input_version,origin.source_sequence,
+            let mut query = tx
+                .prepare(&format!(
+                    "SELECT s.sequence,origin.route_id,origin.input_version,origin.source_sequence,
                     s.anchor_at,s.next_occurrence
                  FROM runtime_check_series s JOIN runtime_jobs last ON last.sequence=s.last_job
                  JOIN runtime_jobs origin ON origin.sequence=s.sequence
-                 WHERE s.next_due<=?1 AND NOT ({active_last}) ORDER BY s.next_due,s.sequence LIMIT ?2"
-            )).map_err(db)?;
+                 WHERE s.next_due<=?1 AND {SERIES_ENABLED} AND NOT ({active_last})
+                 ORDER BY s.next_due,s.sequence LIMIT ?2"
+                ))
+                .map_err(db)?;
             query
                 .query_map(params![now as i64, limit as i64], |row| {
                     Ok((
@@ -214,7 +241,7 @@ impl Journal {
     pub(in crate::task_runtime) fn next_check(&self) -> Result<Option<u64>, HostError> {
         self.connection
             .query_row(
-                "SELECT MIN(next_due) FROM runtime_check_series",
+                &format!("SELECT MIN(s.next_due) FROM runtime_check_series s WHERE s.next_due IS NOT NULL AND {SERIES_ENABLED}"),
                 [],
                 |row| {
                     row.get::<_, Option<i64>>(0)
@@ -226,9 +253,11 @@ impl Journal {
 
     pub(in crate::task_runtime) fn recurring_checks_for_report(
         &self,
+        include_failed: bool,
     ) -> Result<Vec<CheckSeries>, HostError> {
         let mut query = self.connection.prepare(&format!(
-            "{SERIES_SELECT} ORDER BY (s.next_due IS NULL), s.next_due, s.sequence DESC LIMIT 50"
+            "{} ORDER BY (s.next_due IS NULL OR NOT ({SERIES_ENABLED})), s.next_due, s.sequence DESC LIMIT 50",
+            series_select(include_failed)
         )).map_err(db)?;
         let rows = query.query_map([], read_series).map_err(db)?;
         rows.map(|row| row.map_err(db)).collect()
@@ -238,12 +267,14 @@ impl Journal {
         &self,
         sequence: u64,
         limit: usize,
+        include_failed: bool,
     ) -> Result<Vec<CheckSeries>, HostError> {
         validate_page(limit)?;
         let mut query = self
             .connection
             .prepare(&format!(
-                "{SERIES_SELECT} WHERE s.sequence>?1 ORDER BY s.sequence LIMIT ?2"
+                "{} WHERE s.sequence>?1 ORDER BY s.sequence LIMIT ?2",
+                series_select(include_failed)
             ))
             .map_err(db)?;
         let rows = query

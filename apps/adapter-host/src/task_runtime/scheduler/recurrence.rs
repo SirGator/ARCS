@@ -2,6 +2,7 @@ use arcs::core::VersionId;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+use super::SeriesState;
 use crate::HostError;
 use crate::task_runtime::{ReasoningRoute, TaskRuntime, TickReport, config::invalid};
 
@@ -67,6 +68,12 @@ pub struct CheckSeries {
     pub skipped_occurrences: u32,
     pub last_sequence: u64,
     pub last_state: String,
+    #[serde(default)]
+    pub state: SeriesState,
+    #[serde(default)]
+    pub control_revision: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub control_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -138,7 +145,8 @@ impl TaskRuntime {
         sequence: u64,
         limit: usize,
     ) -> Result<Vec<CheckSeries>, HostError> {
-        self.journal.recurring_checks_after(sequence, limit)
+        self.journal
+            .recurring_checks_after(sequence, limit, self.config.retry_failed_jobs())
     }
 
     pub fn check_occurrences_after(

@@ -6,11 +6,12 @@ use arcs::approval::ApprovalDecision;
 use arcs::core::{Actor, ActorType, VersionId};
 use arcs_host::Host;
 use arcs_host::memory::MemoryCommand;
+use arcs_host::task_runtime::scheduler::SeriesControlCommand;
 use arcs_host::task_runtime::suspension::TaskControlCommand;
 use arcs_host::task_runtime::{RuntimeConfig, TaskRuntime};
 use serde::Deserialize;
 
-const USAGE: &str = "usage: arcs-host --config <host.json> [--list-adapters | --find-capabilities <query.json> | --reasoning-attempts <query.json> | --memory-command <command.json> | [--monitor --stop-file <path>] [--runtime <runtime.json>] [--ticks <count>] [--stop-file <path>] | --runtime <runtime.json> [--goal-command <command.json> | --plan-command <command.json> | --task-command <command.json>]]";
+const USAGE: &str = "usage: arcs-host --config <host.json> [--list-adapters | --find-capabilities <query.json> | --reasoning-attempts <query.json> | --memory-command <command.json> | [--monitor --stop-file <path>] [--runtime <runtime.json>] [--ticks <count>] [--stop-file <path>] | --runtime <runtime.json> [--goal-command <command.json> | --plan-command <command.json> | --task-command <command.json> | --series-command <command.json>]]";
 
 #[derive(Deserialize)]
 #[serde(tag = "command", rename_all = "snake_case", deny_unknown_fields)]
@@ -40,6 +41,23 @@ enum GoalCommand {
         reason: String,
     },
 }
+
+fn read_control_command<T: serde::de::DeserializeOwned>(
+    path: PathBuf,
+    label: &str,
+) -> Result<T, String> {
+    let mut bytes = Vec::new();
+    std::fs::File::open(path)
+        .map_err(|error| error.to_string())?
+        .take(65537)
+        .read_to_end(&mut bytes)
+        .map_err(|error| error.to_string())?;
+    if bytes.len() > 65536 {
+        return Err(format!("{label} command exceeds 65536 bytes"));
+    }
+    serde_json::from_slice(&bytes).map_err(|error| error.to_string())
+}
+
 fn run() -> Result<(), String> {
     let args: Vec<OsString> = std::env::args_os().skip(1).collect();
     // Pure contract validation for local input clients. No database, adapter
@@ -82,6 +100,7 @@ fn run() -> Result<(), String> {
     let mut goal_command = None;
     let mut plan_command = None;
     let mut task_command = None;
+    let mut series_command = None;
     let mut capability_query = None;
     let mut attempt_query = None;
     let mut memory_command = None;
@@ -115,6 +134,8 @@ fn run() -> Result<(), String> {
             plan_command = Some(PathBuf::from(value));
         } else if argument == "--task-command" && task_command.is_none() {
             task_command = Some(PathBuf::from(value));
+        } else if argument == "--series-command" && series_command.is_none() {
+            series_command = Some(PathBuf::from(value));
         } else if argument == "--find-capabilities" && capability_query.is_none() {
             capability_query = Some(PathBuf::from(value));
         } else if argument == "--reasoning-attempts" && attempt_query.is_none() {
@@ -126,6 +147,10 @@ fn run() -> Result<(), String> {
         }
     }
     let config = config.ok_or(USAGE)?;
+    let runtime_commands = [&goal_command, &plan_command, &task_command, &series_command]
+        .into_iter()
+        .filter(|command| command.is_some())
+        .count();
     if memory_command.is_some()
         && (capability_query.is_some()
             || attempt_query.is_some()
@@ -134,9 +159,7 @@ fn run() -> Result<(), String> {
             || monitor
             || ticks.is_some()
             || stop_file.is_some()
-            || goal_command.is_some()
-            || plan_command.is_some()
-            || task_command.is_some())
+            || runtime_commands > 0)
     {
         return Err(USAGE.into());
     }
@@ -164,9 +187,7 @@ fn run() -> Result<(), String> {
             || monitor
             || ticks.is_some()
             || stop_file.is_some()
-            || goal_command.is_some()
-            || plan_command.is_some()
-            || task_command.is_some())
+            || runtime_commands > 0)
     {
         return Err(USAGE.into());
     }
@@ -206,16 +227,8 @@ fn run() -> Result<(), String> {
             },
         )
         .transpose()?;
-    if [
-        goal_command.is_some(),
-        plan_command.is_some(),
-        task_command.is_some(),
-    ]
-    .into_iter()
-    .filter(|value| *value)
-    .count()
-        > 1
-        || (goal_command.is_some() || plan_command.is_some() || task_command.is_some())
+    if runtime_commands > 1
+        || runtime_commands > 0
             && (runtime.is_none()
                 || list_adapters
                 || monitor
@@ -240,17 +253,14 @@ fn run() -> Result<(), String> {
         .transpose()?;
     let task_command: Option<TaskControlCommand> = task_command
         .map(|path| -> Result<TaskControlCommand, String> {
-            let mut bytes = Vec::new();
-            std::fs::File::open(path)
-                .map_err(|e| e.to_string())?
-                .take(65537)
-                .read_to_end(&mut bytes)
-                .map_err(|e| e.to_string())?;
-            if bytes.len() > 65536 {
-                return Err("task command exceeds 65536 bytes".into());
-            }
-            let command: TaskControlCommand =
-                serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+            let command: TaskControlCommand = read_control_command(path, "task")?;
+            command.validate().map_err(|e| e.to_string())?;
+            Ok(command)
+        })
+        .transpose()?;
+    let series_command: Option<SeriesControlCommand> = series_command
+        .map(|path| -> Result<SeriesControlCommand, String> {
+            let command: SeriesControlCommand = read_control_command(path, "series")?;
             command.validate().map_err(|e| e.to_string())?;
             Ok(command)
         })
@@ -307,7 +317,16 @@ fn run() -> Result<(), String> {
         serde_json::to_value(catalog)
     } else if let Some(config) = runtime {
         let mut runtime = TaskRuntime::open(&host, config).map_err(|e| e.to_string())?;
-        let report = if let Some(command) = task_command {
+        let series_receipt = series_command
+            .map(|command| {
+                runtime
+                    .control_check_series(&mut host, command)
+                    .map_err(|e| e.to_string())
+            })
+            .transpose()?;
+        let report = if series_receipt.is_some() {
+            runtime.report(0).map_err(|e| e.to_string())?
+        } else if let Some(command) = task_command {
             runtime
                 .control_task(&mut host, command)
                 .map_err(|e| e.to_string())?;
@@ -378,6 +397,10 @@ fn run() -> Result<(), String> {
         let reconnects = host.adapter_reconnections().map_err(|e| e.to_string())?;
         host.shutdown().map_err(|e| e.to_string())?;
         serde_json::to_value(report).map(|mut value| {
+            if let Some(receipt) = series_receipt {
+                value["series_control"] =
+                    serde_json::to_value(receipt).expect("series control receipt serialization");
+            }
             if !reconnects.is_empty() {
                 value["adapter_reconnections"] =
                     serde_json::to_value(reconnects).expect("reconnect report serialization");

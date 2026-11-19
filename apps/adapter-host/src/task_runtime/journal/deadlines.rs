@@ -1,7 +1,7 @@
 //! Lifetime admission, clock high-water mark and cancellation form one journal.
 use rusqlite::{Connection, OptionalExtension, Row, Transaction, params};
 
-use super::{Journal, active, db};
+use super::{Journal, db, runnable};
 use crate::HostError;
 use crate::task_runtime::{config::invalid, deadlines::TaskDeadline};
 use arcs::core::VersionId;
@@ -20,7 +20,7 @@ pub(super) fn initialize(connection: &Connection) -> Result<(), HostError> {
 fn eligible(include_failed: bool) -> String {
     format!(
         "({} OR (d.is_plan=1 AND j.state='blocked' AND EXISTS(SELECT 1 FROM runtime_plan_steps s JOIN runtime_jobs child ON child.sequence=s.sequence WHERE s.parent_sequence=j.sequence AND child.state IN ('pending','running','failed','awaiting_approval'))))",
-        active(include_failed)
+        runnable("j", include_failed)
     )
 }
 

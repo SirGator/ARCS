@@ -187,6 +187,53 @@ gespeicherten Reasoning-Request. Die Prüfungen verwenden dieselbe
 Eingabeversion. Eine konfigurierte Memory-Policy kann jeder Prüfung passenden
 Kontext bereitstellen.
 
+### Ganze Prüfserien steuern
+
+Für `--series-command` wird die `sequence` der Serie aus `recurring_checks`
+verwendet. Das ist die Sequenz der ursprünglichen Prüfung. `expected_revision`
+entspricht der angezeigten `control_revision` und beginnt bei 0.
+
+```json
+{
+  "sequence": 1,
+  "expected_revision": 0,
+  "command_id": "pause-checks-1-for-maintenance",
+  "operator": { "actor_type": "human", "id": "operator.simon" },
+  "reason": "Prüfungen während der Wartung pausieren",
+  "change": "pause"
+}
+```
+
+```bash
+./target/debug/arcs-host --config host.json --runtime runtime.json \
+  --series-command series-command.json
+```
+
+Die CLI übernimmt die Änderung bei gestoppter Runtime und gibt ihren Beleg
+unter `series_control` aus. Eine Anwendung, die den laufenden Host besitzt,
+kann `TaskRuntime::control_check_series` zwischen Ticks aufrufen. Für die
+nächste Änderung wird eine neue `command_id` mit der aktuellen Revision
+verwendet. Dieselbe unveränderte Anweisung liefert auch nach einem Neustart
+ihren ursprünglichen Beleg. `series_control_history` liest die Belege mit
+Betreiber und Begründung seitenweise.
+
+- `pause` verhindert neue Termine und hält die noch offene Prüfung an.
+  Eine laufende Reasoning-Antwort kann gespeichert werden. Eine Aufgabe
+  behält ihre Frist und ihren Queueplatz, solange sie offen ist.
+- `resume` setzt die Serie auf dem ursprünglichen Raster fort. Für verpasste
+  Termine gilt weiterhin die Regel zum jüngsten fälligen Termin. Eine
+  unabhängig gesetzte Pause der Einzelaufgabe bleibt wirksam.
+- `cancel` beendet die Serie endgültig und bricht eine noch offene Prüfung
+  mit ab. Bereits abgeschlossene Prüfungen und ältere Fehlerbelege bleiben
+  im Verlauf. Ein schon gestarteter Worker kann bis Antwort oder Frist noch
+  Ressourcen belegen. Eine verspätete Antwort öffnet die Aufgabe nicht wieder.
+
+Der Serienstatus lautet `active`, `paused`, `cancelled` oder `exhausted`.
+`exhausted` bedeutet, dass alle Termine verarbeitet sind und keine Prüfung
+mehr offen ist. `last_state` zeigt separat den Ausgang der letzten Prüfung.
+Eine pausierte Serie kann ihren geplanten nächsten Rastertermin anzeigen.
+Sie zählt während der Pause nicht zu `next_wake_unix_ms`.
+
 Unterbrechung laufender Planschritte, Kalender-/Cron-Termine, dynamisch durch
 Reasoner vorgeschlagene Wartezustände, Abhängigkeitsplanung und ein allgemein
 versioniertes Langzeit-Zielmodell bleiben offen. Die Architektur und ihre

@@ -1,3 +1,5 @@
+#[path = "scheduled_runtime/series_control.rs"]
+mod series_control;
 mod support;
 
 use std::path::PathBuf;
@@ -5,7 +7,7 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use arcs_host::Host;
-use arcs_host::task_runtime::scheduler::ScheduleState;
+use arcs_host::task_runtime::scheduler::{ScheduleState, SeriesState};
 use arcs_host::task_runtime::{RuntimeConfig, TaskRuntime};
 use serde_json::{Value, json};
 
@@ -591,6 +593,7 @@ fn recurring_checks_resume_on_the_original_grid_and_coalesce_missed_dates() {
         .remove(0);
     let summary = runtime.report(0).unwrap();
     assert_eq!(summary.next_wake_unix_ms, None);
+    assert_eq!(summary.recurring_checks[0].state, SeriesState::Exhausted);
     assert_eq!(summary.recurring_checks[0].skipped_occurrences, 2);
     assert_eq!(summary.recurring_checks[0].last_sequence, last.sequence);
     assert_eq!(
