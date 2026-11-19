@@ -11,7 +11,8 @@ pub use arcs_adapter_protocol::{RequestInvocation, RequestResponse};
 mod error;
 mod service;
 pub use error::RequestError;
-pub use service::RequestService;
+pub use service::invocation_id as request_invocation_id;
+pub use service::{PreparedRequest, RequestPreparation, RequestService};
 
 /// Port zu einem externen API-, Datenbank-, Datei- oder System-Query-Service.
 ///

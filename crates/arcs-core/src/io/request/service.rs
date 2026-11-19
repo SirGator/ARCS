@@ -1,15 +1,34 @@
-use crate::adapters::{AdapterRegistry, CapabilityContract, CapabilityRef, ProducerClass};
+use crate::adapters::{
+    AdapterGrant, AdapterRegistry, CapabilityContract, CapabilityRef, ProducerClass,
+};
 use crate::core::{
     Actor, ActorType, Artifact, ArtifactFactory, ArtifactFactoryInput, ArtifactIdGenerator, Clock,
     Provenance, SchemaId, SchemaRegistry, Source, SourceClass, Trust, TrustLevel, VersionId,
 };
 use crate::runtime::{
-    InvocationKind, InvocationService, InvocationSpec, InvocationStatus,
+    InvocationKind, InvocationService, InvocationSpec, InvocationState, InvocationStatus,
     deterministic_input_fingerprint, deterministic_invocation_id,
 };
 use crate::store::{SqliteArtifactStore, relation_kinds};
 
-use super::{RequestAdapter, RequestError, RequestInvocation};
+use super::{RequestAdapter, RequestError, RequestInvocation, RequestResponse};
+
+/// Opaque Core-owned dispatch. Workers receive only `invocation()`, never a store.
+pub struct PreparedRequest {
+    invocation: RequestInvocation,
+    request: Artifact,
+    dispatched: InvocationState,
+    grant: AdapterGrant,
+}
+impl PreparedRequest {
+    pub fn invocation(&self) -> &RequestInvocation {
+        &self.invocation
+    }
+}
+pub enum RequestPreparation {
+    Complete(Box<Artifact>),
+    Dispatch(Box<PreparedRequest>),
+}
 
 /// Eigenständiger Slice für korrelierte Datenanforderungen.
 ///
@@ -48,6 +67,23 @@ impl<'a> RequestService<'a> {
         request_version: &VersionId,
         response_schema: &SchemaId,
     ) -> Result<Artifact, RequestError> {
+        match self.prepare(endpoint, capability, request_version, response_schema)? {
+            RequestPreparation::Complete(result) => Ok(*result),
+            RequestPreparation::Dispatch(prepared) => {
+                let response = endpoint.fetch(prepared.invocation());
+                self.finish(*prepared, response)
+            }
+        }
+    }
+
+    /// Persist the exact dispatch before external I/O. Replays need no worker.
+    pub fn prepare(
+        &mut self,
+        endpoint: &dyn RequestAdapter,
+        capability: &CapabilityRef,
+        request_version: &VersionId,
+        response_schema: &SchemaId,
+    ) -> Result<RequestPreparation, RequestError> {
         if endpoint.manifest().adapter_id != capability.adapter_id {
             return Err(RequestError::Authorization(
                 crate::adapters::AdapterRegistryError::UnknownAdapter(
@@ -90,14 +126,12 @@ impl<'a> RequestService<'a> {
         }
 
         let grant = registered.grant();
-        let source_kind = grant
+        grant
             .ingress_source_kind
             .ok_or(RequestError::MissingSourceKind)?;
-        let definition = self
-            .schemas
+        self.schemas
             .get(response_schema)
-            .ok_or_else(|| RequestError::MissingRegisteredSchema(response_schema.clone()))?
-            .clone();
+            .ok_or_else(|| RequestError::MissingRegisteredSchema(response_schema.clone()))?;
         let invocation_id = invocation_id(capability, request_version, response_schema);
         let dispatched = {
             let invocations = InvocationService::new(self.store, self.schemas, self.clock);
@@ -116,6 +150,7 @@ impl<'a> RequestService<'a> {
                     .store
                     .get(&result)?
                     .ok_or(crate::runtime::InvocationError::MissingResult)
+                    .map(|artifact| RequestPreparation::Complete(Box::new(artifact)))
                     .map_err(RequestError::from);
             }
             let recovered = invocations.recover(&prepared)?;
@@ -132,9 +167,60 @@ impl<'a> RequestService<'a> {
             max_response_bytes: grant.max_payload_bytes,
         };
 
+        Ok(RequestPreparation::Dispatch(Box::new(PreparedRequest {
+            invocation,
+            request,
+            dispatched,
+            grant: grant.clone(),
+        })))
+    }
+
+    /// Validate and atomically commit on the Core thread, using the exact dispatch.
+    pub fn finish(
+        &mut self,
+        prepared: PreparedRequest,
+        response: Result<RequestResponse, crate::adapters::AdapterCallError>,
+    ) -> Result<Artifact, RequestError> {
+        let PreparedRequest {
+            invocation,
+            request,
+            dispatched,
+            grant,
+        } = prepared;
+        let capability = &invocation.capability;
+        let response_schema = &invocation.response_schema_id;
+        let invocation_id = &invocation.invocation_id;
         let outcome = (|| {
-            let response = endpoint.fetch(&invocation)?;
-            if response.invocation_id != invocation_id {
+            let (registered, descriptor) = self
+                .policy
+                .authorized_capability(&capability.adapter_id, &capability.capability_id)?;
+            if registered.grant() != &grant
+                || !matches!(&descriptor.contract,
+                CapabilityContract::Request { accepts, emits }
+                if accepts.contains(&request.schema_id) && emits.contains(response_schema))
+            {
+                return Err(RequestError::PreparedPolicyChanged);
+            }
+            let current = InvocationService::new(self.store, self.schemas, self.clock)
+                .lookup(invocation_id)?
+                .ok_or(crate::runtime::InvocationError::MissingResult)?;
+            if current != dispatched {
+                return Err(RequestError::StaleDispatch);
+            }
+            let definition = self
+                .schemas
+                .get(response_schema)
+                .ok_or_else(|| RequestError::MissingRegisteredSchema(response_schema.clone()))?
+                .clone();
+            let source_kind = grant
+                .ingress_source_kind
+                .ok_or(RequestError::MissingSourceKind)?;
+            let subject = request
+                .subject
+                .clone()
+                .ok_or_else(|| RequestError::MissingRequestSubject(request.version_id.clone()))?;
+            let response = response?;
+            if &response.invocation_id != invocation_id {
                 return Err(RequestError::InvocationResponseMismatch);
             }
             if response.external_reference.trim().is_empty() {
@@ -220,7 +306,7 @@ fn is_retryable(error: &RequestError) -> bool {
     )
 }
 
-pub(super) fn invocation_id(
+pub fn invocation_id(
     capability: &CapabilityRef,
     request: &VersionId,
     response_schema: &SchemaId,

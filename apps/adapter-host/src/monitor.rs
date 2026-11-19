@@ -185,6 +185,6 @@ fn snapshot(
         writer,
         json!({"event":"snapshot","ticks":ticks,"uptime_ms":started.elapsed().as_millis(),
         "stored_artifacts":report.stored_artifacts,"world_revision":report.world_revision,
-        "adapters":adapters,"runtime":runtime,"recent_artifacts":recent,"resource_pools":report.resource_pools,"resource_reservations":reservations,"reasoner_selections":selections,"reasoning_recoveries":recoveries,"adapter_reconnections":reconnects}),
+        "adapters":adapters,"runtime":runtime,"recent_artifacts":recent,"resource_pools":report.resource_pools,"request_workers":report.request_workers,"resource_reservations":reservations,"reasoner_selections":selections,"reasoning_recoveries":recoveries,"adapter_reconnections":reconnects}),
     )
 }

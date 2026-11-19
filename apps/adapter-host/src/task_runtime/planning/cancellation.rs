@@ -47,6 +47,6 @@ impl TaskRuntime {
         self.journal
             .cancel_plan(sequence, &reason, now_unix_ms()?)?;
         self.cleanup_control_sessions(host)?;
-        self.reap_cancelled_task_reasoning(host)
+        self.reap_abandoned_task_work(host)
     }
 }

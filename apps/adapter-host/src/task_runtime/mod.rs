@@ -11,6 +11,7 @@ mod reasoning;
 pub mod recovery;
 pub mod scheduler;
 pub mod suspension;
+mod worker_lifecycle;
 pub use config::{ReasoningRoute, RuntimeConfig};
 pub use journal::dispatch::{DispatchClassReport, DispatchReport};
 
@@ -178,16 +179,15 @@ impl TaskRuntime {
         if has_deadlines {
             self.expire_due_tasks(host, &mut report)?;
         }
-        self.reap_cancelled_task_reasoning(host)?;
+        self.reap_abandoned_task_work(host)?;
+        self.collect_paused_source_requests(host, has_deadlines, &mut report)?;
         self.collect_paused_reasoning(host, has_deadlines, live_clock, &mut report)?;
         self.cleanup_control_sessions(host)?;
         let caught_up = self.discover(host, &mut report, now_unix_ms)?;
         // Erst alte Core-Ereignisse übernehmen. Normale Inputs nur bei freier Queue.
         if caught_up
             && !report.backpressure
-            && self
-                .journal
-                .capacity(self.config.max_concurrent_reasoning == 1)?
+            && self.journal.capacity(self.config.retry_failed_jobs())?
                 < self.config.max_pending_jobs
         {
             host.poll_event_tick()?;
@@ -220,9 +220,8 @@ impl TaskRuntime {
         self.advance_dependencies(host)?;
         self.journal.begin_dispatch_tick()?;
         for _ in 0..self.config.max_jobs_per_tick {
-            let Some((sequence, route_id, input_version_id, priority)) = self
-                .journal
-                .next(self.config.max_concurrent_reasoning == 1)?
+            let Some((sequence, route_id, input_version_id, priority)) =
+                self.journal.next(self.config.retry_failed_jobs())?
             else {
                 break;
             };
@@ -286,7 +285,7 @@ impl TaskRuntime {
             .map_err(db)?;
         let mut pending: usize = transaction
             .query_row(
-                &journal::capacity_query(self.config.max_concurrent_reasoning == 1),
+                &journal::capacity_query(self.config.retry_failed_jobs()),
                 [],
                 |row| row.get::<_, i64>(0),
             )
@@ -376,7 +375,7 @@ impl TaskRuntime {
         let (running_plans, stopped_plans, review_plans) = self.journal.plan_summary()?;
         let (expired_jobs, next_deadline_unix_ms) = self
             .journal
-            .deadline_summary(self.config.max_concurrent_reasoning == 1)?;
+            .deadline_summary(self.config.retry_failed_jobs())?;
         let count = |state: &str| {
             self.journal
                 .connection
@@ -396,9 +395,7 @@ impl TaskRuntime {
             task_controls: self.journal.task_controls_report()?,
             runtime_id: self.config.runtime_id.clone(),
             ticks,
-            pending_jobs: self
-                .journal
-                .pending(self.config.max_concurrent_reasoning == 1)?,
+            pending_jobs: self.journal.pending(self.config.retry_failed_jobs())?,
             ready_for_review: count("ready_for_review")?,
             failed_jobs: count("failed")?,
             cancelled_jobs: count("cancelled")?,
@@ -420,9 +417,7 @@ impl TaskRuntime {
             next_wake_unix_ms,
             waiting_dependency,
             blocked_dependencies,
-            capacity_used: self
-                .journal
-                .capacity(self.config.max_concurrent_reasoning == 1)?,
+            capacity_used: self.journal.capacity(self.config.retry_failed_jobs())?,
             plans: self.journal.plans_for_report()?,
             planning_jobs: self.journal.planning_jobs_after(0, 50)?,
             running_plans,
@@ -491,6 +486,12 @@ fn is_core_failure(error: &HostError) -> bool {
         error,
         HostError::Store(_)
             | HostError::Reduction(_)
+            | HostError::Request {
+                source: arcs::request::RequestError::Store(_)
+                    | arcs::request::RequestError::Invocation(_)
+                    | arcs::request::RequestError::StaleDispatch,
+                ..
+            }
             | HostError::Reasoning(arcs::reasoning::ReasoningError::Store(_))
             | HostError::Reasoning(arcs::reasoning::ReasoningError::Invocation(_))
             | HostError::Reasoning(arcs::reasoning::ReasoningError::Retrieval(

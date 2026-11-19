@@ -109,7 +109,7 @@ impl TaskRuntime {
             &limits,
         )?;
         // A failed control transaction must never discard a live response.
-        self.reap_cancelled_task_reasoning(host)?;
+        self.reap_abandoned_task_work(host)?;
         for sequence in limits.keys() {
             self.cleanup_control(host, *sequence)?;
         }

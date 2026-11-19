@@ -40,7 +40,9 @@ dokumentiert Slice 19; der
 [Bericht zur Wiederverbindung](docs/ZWISCHENBERICHT_2026-11-18_RECONNECT.md)
 ergänzt Slice 20. Der [Bericht zu Gedächtnisbewertungen](docs/ZWISCHENBERICHT_2026-11-18_EPISTEMIC.md)
 dokumentiert Slice 21. Der [Inferenzbericht](docs/ZWISCHENBERICHT_2026-11-19_INFERENCE.md)
-beschreibt den ausführbaren Modell- und Wiederaufnahmenachweis von Slice 22. Die Berichte vom
+beschreibt den ausführbaren Modell- und Wiederaufnahmenachweis von Slice 22.
+Der [Bericht zu parallelen Quellenabfragen](docs/ZWISCHENBERICHT_2026-11-19_REQUESTS.md)
+ergänzt Slice 23. Die Berichte vom
 [17. November](docs/ZWISCHENBERICHT_2026-11-17.md) und
 [16. November](docs/ZWISCHENBERICHT_2026-11-16.md) dokumentieren frühere
 Umsetzungsstände, Prüfergebnisse und offene Grenzen.
@@ -431,7 +433,7 @@ Observation → Belief Update → Goal → Memory/Skill Retrieval
 | Append-only SQLite-Store und deterministisches Replay | Implementiert |
 | Artifact-Netz als bekannter Fast Path | Implementiert |
 | Externe Kamera und Pixel-Suche | In `../drone-sim`: zielunabhängige Kamera und separater Rules-Reasoner mit ausgewählten Bildbytes; noch keine autonome Suche |
-| Dauerhafte Aufgabenverarbeitung | Konfigurierbare Input-/Observe-zu-Reason-Routen, persistente Queue, Wiederaufnahme und Review-Übergabe; optional begrenztes [paralleles Reasoning](apps/adapter-host/examples/parallel-runtime.md), Polling weiterhin seriell |
+| Dauerhafte Aufgabenverarbeitung | Konfigurierbare Input-/Observe-zu-Reason-Routen, persistente Queue, Wiederaufnahme und Review-Übergabe; optional begrenztes [paralleles Reasoning](apps/adapter-host/examples/parallel-runtime.md) und [parallele Goal-Quellenabfragen](apps/adapter-host/examples/parallel-requests.md), Polling weiterhin seriell |
 | Allgemeine Zielschleife | Optional pro Route: externe Planung und Bewertung, kontrollierte Aktionen, frische Quellen, Wiederaufnahme und Rundenbudget; Lüftertest nachgewiesen |
 | Kuratiertes Reasoning | V1-Modellfall und allgemeiner V2-Port; externe Solver und Modell-Testadapter, noch kein echter Modellanbieter |
 | Verification → Approval → Action → Execution → Outcome | Implementiert |

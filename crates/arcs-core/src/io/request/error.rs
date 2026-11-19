@@ -29,6 +29,8 @@ pub enum RequestError {
     MissingRegisteredSchema(SchemaId),
     MissingSourceKind,
     InvocationResponseMismatch,
+    PreparedPolicyChanged,
+    StaleDispatch,
     InvalidExternalReference,
     ExternalReferenceTooLarge {
         actual: usize,

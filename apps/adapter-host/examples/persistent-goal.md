@@ -134,7 +134,8 @@ bleiben für die Ursachenprüfung erhalten; Antworten werden nicht passend gemac
 Die Operator-Konfiguration begrenzt jeden Modellaufruf auf fünf Minuten und
 2.048 Ausgabetokens. Das Host-Protokoll hat einen gesonderten Timeout von
 305 Sekunden; jede Nachweisphase ist auf 750 Sekunden tatsächliche Zeit
-begrenzt. Zwei Reason-Prozesse teilen einen benannten Rechenplatz. Die
+begrenzt. Zwei Reason-Prozesse teilen einen benannten Rechenplatz. Quellenabfragen
+verwenden zusätzlich das getrennte [Request-Workerbudget](parallel-requests.md). Die
 Gesamtaufgabe hat eine maximale simulierte Lebensdauer von 120 Tagen.
 
 `tick_at` verändert die Scheduler-Zeit. Modell-Timeouts und tatsächliche

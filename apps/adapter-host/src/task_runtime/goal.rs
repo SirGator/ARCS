@@ -1,5 +1,6 @@
 //! Fachneutrale Aufgabensteuerung. Pläne und Wirkungsbewertungen kommen von
 //! externen Reasonern; Autorität folgt ausschließlich der Betreiberpolicy.
+mod acquisition;
 mod engine;
 mod gates;
 mod waiting;

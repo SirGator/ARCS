@@ -317,6 +317,21 @@
 > unbekannte Aufgaben ohne Routen, langfristiger realer Betrieb und autonome
 > Drohnensuche bleiben eigene Abnahmen.
 
+> Dreiundzwanzigster Slice gemäß v3 §4.1 MGR-04/MGR-05, §5.2 HET-03/HET-04,
+> §7.2 PAR-02/PAR-08/PAR-10/PAR-11 und §8.2 LNG-04/LNG-05: Der bestehende
+> Request-Service trennt persistente Vorbereitung, externen Aufruf und validierte
+> Ergebnisübernahme. Optionale begrenzte Request-Worker erlauben unabhängige
+> Goals und Quellen desselben Goals ohne blockierendes Warten. Hostweite
+> Session-Zulassung berücksichtigt Reasoning und Request gemeinsam. Eine
+> additive Task-/Rundenbindung begrenzt Bereinigung und schützt Pause, Abbruch,
+> Fristen und Wiederaufnahme. Drei Core-, ein Worker- und dreizehn Prozess-Tests prüfen Grenzen,
+> veraltete Dispatches, Grants, langsame/fehlerhafte Peers, Sensorfortschritt,
+> Replay, zwei Runtimes und manuell freigegebene Simulatorwirkung. Gemeinsame
+> Session-Verwaltung, Quellenbeschaffung und Worker-Lebenszyklus sind nach
+> Zuständigkeit getrennt. Synchrone Act-/Output-/Polling-Ports, Request-Quoten,
+> Reconnect von Mehrrolleninstallationen, allgemeine Neuplanung und vollständige
+> Parallelitätsabnahme bleiben offen.
+
 **Leitbild:** ARCS ist ein universeller Agent. Es soll sich einfach bedienen lassen, beliebige kompatible Systeme verbinden, eigenständig Probleme lösen und langfristige Aufgaben über Monate verfolgen.
 
 ## 1. Verbindliche Architekturregeln

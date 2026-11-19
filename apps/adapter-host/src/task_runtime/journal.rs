@@ -171,6 +171,7 @@ impl Journal {
         dependencies::initialize(&connection)?;
         planning::initialize(&connection)?;
         reasoning::initialize(&connection)?;
+        queries::initialize(&connection)?;
         suspension::initialize(&connection)?;
         control::initialize(&connection)?;
         dispatch::initialize(&connection, config)?;

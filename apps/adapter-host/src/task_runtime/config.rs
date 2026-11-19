@@ -41,6 +41,9 @@ pub struct RuntimeConfig {
     /// 1 erhält den synchronen Betrieb; 2..32 aktivieren begrenzte Worker.
     #[serde(default = "concurrency")]
     pub max_concurrent_reasoning: usize,
+    /// 1 preserves synchronous queries; 2..32 enable bounded Request workers.
+    #[serde(default = "concurrency")]
+    pub max_concurrent_requests: usize,
     #[serde(default = "capacity")]
     pub max_pending_jobs: usize,
     pub routes: Vec<ReasoningRoute>,
@@ -103,6 +106,11 @@ pub(super) fn identifier(value: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(&byte))
 }
 impl RuntimeConfig {
+    /// Preserve legacy retry behavior only for fully synchronous configurations.
+    pub(super) fn retry_failed_jobs(&self) -> bool {
+        self.max_concurrent_reasoning == 1 && self.max_concurrent_requests == 1
+    }
+
     pub fn load(path: impl AsRef<Path>) -> Result<Self, HostError> {
         let path = path
             .as_ref()
@@ -134,6 +142,7 @@ impl RuntimeConfig {
             || !(1..=10_000).contains(&self.max_events_per_tick)
             || !(1..=1000).contains(&self.max_jobs_per_tick)
             || !(1..=32).contains(&self.max_concurrent_reasoning)
+            || !(1..=32).contains(&self.max_concurrent_requests)
             || !(1..=32).contains(&self.routes.len())
             || !(self.routes.len()..=100_000).contains(&self.max_pending_jobs)
         {

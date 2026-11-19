@@ -35,37 +35,6 @@ impl Host {
         }
     }
 
-    pub(in crate::runtime) fn busy_adapters(&self) -> HashSet<AdapterId> {
-        self.reasoning_jobs
-            .values()
-            .flat_map(|job| job.resources.iter().cloned())
-            .chain(self.reconnect_jobs.keys().cloned())
-            .collect()
-    }
-
-    pub(in crate::runtime) fn ensure_adapter_available(
-        &self,
-        adapter: &AdapterId,
-    ) -> Result<(), HostError> {
-        if self.busy_adapters().contains(adapter) {
-            return Err(HostError::AdapterBusy(adapter.clone()));
-        }
-        if self.unavailable_adapters.contains(adapter) {
-            if self.reconnect_can_wait(adapter) {
-                return Err(HostError::ResourceBusy {
-                    resource: "reasoner-reconnect".into(),
-                    requested: 1,
-                    available: 0,
-                });
-            }
-            return Err(HostError::Adapter {
-                adapter: adapter.clone(),
-                source: arcs::adapters::stdio::StdioError::Disconnected,
-            });
-        }
-        Ok(())
-    }
-
     /// None bedeutet laufend oder wartend auf Kapazität. Der gleiche Auftrag
     /// wird anhand seiner stabilen Identität abgeholt, niemals doppelt gestartet.
     pub(crate) fn poll_reason_with_data(
@@ -272,7 +241,11 @@ impl Host {
     }
 
     pub(in crate::runtime) fn cancel_reasoning_jobs(&mut self) -> HashSet<AdapterId> {
-        let resources = self.busy_adapters();
+        let resources = self
+            .reasoning_jobs
+            .values()
+            .flat_map(|job| job.resources.iter().cloned())
+            .collect::<HashSet<_>>();
         for adapter in &self.adapters {
             if resources.contains(&adapter.config.grant.adapter_id) {
                 adapter.endpoint.abort();

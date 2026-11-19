@@ -350,3 +350,114 @@ fn mismatched_external_correlation_records_failed_invocation_without_result() {
         None
     );
 }
+
+fn split_fixture() -> (
+    SchemaRegistry,
+    SqliteArtifactStore,
+    AdapterRegistry,
+    RecordingEndpoint,
+) {
+    let schemas = schemas();
+    let store = SqliteArtifactStore::in_memory().unwrap();
+    store.append(&input(), &schemas).unwrap();
+    let mut registry = AdapterRegistry::new();
+    registry
+        .register(manifest(), grant(), &schemas, &store)
+        .unwrap();
+    let endpoint = RecordingEndpoint {
+        manifest: manifest(),
+        calls: Arc::new(Mutex::new(Vec::new())),
+        mismatched_correlation: false,
+    };
+    (schemas, store, registry, endpoint)
+}
+fn prepare_split(
+    service: &mut RequestService<'_>,
+    endpoint: &RecordingEndpoint,
+) -> PreparedRequest {
+    match service
+        .prepare(
+            endpoint,
+            &CapabilityRef::new("metrics.request-test", "metrics.fetch"),
+            &input().version_id,
+            &SchemaId("arcs.observation.request_slice_test.v1".into()),
+        )
+        .unwrap()
+    {
+        RequestPreparation::Dispatch(prepared) => *prepared,
+        RequestPreparation::Complete(_) => panic!("expected new dispatch"),
+    }
+}
+#[test]
+fn preparation_does_not_call_the_endpoint_and_finish_retains_correlated_replay() {
+    let (schemas, store, registry, endpoint) = split_fixture();
+    let mut ids = TestIds;
+    let mut service = RequestService::new(&registry, &schemas, &store, &mut ids, &FixedClock);
+    let prepared = prepare_split(&mut service, &endpoint);
+    assert!(endpoint.calls.lock().unwrap().is_empty());
+    let response = endpoint.fetch(prepared.invocation());
+    let artifact = service.finish(prepared, response).unwrap();
+    let replay = service
+        .execute(
+            &endpoint,
+            &CapabilityRef::new("metrics.request-test", "metrics.fetch"),
+            &input().version_id,
+            &artifact.schema_id,
+        )
+        .unwrap();
+    assert_eq!(artifact, replay);
+    assert_eq!(endpoint.calls.lock().unwrap().len(), 1);
+}
+#[test]
+fn a_late_response_cannot_complete_an_obsolete_dispatch() {
+    let (schemas, store, registry, endpoint) = split_fixture();
+    let mut ids = TestIds;
+    let mut service = RequestService::new(&registry, &schemas, &store, &mut ids, &FixedClock);
+    let first = prepare_split(&mut service, &endpoint);
+    let later = prepare_split(&mut service, &endpoint);
+    assert_eq!(first.invocation(), later.invocation());
+    let response = endpoint.fetch(first.invocation());
+    assert!(matches!(
+        service.finish(first, response),
+        Err(RequestError::StaleDispatch)
+    ));
+    assert!(
+        store
+            .current(
+                &SubjectId("server-01/cpu".into()),
+                &SchemaId("arcs.observation.request_slice_test.v1".into())
+            )
+            .unwrap()
+            .is_none()
+    );
+    let response = endpoint.fetch(later.invocation());
+    assert!(service.finish(later, response).is_ok());
+}
+#[test]
+fn changing_the_authorizing_grant_rejects_a_prepared_response() {
+    let (schemas, store, registry, endpoint) = split_fixture();
+    let mut ids = TestIds;
+    let prepared = prepare_split(
+        &mut RequestService::new(&registry, &schemas, &store, &mut ids, &FixedClock),
+        &endpoint,
+    );
+    let mut changed = grant();
+    changed.assigned_trust = TrustLevel::High;
+    let mut registry = AdapterRegistry::new();
+    registry
+        .register(manifest(), changed, &schemas, &store)
+        .unwrap();
+    let response = endpoint.fetch(prepared.invocation());
+    let result = RequestService::new(&registry, &schemas, &store, &mut ids, &FixedClock)
+        .finish(prepared, response);
+    assert!(matches!(result, Err(RequestError::PreparedPolicyChanged)));
+    assert!(
+        store
+            .current(
+                &SubjectId("server-01/cpu".into()),
+                &SchemaId("arcs.observation.request_slice_test.v1".into())
+            )
+            .unwrap()
+            .is_none()
+    );
+}

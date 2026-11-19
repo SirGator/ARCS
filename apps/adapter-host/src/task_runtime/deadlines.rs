@@ -25,7 +25,7 @@ impl TaskRuntime {
     ) -> Result<(), HostError> {
         let due = self.journal.expiring_tasks(
             self.config.max_jobs_per_tick,
-            self.config.max_concurrent_reasoning == 1,
+            self.config.retry_failed_jobs(),
         )?;
         for sequence in due {
             self.expire_task(host, sequence, report)?;
@@ -41,14 +41,14 @@ impl TaskRuntime {
     ) -> Result<bool, HostError> {
         if !self
             .journal
-            .expire_task(sequence, self.config.max_concurrent_reasoning == 1)?
+            .expire_task(sequence, self.config.retry_failed_jobs())?
         {
             return Ok(false);
         }
         report.expired_tasks.push(sequence);
         // Only after the durable cancellation commits may a late worker result
         // be discarded. Its capacity remains held until the worker actually ends.
-        self.reap_cancelled_task_reasoning(host)?;
+        self.reap_abandoned_task_work(host)?;
         self.cleanup_control_sessions(host)?;
         Ok(true)
     }

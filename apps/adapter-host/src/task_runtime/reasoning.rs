@@ -4,13 +4,6 @@ use arcs::reasoning::{ContextSelection, ReasoningRequestV2};
 use arcs::runtime::{InvocationKind, deterministic_invocation_id};
 
 impl TaskRuntime {
-    pub(super) fn reap_cancelled_task_reasoning(&self, host: &mut Host) -> Result<(), HostError> {
-        let cancelled = self
-            .journal
-            .cancelled_reasoning(&host.pending_reasoning_request_ids())?;
-        host.discard_reasoning_requests(&cancelled);
-        Ok(())
-    }
     pub(super) fn advance_job(
         &mut self,
         host: &mut Host,
@@ -109,7 +102,7 @@ impl TaskRuntime {
         if matches!(error, HostError::AdapterBusy(_)) {
             return Ok(());
         }
-        if self.config.max_concurrent_reasoning == 1 || is_core_failure(&error) {
+        if self.config.retry_failed_jobs() || is_core_failure(&error) {
             self.journal.fail(sequence, &error)?;
             return Err(error);
         }

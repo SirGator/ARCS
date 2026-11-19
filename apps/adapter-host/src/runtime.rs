@@ -1,8 +1,11 @@
 mod input;
 mod reason;
 mod reconnect;
+mod request;
 mod resources;
+mod sessions;
 pub use reconnect::AdapterReconnectReport;
+pub use request::RequestWorkerReport;
 pub use resources::ResourcePoolReport;
 
 use std::collections::{HashMap, HashSet};
@@ -82,6 +85,7 @@ pub struct HostReport {
     pub adapters: Vec<AdapterReport>,
     pub estimates: Vec<EstimateReport>,
     pub resource_pools: Vec<ResourcePoolReport>,
+    pub request_workers: Vec<RequestWorkerReport>,
 }
 
 struct RunningAdapter {
@@ -100,6 +104,8 @@ pub struct Host {
     adapters: Vec<RunningAdapter>,
     polling: PollingConfig,
     reasoning_jobs: HashMap<String, reason::PendingReasoning>,
+    request_jobs: HashMap<String, request::PendingRequest>,
+    retiring_request_jobs: Vec<request::RetiringRequest>,
     unavailable_adapters: HashSet<AdapterId>,
     resource_pools: crate::resource_policy::ResourceQuantities,
     reconnect_installations: std::collections::BTreeMap<AdapterId, VersionId>,
@@ -451,6 +457,8 @@ impl Host {
             adapters,
             polling: config.polling,
             reasoning_jobs: HashMap::new(),
+            request_jobs: HashMap::new(),
+            retiring_request_jobs: Vec::new(),
             unavailable_adapters: HashSet::new(),
             resource_pools: config.resource_pools,
             reconnect_installations,
@@ -810,7 +818,8 @@ impl Host {
     /// Ein Fehler beim Beenden verhindert nicht das Beenden der übrigen Childs.
     pub fn shutdown(&mut self) -> Result<(), HostError> {
         let reconnect_error = self.cancel_reconnections().err();
-        let cancelled = self.cancel_reasoning_jobs();
+        let mut cancelled = self.cancel_reasoning_jobs();
+        cancelled.extend(self.cancel_request_jobs());
         let mut first_error = reconnect_error;
         for adapter in &mut self.adapters {
             if cancelled.contains(&adapter.config.grant.adapter_id)
@@ -835,6 +844,7 @@ impl Host {
     pub fn report(&self) -> Result<HostReport, HostError> {
         Ok(HostReport {
             resource_pools: self.resource_usage(),
+            request_workers: self.request_workers(),
             stored_artifacts: self.store.len().map_err(HostError::Store)?,
             world_revision: self.world.revision().get(),
             adapters: self
@@ -902,5 +912,6 @@ impl Drop for Host {
         // host must not overlap a reader retained by an abandoned host object.
         let _ = self.cancel_reconnections();
         self.cancel_reasoning_jobs();
+        self.cancel_request_jobs();
     }
 }

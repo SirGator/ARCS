@@ -63,7 +63,9 @@ Der Adapter muss die entsprechende dauerhafte Deduplizierung gewährleisten.
 Ein gestoppter lokaler Prozess garantiert keine Rücknahme einer entfernten
 Berechnung oder einer bereits eingetretenen Wirkung.
 
-Request, Act, Output und das Polling selbst bleiben in diesem Slice synchron.
+Dieser erste Slice ließ Request, Act, Output und das Polling synchron.
+Der spätere [Request-Ausbau](parallel-requests.md) ergänzt begrenzt parallele
+Goal-Quellenabfragen; Act, Output und das Polling bleiben weiterhin synchron.
 Geräteübergreifende Ressourcenidentitäten, GPU-/RAM-Budgets, parallele
 Planverzweigungen und automatische Wiederverbindungen sind noch offen.
 Eine gemeinsame Drohne hinter zwei verschiedenen Installationen wird noch
