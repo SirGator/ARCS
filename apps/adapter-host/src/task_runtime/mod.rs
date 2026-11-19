@@ -15,6 +15,7 @@ pub mod scheduler;
 pub mod suspension;
 mod worker_lifecycle;
 pub use config::{ReasoningRoute, RuntimeConfig};
+pub use control::ResourceEvidenceReview;
 pub use journal::dispatch::{DispatchClassReport, DispatchReport};
 
 use std::time::{Duration, Instant};

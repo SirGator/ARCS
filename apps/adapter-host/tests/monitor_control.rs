@@ -425,3 +425,120 @@ fn live_goal_review_requires_the_current_candidate_and_executes_once() {
     assert_eq!(fan_count(), 1);
     host.shutdown().unwrap();
 }
+
+#[test]
+fn reconciliation_preview_requires_the_complete_current_reservation_set() {
+    use arcs::approval::ApprovalDecision;
+    use arcs::core::{Actor, ActorType};
+    use arcs_host::task_runtime::goal::GoalState;
+
+    let f = goals::Fixture::new();
+    f.manual();
+    let mut config = f.read("runtime.json");
+    config["interval_ms"] = json!(10);
+    config["routes"][0]["goal"]["exclusive_resources"] = json!(["device.fan-01", "workcell.fan"]);
+    f.write("runtime.json", config);
+    let mut host = f.host();
+    let mut runtime = f.runtime(&host);
+    let mut until = |state| {
+        let deadline = Instant::now() + Duration::from_secs(20);
+        loop {
+            runtime.tick(&mut host).unwrap();
+            if let Some(goal) = runtime.goals_after(0, 1).unwrap().into_iter().next()
+                && goal.state == state
+            {
+                return goal;
+            }
+            assert!(Instant::now() < deadline);
+        }
+    };
+    let goal = until(GoalState::AwaitingApproval);
+    let actor = Actor {
+        actor_type: ActorType::Human,
+        id: "simulator.test".into(),
+    };
+    runtime
+        .review_goal(
+            &host,
+            goal.sequence,
+            goal.candidate.as_ref().unwrap(),
+            ApprovalDecision::Approved,
+            actor,
+            "simulated action".into(),
+        )
+        .unwrap();
+    runtime.tick(&mut host).unwrap();
+    let goal = runtime.goals_after(0, 1).unwrap().remove(0);
+    assert_eq!(goal.state, GoalState::Observing);
+    let evidence = goal.execution.unwrap();
+    runtime
+        .cancel_goal(&host, goal.sequence, "settle the simulated dispatch".into())
+        .unwrap();
+    host.shutdown().unwrap();
+    drop((runtime, host));
+
+    let mut monitor = Monitor::start(&f.directory);
+    let snapshot = monitor.until(|event| event["event"] == "snapshot");
+    let review = &snapshot["resource_release_reviews"][0];
+    assert_eq!(review["sequence"], goal.sequence);
+    assert_eq!(review["state"], "cancelled");
+    assert_eq!(review["execution"], evidence.0);
+    let reservations = review["reservations"].as_array().unwrap();
+    assert_eq!(reservations.len(), 2);
+    let versions = reservations
+        .iter()
+        .map(|record| record["version_id"].clone())
+        .collect::<Vec<_>>();
+    let inspect = |versions: &[Value], evidence_versions: Value| {
+        json!({
+            "command":"inspect_resource_evidence", "sequence":goal.sequence,
+            "reservation_versions":versions, "evidence_versions":evidence_versions
+        })
+    };
+    let refs = json!([&evidence]);
+    assert_eq!(
+        monitor.command("partial", "goal", inspect(&versions[..1], refs.clone()))["ok"],
+        false
+    );
+    assert_eq!(
+        monitor.command(
+            "missing",
+            "goal",
+            inspect(&versions, json!(["missing-version"]))
+        )["ok"],
+        false
+    );
+    assert_eq!(
+        monitor.command(
+            "too-many",
+            "goal",
+            inspect(&versions, json!(vec![&evidence; 33]))
+        )["ok"],
+        false
+    );
+    let preview = monitor.command("preview", "goal", inspect(&versions, refs.clone()));
+    assert_eq!(preview["ok"], true, "{preview}");
+    assert_eq!(preview["receipt"]["reservation_versions"], json!(versions));
+    assert_eq!(preview["receipt"]["artifacts"][0]["version_id"], evidence.0);
+    assert!(preview["receipt"]["artifacts"][0]["payload"].is_object());
+    let release = json!({"command":"release_resources","sequence":goal.sequence,
+        "reservation_versions":versions,"evidence_versions":refs,"operator_id":"simulator.test",
+        "reason":"simulated state was checked"});
+    assert_eq!(monitor.command("release", "goal", release)["ok"], true);
+    let snapshot = monitor.until(|event| event["resource_reservations"][0]["state"] == "released");
+    assert!(
+        snapshot["resource_release_reviews"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        snapshot["resource_reservations"][1]["evidence"],
+        json!([&evidence])
+    );
+    assert_eq!(
+        monitor.command("old-preview", "goal", inspect(&versions, json!([evidence])))["ok"],
+        false
+    );
+    monitor.stop();
+}

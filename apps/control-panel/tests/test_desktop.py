@@ -297,6 +297,73 @@ class DesktopTests(unittest.TestCase):
         self.assertTrue(all(step['state'] == 'cancelled' for step in page.records['plan:1'][1]['steps']))
         self.assertFalse(page.cancel_button.get_visible())
 
+    def test_resource_review_displays_evidence_and_releases_the_simulated_reservation(self):
+        host = real_configuration(PROJECT_ROOT, self.directory, 'goals')
+        path = self.directory / 'runtime.json'
+        runtime = json.loads(path.read_text())
+        runtime.update(journal='state/resource-runtime.sqlite', interval_ms=1000)
+        goal_config = runtime['routes'][0]['goal']
+        goal_config['approval'] = {'mode': 'manual'}
+        goal_config['exclusive_resources'] = ['device.fan-01']
+        path.write_text(json.dumps(runtime))
+        window = self.window
+        page = window.control_page
+        window.select_configuration(Configuration(host, path))
+        window.show_page('control')
+        window.start_button.emit('clicked')
+        pump_until(lambda: page.inspect_button.get_sensitive())
+        self.assertNotIn('resource:1', page.records)
+        page.inspect_button.emit('clicked')
+        pump_until(lambda: page.review is not None)
+        dialog, _, reason = page.review
+        reason.set_text('Simulierten Lüfterauftrag prüfen und freigeben')
+        dialog.response(Gtk.ResponseType.ACCEPT)
+        pump_until(lambda: page.records['goal:1'][1]['dispatch_cursor'] is not None)
+        page.reason.set_text('Simulierten Auftrag nach Auslösung beenden')
+        page.cancel_button.emit('clicked')
+        pump_until(lambda: 'resource:1' in page.records and page.pending is None)
+
+        page.selection.set_active_id('resource:1')
+        self.assertIn('device.fan-01', page.detail.get_text())
+        page.resource_button.emit('clicked')
+        review = page.resource_review
+        accept = review.get_widget_for_response(Gtk.ResponseType.ACCEPT)
+        evidence = review.record['execution']
+        reservation = review.versions[0]
+        review.reason.set_text('Simulierten Gerätezustand geprüft')
+        review.evidence.get_buffer().set_text(evidence)
+        self.assertFalse(accept.get_sensitive())
+        review.inspect.emit('clicked')
+        pump_until(lambda: review.inspected == (evidence,))
+        preview = review.preview.get_buffer()
+        artifacts = json.loads(preview.get_text(preview.get_start_iter(), preview.get_end_iter(), True))
+        self.assertEqual(artifacts[0]['version_id'], evidence)
+        self.assertTrue(artifacts[0]['payload'])
+        self.assertTrue(accept.get_sensitive())
+        review.evidence.get_buffer().set_text('missing-evidence')
+        self.assertFalse(accept.get_sensitive())
+        review.inspect.emit('clicked')
+        pump_until(lambda: review.pending is None)
+        self.assertFalse(accept.get_sensitive())
+        review.evidence.get_buffer().set_text(evidence)
+        review.inspect.emit('clicked')
+        pump_until(lambda: accept.get_sensitive())
+        render_window(review, PROJECT_ROOT / 'var/control-panel/screenshots/resource-review.png')
+        review.response(Gtk.ResponseType.ACCEPT)
+        pump_until(lambda: 'resource:1' not in page.records and page.pending is None)
+        released = window.snapshot['resource_reservations'][0]
+        self.assertEqual(released['state'], 'released')
+        self.assertNotEqual(released['version_id'], reservation)
+        self.assertEqual(released['evidence'], [evidence])
+        window.stop_button.emit('clicked')
+        pump_until(lambda: not window.controller.busy and window.state == 'idle')
+        window.start_button.emit('clicked')
+        pump_until(lambda: window.snapshot.get('resource_reservations'))
+        self.assertEqual(window.snapshot['resource_reservations'][0], released)
+        self.assertNotIn('resource:1', page.records)
+        with sqlite3.connect(self.directory / 'state/fan.sqlite') as db:
+            self.assertEqual(db.execute('SELECT actuation_count FROM fan_state').fetchone()[0], 1)
+
     def test_queue_pages_and_controls_a_scheduled_reasoning_task(self):
         runtime = json.loads((PROJECT_ROOT / 'apps/adapter-host/config/roles/runtime.json').read_text())
         runtime.update(runtime_id='desktop-task-queue', journal='state/task-queue.sqlite', interval_ms=20, max_pending_jobs=30)

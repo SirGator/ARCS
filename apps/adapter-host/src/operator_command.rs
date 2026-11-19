@@ -3,10 +3,10 @@ use arcs::approval::ApprovalDecision;
 use arcs::core::{Actor, ActorType, VersionId};
 use serde::{Deserialize, Serialize};
 
-use crate::task_runtime::goal::GoalReview;
 use crate::task_runtime::queue::{TaskQueuePage, TaskQueueQuery};
 use crate::task_runtime::scheduler::{SeriesControlCommand, SeriesControlReceipt};
 use crate::task_runtime::suspension::{TaskControlCommand, TaskControlReceipt};
+use crate::task_runtime::{ResourceEvidenceReview, goal::GoalReview};
 use crate::{Host, HostError, task_runtime::TaskRuntime};
 
 #[derive(Deserialize)]
@@ -21,6 +21,11 @@ pub enum GoalCommand {
     Inspect {
         sequence: u64,
         candidate_version_id: VersionId,
+    },
+    InspectResourceEvidence {
+        sequence: u64,
+        reservation_versions: Vec<VersionId>,
+        evidence_versions: Vec<VersionId>,
     },
     ReleaseResources {
         sequence: u64,
@@ -64,6 +69,7 @@ pub enum CommandReceipt {
     Task(TaskControlReceipt),
     Series(SeriesControlReceipt),
     GoalReview(GoalReview),
+    ResourceEvidenceReview(ResourceEvidenceReview),
 }
 
 impl OperatorCommand {
@@ -104,6 +110,20 @@ impl GoalCommand {
                 return runtime
                     .inspect_goal_review(host, sequence, &candidate_version_id)
                     .map(|review| Some(CommandReceipt::GoalReview(review)));
+            }
+            Self::InspectResourceEvidence {
+                sequence,
+                reservation_versions,
+                evidence_versions,
+            } => {
+                return runtime
+                    .inspect_resource_evidence(
+                        host,
+                        sequence,
+                        reservation_versions,
+                        &evidence_versions,
+                    )
+                    .map(|review| Some(CommandReceipt::ResourceEvidenceReview(review)));
             }
             Self::ReleaseResources {
                 sequence,

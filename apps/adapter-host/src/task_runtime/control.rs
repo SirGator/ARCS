@@ -1,8 +1,12 @@
 //! Cooperative exclusive goal rounds in the existing Core, without expiry.
+mod review;
+pub use review::ResourceEvidenceReview;
+
 use super::{
     TaskRuntime,
     config::invalid,
     goal::{GoalConfig, GoalState},
+    journal::ControlSession,
 };
 use crate::{Host, HostError};
 use arcs::core::{Actor, ActorType, SystemClock, VersionId};
@@ -27,6 +31,23 @@ fn error(error: ReservationError) -> HostError {
         error => invalid(format!("exclusive control: {error:?}")),
     }
 }
+
+fn held_reservations(
+    service: &ReservationService<'_>,
+    session: &ControlSession,
+) -> Result<Vec<Reservation>, HostError> {
+    let mut held = Vec::new();
+    for resource in &session.resources {
+        if let Some(record) = service.current(resource).map_err(error)?
+            && record.owner == session.owner
+            && record.state == ReservationState::Held
+        {
+            held.push(record);
+        }
+    }
+    Ok(held)
+}
+
 impl TaskRuntime {
     pub(super) fn verify_goal_control(
         &self,
@@ -159,15 +180,8 @@ impl TaskRuntime {
             }
         }
         let service = ReservationService::new(host.store(), host.schemas(), &SystemClock);
-        let held = session
-            .resources
-            .iter()
-            .map(|r| service.current(r))
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(error)?
+        let held = held_reservations(&service, &session)?
             .into_iter()
-            .flatten()
-            .filter(|r| r.owner == session.owner && r.state == ReservationState::Held)
             .map(|r| r.version_id)
             .collect::<Vec<_>>();
         if !held.is_empty() {
@@ -243,16 +257,8 @@ impl TaskRuntime {
             .control_session(sequence)?
             .ok_or_else(|| invalid("goal has no control session"))?;
         let service = ReservationService::new(host.store(), host.schemas(), &SystemClock);
-        let records = session
-            .resources
-            .iter()
-            .map(|r| service.current(r))
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(error)?;
-        let held = records
+        let held = held_reservations(&service, &session)?
             .into_iter()
-            .flatten()
-            .filter(|r| r.owner == session.owner && r.state == ReservationState::Held)
             .map(|r| r.version_id.0)
             .collect::<HashSet<_>>();
         let wanted = expected.iter().map(|v| v.0.clone()).collect::<HashSet<_>>();

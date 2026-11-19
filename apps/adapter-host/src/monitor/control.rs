@@ -63,6 +63,7 @@ impl MonitorControl {
             "max_line_bytes":MAX_LINE_BYTES,
             "commands_per_tick":COMMANDS_PER_TICK,
             "goal_review_preview":true,
+            "resource_release_review":true,
             "task_queue":{"max_page_size":MAX_TASK_QUEUE_PAGE,"cancel":true}
         })
     }

@@ -7,11 +7,12 @@ import json
 from gi.repository import Gtk
 
 from .control_widgets import STATE_NAMES, local_operator, reason_text, revision_command, text_label
+from .resource_review import ResourceReview
 
 
 GOAL_ENDED = {"completed", "failed", "blocked", "rejected", "budget_exhausted", "cancelled"}
 PLAN_OPEN = {"pending", "running", "replanning", "failed"}
-KIND_NAMES = {"goal": "Ziel", "series": "Prüfserie", "plan": "Plan"}
+KIND_NAMES = {"goal": "Ziel", "series": "Prüfserie", "plan": "Plan", "resource": "Reservierung für Ziel"}
 
 
 class ControlPage(Gtk.Box):
@@ -24,9 +25,12 @@ class ControlPage(Gtk.Box):
         self.options = []
         self.connected = False
         self.review_available = False
+        self.resource_review_available = False
+        self.recent = ()
         self.pending = None
         self.waiting_for_snapshot = False
         self.review = None
+        self.resource_review = None
         self.pack_start(text_label("Laufende Aufgaben steuern", "card-title"), False, False, 0)
         self.selection = Gtk.ComboBoxText()
         self.selection.connect("changed", lambda *_: self._refresh())
@@ -45,7 +49,9 @@ class ControlPage(Gtk.Box):
         self.cancel_button = Gtk.Button(label="Abbrechen")
         self.cancel_button.get_style_context().add_class("danger")
         self.cancel_button.connect("clicked", self._cancel)
-        for button in (self.inspect_button, self.pause_button, self.cancel_button):
+        self.resource_button = Gtk.Button(label="Ressourcen klären")
+        self.resource_button.connect("clicked", self._review_resources)
+        for button in (self.inspect_button, self.pause_button, self.cancel_button, self.resource_button):
             button.set_no_show_all(True)
             buttons.pack_start(button, False, False, 0)
         self.pack_start(buttons, False, False, 0)
@@ -54,11 +60,14 @@ class ControlPage(Gtk.Box):
         self.pack_start(self.status, False, False, 0)
         self._refresh()
 
-    def set_connected(self, connected, review_available=False):
+    def set_connected(self, connected, review_available=False, resource_review_available=False):
         self.connected = connected
         self.review_available = review_available
+        self.resource_review_available = resource_review_available
         if not connected:
             self._dismiss_review()
+        if not connected or not resource_review_available:
+            self._dismiss_resource_review()
         self._refresh()
 
     def reset(self):
@@ -68,18 +77,23 @@ class ControlPage(Gtk.Box):
         self.set_connected(False)
         self.snapshot({})
 
-    def snapshot(self, runtime):
+    def snapshot(self, runtime, resource_releases=(), recent=()):
         self.waiting_for_snapshot = False
+        self.recent = recent
         self.records = {
             f"{kind}:{entry['sequence']}": (kind, entry)
             for kind, entries in (("goal", runtime.get("goals", [])), ("series", runtime.get("recurring_checks", [])),
-                                  ("plan", runtime.get("planning_jobs", []) + runtime.get("plans", [])))
+                                  ("plan", runtime.get("planning_jobs", []) + runtime.get("plans", [])),
+                                  ("resource", resource_releases if self.resource_review_available else ()))
             for entry in entries
         }
         self.task_controls = {row["sequence"]: row for row in runtime.get("task_controls", [])}
         if self.review and not self._still_reviewable(self.review[1]):
             self._dismiss_review()
             self.status.set_text("Der angezeigte Vorschlag wartet nicht mehr auf eine Entscheidung.")
+        if self.resource_review and not self._resource_review_current(self.resource_review):
+            self._dismiss_resource_review()
+            self.status.set_text("Die angezeigten Reservierungen haben sich geändert.")
         options = [(key, f"{KIND_NAMES[kind]} {row['sequence']} · {row['route_id']}") for key, (kind, row) in self.records.items()]
         if options != self.options:
             previous = self.selection.get_active_id()
@@ -98,7 +112,8 @@ class ControlPage(Gtk.Box):
 
     def _refresh(self):
         kind, row = self._selected()
-        ready = self.connected and self.pending is None and not self.waiting_for_snapshot and self.review is None
+        ready = (self.connected and self.pending is None and not self.waiting_for_snapshot
+                 and self.review is None and self.resource_review is None)
         has_reason = reason_text(self.reason) is not None
         state = row.get("state")
         controls = self.task_controls.get(row.get("sequence"), {}) if kind != "series" else {}
@@ -119,6 +134,8 @@ class ControlPage(Gtk.Box):
                     pass
             if kind == "goal":
                 detail += f" · Runde {row['round']}"
+            if kind == "resource":
+                detail += " · Reserviert: " + ", ".join(item["resource"] for item in row["reservations"])
         if not self.connected:
             detail = "Steuerung verfügbar, sobald eine unterstützte ARCS-Runtime läuft."
         self.detail.set_text(detail)
@@ -135,6 +152,8 @@ class ControlPage(Gtk.Box):
         may_review = self.review_available and kind == "goal" and state == "awaiting_approval" and bool(row.get("candidate"))
         self.inspect_button.set_visible(may_review)
         self.inspect_button.set_sensitive(ready and may_review and not effective_pause)
+        self.resource_button.set_visible(kind == "resource")
+        self.resource_button.set_sensitive(ready and kind == "resource")
 
     def _send(self, kind, payload, review_key=None):
         if not self.connected or self.pending or self.waiting_for_snapshot:
@@ -187,6 +206,8 @@ class ControlPage(Gtk.Box):
                 and current.get("capability") == capability)
 
     def result(self, event):
+        if self.resource_review is not None:
+            self.resource_review.result(event)
         if self.pending is None or event.get("request_id") != self.pending[0]:
             return
         _, expected = self.pending
@@ -255,3 +276,34 @@ class ControlPage(Gtk.Box):
         else:
             self._dismiss_review()
             self._refresh()
+
+    def _review_resources(self, *_):
+        if not self.resource_button.get_sensitive():
+            return
+        _, record = self._selected()
+        dialog = ResourceReview(self.get_toplevel(), record, self.recent, self.operator, self.submit)
+        self.resource_review = dialog
+        dialog.connect("response", self._resource_decision)
+        dialog.show_all()
+        self._refresh()
+
+    def _resource_review_current(self, dialog):
+        _, current = self.records.get(f"resource:{dialog.record['sequence']}", (None, {}))
+        return self.connected and self.resource_review_available and current == dialog.record
+
+    def _resource_decision(self, dialog, response):
+        if self.resource_review is not dialog:
+            return
+        command = (dialog.release_command()
+                   if response == Gtk.ResponseType.ACCEPT and self._resource_review_current(dialog) else None)
+        self._dismiss_resource_review()
+        if command:
+            self._send("goal", command)
+        else:
+            self._refresh()
+
+    def _dismiss_resource_review(self):
+        if self.resource_review is not None:
+            dialog = self.resource_review
+            self.resource_review = None
+            dialog.destroy()

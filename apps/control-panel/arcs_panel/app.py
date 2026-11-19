@@ -82,6 +82,7 @@ class ControlWindow(Gtk.ApplicationWindow):
         self._source_id = None
         self._control_protocol = False
         self._review_preview = False
+        self._resource_review_available = False
         self._queue_size = None
         self._task_cancel = False
         self.presets = [
@@ -477,7 +478,8 @@ class ControlWindow(Gtk.ApplicationWindow):
     def _set_state(self, state):
         self.state = state
         self.input_page.set_running(state == "running")
-        self.control_page.set_connected(state == "running" and self._control_protocol, self._review_preview)
+        self.control_page.set_connected(state == "running" and self._control_protocol,
+                                        self._review_preview, self._resource_review_available)
         queue_size = self._queue_size if state == "running" and self._control_protocol else None
         self.queue_page.set_connected(queue_size, self._task_cancel)
         text, sub = {
@@ -580,6 +582,7 @@ class ControlWindow(Gtk.ApplicationWindow):
                 control = event.get("control") or {}
                 self._control_protocol = control.get("protocol_version") == 1 and control.get("transport") == "stdin_jsonl"
                 self._review_preview = control.get("goal_review_preview") is True
+                self._resource_review_available = control.get("resource_release_review") is True
                 queue_features = control.get("task_queue") or {}
                 queue_size = queue_features.get("max_page_size")
                 self._queue_size = queue_size if type(queue_size) is int and queue_size > 0 else None
@@ -594,7 +597,8 @@ class ControlWindow(Gtk.ApplicationWindow):
                 self.metrics["artifacts"][0].set_text(f"{event['stored_artifacts']:,}".replace(",", "."))
                 runtime = event.get("runtime")
                 self.input_page.goal_progress(runtime.get("goals", []) if runtime else [])
-                self.control_page.snapshot(runtime or {})
+                self.recent = (self.recent + event.get("recent_artifacts", []))[-20:]
+                self.control_page.snapshot(runtime or {}, event.get("resource_release_reviews", []), self.recent)
                 if runtime and self.stack.get_visible_child_name() == "tasks":
                     self.queue_page.load_if_needed()
                 self.metrics["review"][0].set_text(str(runtime["ready_for_review"] + runtime.get("awaiting_approval", 0)) if runtime else "—")
@@ -624,7 +628,6 @@ class ControlWindow(Gtk.ApplicationWindow):
                 if runtime and self._last_ready != runtime["ready_for_review"]:
                     self._log(f"{runtime['ready_for_review']} Aufgaben zur Prüfung bereit.")
                     self._last_ready = runtime["ready_for_review"]
-                self.recent = (self.recent + event.get("recent_artifacts", []))[-20:]
                 self._render_activity()
             elif kind == "inputs":
                 self.input_page.connect_targets(event["targets"], event["has_runtime"])

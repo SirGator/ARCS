@@ -1,4 +1,5 @@
 mod control;
+pub(super) use control::ControlSession;
 mod deadlines;
 mod dependencies;
 pub(super) mod dispatch;

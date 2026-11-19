@@ -344,6 +344,10 @@ fn run() -> Result<(), String> {
                     value["goal_review"] =
                         serde_json::to_value(review).expect("goal review serialization")
                 }
+                Some(CommandReceipt::ResourceEvidenceReview(review)) => {
+                    value["resource_evidence_review"] = serde_json::to_value(review)
+                        .expect("resource evidence review serialization")
+                }
                 _ => {}
             }
             if !reconnects.is_empty() {

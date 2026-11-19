@@ -106,6 +106,11 @@ des Checkouts lassen sie sich mit demselben Befehl aktualisieren.
   **Freigeben** und **Ablehnen** beziehen sich auf genau den angezeigten
   Vorschlag. Der Dialog verlangt die Begründung der Entscheidung. Nach der
   Bestätigung zeigt der Host den weiteren Verlauf im nächsten Snapshot.
+  Beendete Goals mit gehaltenen Gerätereservierungen erscheinen unter
+  **Reservierung für Ziel …**. Öffne **Ressourcen klären** und wähle die
+  geprüften Belegversionen aus oder füge ihre IDs ein. **Belege anzeigen**
+  lädt die gespeicherten Inhalte. Nach Prüfung des Gerätezustands und der
+  Belege bestätigst du die Übergabe mit Begründung.
 - **Stoppen:** Fordert einen geordneten Stopp zwischen den Host-Runden an.
   Auch das Schließen des Fensters wartet zunächst auf diesen Stopp. Nach acht
   Sekunden erscheint bei Bedarf **Sofort beenden**, das ausschließlich die

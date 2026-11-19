@@ -132,7 +132,7 @@ CLI-Befehls.
 | `task` | `--task-command` | Aufgabe pausieren, fortsetzen oder abbrechen |
 | `series` | `--series-command` | Prüfserie pausieren, fortsetzen oder abbrechen |
 | `plan` | `--plan-command` | Plan abbrechen |
-| `goal` | `--goal-command` | Aktionsvorschlag ansehen, freigeben oder ablehnen, Goal abbrechen oder Ressourcen anhand von Belegen klären |
+| `goal` | `--goal-command` | Aktionsvorschlag ansehen, freigeben oder ablehnen, Goal abbrechen, Belege zur Ressourcenklärung ansehen und die Übergabe bestätigen |
 | `queue` | Monitor und Host-API | Offene Aufgaben oder den Verlauf seitenweise lesen |
 
 Die Antwort `control_result` erscheint im selben JSON-Lines-Strom wie die
@@ -152,6 +152,9 @@ Vorschlag. Sein Beleg enthält `payload`, `capability` und
 `verification_version_id`. Im Einzelkommando steht die Vorschau unter
 `goal_review`. Die Vorschau ist auf 65.536 Byte begrenzt und enthält die
 vollständigen Parameter des angezeigten Vorschlags.
+
+`ready.control.resource_release_review` kündigt die Belegvorschau
+für eine Geräteübergabe an. [Ressourcen klären](exclusive-goals.md#freigabe-und-unklarer-aktionsausgang)
 
 ### Aufgabenwarteschlange lesen
 

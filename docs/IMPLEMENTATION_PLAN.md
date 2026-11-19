@@ -394,6 +394,13 @@
 > seine Serienzuordnung und die Serie ihren Zeitplan. Eine ungeklärte
 > Reservierung nach einem Dispatch bleibt über den Neustart bestehen.
 
+> Einunddreißigster Schritt gemäß v3 §7.2 PAR-04/PAR-10 und §8.2 LNG-08/LNG-09:
+> Das Kontrollpanel findet beendete Goals mit gehaltenen Reservierungen anhand
+> aktueller Core-Versionen und der zugehörigen Journal-Sitzung. Der Betreiber
+> prüft ausgewählte Artefaktversionen und bestätigt die geklärte Übergabe mit
+> Begründung. Die vorhandene Freigabe vergleicht den vollständigen Satz
+> gehaltener Revisionen und speichert die Entscheidung im Artifact-Netz.
+
 **Leitbild:** ARCS ist ein universeller Agent. Es soll sich einfach bedienen lassen, beliebige kompatible Systeme verbinden, eigenständig Probleme lösen und langfristige Aufgaben über Monate verfolgen.
 
 ## 1. Verbindliche Architekturregeln

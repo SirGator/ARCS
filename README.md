@@ -49,7 +49,8 @@ dokumentiert Slice 26. Der [Bericht zur Steuerung im laufenden Host](docs/ZWISCH
 dokumentiert Slice 27. Der [Bericht zur Desktop-Steuerung](docs/ZWISCHENBERICHT_2026-11-19_DESKTOP_CONTROL.md)
 dokumentiert Slice 28. Der [Bericht zur Aufgabenwarteschlange](docs/ZWISCHENBERICHT_2026-11-19_TASK_QUEUE.md)
 dokumentiert Slice 29. Der [Bericht zum Aufgabenabbruch](docs/ZWISCHENBERICHT_2026-11-19_TASK_CANCELLATION.md)
-dokumentiert Slice 30. Die Berichte vom
+dokumentiert Slice 30. Der [Bericht zur Klärung von Gerätereservierungen](docs/ZWISCHENBERICHT_2026-11-19_RESOURCE_REVIEW.md)
+dokumentiert Slice 31. Die Berichte vom
 [17. November](docs/ZWISCHENBERICHT_2026-11-17.md) und
 [16. November](docs/ZWISCHENBERICHT_2026-11-16.md) dokumentieren frühere
 Umsetzungsstände, Prüfergebnisse und offene Grenzen.

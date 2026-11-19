@@ -111,6 +111,15 @@ Reservierungsrevisionen, vorhandene Core-Belege und eine Begründung.
 Sie kann aus Belegreferenzen allein keinen sicheren physischen Stillstand
 ableiten. Die Klärung und sichere Übergabe müssen vor der Bestätigung erfolgt sein.
 
+Im laufenden GTK-Panel steht der Auftrag unter **Steuerung → Reservierung
+für Ziel …**. Der Dialog **Ressourcen klären** zeigt die gehaltenen
+Revisionen und vorhandene Ausführungs- und Wirkungsbelege der Sitzung.
+Wähle kürzlich gespeicherte Belege oder füge ihre Versions-IDs ein.
+Nach **Belege anzeigen** und Prüfung des Gerätezustands bestätigst du
+die Übergabe mit einer Begründung. Eine Änderung der Belegauswahl verlangt
+eine erneute Vorschau. Der Monitor stellt auch Reservierungen älterer
+Aufträge bereit, die aus der Liste der letzten 50 Goals gefallen sind.
+
 Für eine gestoppte Runtime steht derselbe Port über `--goal-command` bereit:
 
 ```json
@@ -137,6 +146,20 @@ ein weiterer regulärer Goal-Abschnitt braucht eine neue Sitzung.
 konfigurierten Ressourcen. Monitor-Snapshots und CLI-Berichte mit vorhandenen
 Reservierungen enthalten `resource_reservations` mit Besitzer, Zustand,
 Version, Entscheidungsakteur, Begründung und Belegreferenzen.
+Monitor-Snapshots enthalten zusätzlich `resource_release_reviews` mit den
+lokalen terminalen Goals, ihren gehaltenen Revisionen und vorhandenen
+Ausführungs- und Wirkungsreferenzen. Der Host ermittelt sie aus den gehaltenen
+Versionen und der gebundenen Control-Sitzung.
+
+Unter `ready.control.resource_release_review` kündigt der Monitor die
+Vorschau an. Der lesende Goal-Befehl `inspect_resource_evidence` nimmt
+`sequence`, `reservation_versions` und `evidence_versions` entgegen.
+Die Antwort enthält Sequenz, angefragte Reservierungsrevisionen und die
+unveränderten gespeicherten Artefakte in der Reihenfolge der Belegauswahl.
+Das Belegobjekt ist auf 65.536 Byte begrenzt. Die CLI gibt es unter
+`resource_evidence_review` aus. Die Übergabe verwendet anschließend
+`release_resources` und dessen Vergleich der gehaltenen Versionen.
+
 Das Runtime-Journal führt nur Sitzungszeiger und die begrenzte Bereinigung.
 Der vorhandene Planabbruch aktualisiert weiterhin Goal-Checkpoints, damit eine
 verspätete Freigabe keinen abgebrochenen Auftrag wieder aktiviert.
