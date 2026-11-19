@@ -331,9 +331,16 @@ fn run() -> Result<(), String> {
         let reconnects = host.adapter_reconnections().map_err(|e| e.to_string())?;
         host.shutdown().map_err(|e| e.to_string())?;
         serde_json::to_value(report).map(|mut value| {
-            if let Some(CommandReceipt::Series(receipt)) = receipt {
-                value["series_control"] =
-                    serde_json::to_value(receipt).expect("series control receipt serialization");
+            match receipt {
+                Some(CommandReceipt::Series(receipt)) => {
+                    value["series_control"] =
+                        serde_json::to_value(receipt).expect("series control receipt serialization")
+                }
+                Some(CommandReceipt::GoalReview(review)) => {
+                    value["goal_review"] =
+                        serde_json::to_value(review).expect("goal review serialization")
+                }
+                _ => {}
             }
             if !reconnects.is_empty() {
                 value["adapter_reconnections"] =

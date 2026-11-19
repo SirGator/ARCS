@@ -170,6 +170,126 @@ class DesktopTests(unittest.TestCase):
         self.window.stop_button.emit('clicked')
         pump_until(lambda:not self.window.controller.busy and self.window.state=='idle')
 
+    def test_series_controls_keep_the_same_running_host_and_persist_after_restart(self):
+        runtime = json.loads((PROJECT_ROOT / 'apps/adapter-host/config/roles/runtime.json').read_text())
+        runtime.update(runtime_id='desktop-recurrence', journal='state/recurring.sqlite', interval_ms=25)
+        route = runtime['routes'][0]
+        route['source']['adapter_id'] = 'multi.input.left'
+        route['reasoner']['adapter_id'] = 'multi.reasoner.solver'
+        route['recurrence'] = {'every_ms': 3600000, 'max_occurrences': 5}
+        path = self.directory / 'recurring.json'
+        path.write_text(json.dumps(runtime))
+        window = self.window
+        window.select_configuration(Configuration(self.host, path))
+        window.show_page('control')
+        page = window.control_page
+
+        def series_state():
+            rows = (window.snapshot.get('runtime') or {}).get('recurring_checks', [])
+            return rows[0]['state'] if rows else None
+
+        window.start_button.emit('clicked')
+        pump_until(lambda: page.connected and series_state() == 'active' and bool(page.records))
+        control = window.controller._process.pid
+        page.reason.set_text('Wartungsfenster')
+        self.assertTrue(page.pause_button.get_sensitive())
+        page.pause_button.emit('clicked')
+        pump_until(lambda: series_state() == 'paused' and page.pending is None)
+        self.assertEqual(page.pause_button.get_label(), 'Fortsetzen')
+        self.assertEqual(window.controller._process.pid, control)
+        render_window(window, PROJECT_ROOT / 'var/control-panel/screenshots/live-series.png')
+        window.stop_button.emit('clicked')
+        pump_until(lambda: not window.controller.busy and window.state == 'idle')
+        window.start_button.emit('clicked')
+        pump_until(lambda: page.connected and series_state() == 'paused' and bool(page.records))
+        page.reason.set_text('Wartung abgeschlossen')
+        page.pause_button.emit('clicked')
+        pump_until(lambda: series_state() == 'active' and page.pending is None)
+        page.reason.set_text('Prüfserie abgeschlossen')
+        page.cancel_button.emit('clicked')
+        pump_until(lambda: series_state() == 'cancelled' and page.pending is None)
+        self.assertFalse(page.cancel_button.get_visible())
+        self.assertEqual(window.snapshot['runtime']['recurring_checks'][0]['control_revision'], 3)
+        self.assertEqual(window.snapshot['runtime']['ready_for_review'], 1)
+
+    def test_goal_review_panel_displays_exact_parameters_before_approval(self):
+        host = real_configuration(PROJECT_ROOT, self.directory, 'goals')
+        path = self.directory / 'runtime.json'
+        runtime = json.loads(path.read_text())
+        runtime.update(journal='state/manual-runtime.sqlite', interval_ms=15)
+        runtime['routes'][0]['goal']['approval'] = {'mode': 'manual'}
+        path.write_text(json.dumps(runtime))
+        source = self.directory / 'input-profile.json'
+        inputs = json.loads(source.read_text())
+        inputs['events'][0]['payload'] = {'device_id': 'fan-01', 'enabled': True, 'minimum_actuations': 1}
+        source.write_text(json.dumps(inputs))
+        window = self.window
+        window.select_configuration(Configuration(host, path))
+        window.show_page('control')
+        window.start_button.emit('clicked')
+        page = window.control_page
+        pump_until(lambda: page.inspect_button.get_sensitive())
+
+        def actuations():
+            with sqlite3.connect(f"file:{self.directory / 'state/fan.sqlite'}?mode=ro", uri=True) as db:
+                return db.execute('SELECT actuation_count FROM fan_state').fetchone()[0]
+
+        self.assertEqual(actuations(), 0)
+        page.inspect_button.emit('clicked')
+        pump_until(lambda: page.review is not None)
+        dialog, expected, entry = page.review
+        self.assertFalse(dialog.get_widget_for_response(Gtk.ResponseType.ACCEPT).get_sensitive())
+        view = next(widget.get_child() for widget in dialog.get_content_area().get_children() if isinstance(widget, Gtk.ScrolledWindow))
+        buffer = view.get_buffer()
+        self.assertEqual(json.loads(buffer.get_text(buffer.get_start_iter(), buffer.get_end_iter(), True)),
+                         {'device_id': 'fan-01', 'enabled': True})
+        self.assertEqual(expected[1], window.snapshot['runtime']['goals'][0]['candidate'])
+        self.assertEqual(actuations(), 0)
+        render_window(dialog, PROJECT_ROOT / 'var/control-panel/screenshots/goal-review.png')
+        dialog.response(Gtk.ResponseType.CANCEL)
+        self.assertIsNone(page.review)
+        self.assertEqual(actuations(), 0)
+        page.inspect_button.emit('clicked')
+        pump_until(lambda: page.review is not None)
+        dialog, _, entry = page.review
+        entry.set_text('Testfreigabe für den lokalen Lüftersimulator')
+        self.assertTrue(dialog.get_widget_for_response(Gtk.ResponseType.ACCEPT).get_sensitive())
+        dialog.response(Gtk.ResponseType.ACCEPT)
+        pump_until(lambda: window.snapshot['runtime']['completed_goals'] == 1)
+        self.assertEqual(actuations(), 1)
+
+    def test_plan_root_pause_and_cancel_use_the_running_scheduler(self):
+        host = real_configuration(PROJECT_ROOT, self.directory, 'dynamic-plans')
+        source = PROJECT_ROOT / 'apps/adapter-host/config/dynamic-plans'
+        host_config = json.loads(host.read_text())
+        # References to other example profiles stay in the repository.
+        for adapter in host_config['adapters']:
+            for field in ('profile', 'grant_file'):
+                if adapter[field].startswith('../'):
+                    adapter[field] = str((source / adapter[field]).resolve())
+        host.write_text(json.dumps(host_config))
+        path = self.directory / 'runtime.json'
+        runtime = json.loads(path.read_text())
+        runtime.update(journal='state/plan-runtime.sqlite', interval_ms=20)
+        for template in runtime['routes'][0]['plan']['templates']:
+            template['route']['activation'] = {'kind': 'at_time', 'unix_ms': 4102444800000}
+        path.write_text(json.dumps(runtime))
+
+        window = self.window
+        window.select_configuration(Configuration(host, path))
+        window.show_page('control')
+        window.start_button.emit('clicked')
+        page = window.control_page
+        pump_until(lambda: bool(page.records.get('plan:1', (None, {}))[1].get('steps')))
+        page.reason.set_text('Untersuchung pausieren')
+        page.pause_button.emit('clicked')
+        pump_until(lambda: window.snapshot['runtime']['paused_jobs'] > 1)
+        page.reason.set_text('Untersuchung abbrechen')
+        page.cancel_button.emit('clicked')
+        pump_until(lambda: page.records['plan:1'][1]['state'] == 'cancelled')
+        self.assertTrue(all(step['state'] == 'cancelled' for step in page.records['plan:1'][1]['steps']))
+        self.assertFalse(page.cancel_button.get_visible())
+
     def test_text_input_and_json_modes_send_through_the_real_adapter_and_report_invalid_payloads(self):
         host=real_configuration(PROJECT_ROOT,self.directory,'text-input')
         self.window.select_configuration(Configuration(host))

@@ -181,6 +181,50 @@ class ControllerTests(unittest.TestCase):
         controller.request_stop()
         self.assertEqual(next_event(controller,'finished')['code'],0)
 
+    def test_control_commands_use_the_owned_pipe_and_report_a_missing_reply(self):
+        binary = self.root / 'target/debug/arcs-host'
+        binary.write_text('''#!/usr/bin/python3
+import json,pathlib,sys,time
+args=sys.argv[1:]
+if args == ['--help']:
+    print('--control-stdin')
+    sys.exit(0)
+assert '--control-stdin' in args
+stop=pathlib.Path(args[args.index('--stop-file')+1])
+state=pathlib.Path(args[args.index('--config')+1]).with_suffix('.command')
+print(json.dumps({'event':'ready','catalog':[],'has_runtime':True,'control':{'transport':'stdin_jsonl','protocol_version':1}}),flush=True)
+for line in sys.stdin:
+    request=json.loads(line)
+    state.write_text(line)
+    while not stop.exists(): time.sleep(.02)
+    break
+print(json.dumps({'event':'stopped'}),flush=True)
+''')
+        runtime = self.root / 'runtime.json'
+        runtime.write_text(json.dumps({'config_version': 1}))
+        controller = self.controller()
+        with self.assertRaises(RuntimeError):
+            controller.submit_control('series', {})
+        controller.start(Configuration(self.host, runtime))
+        next_event(controller, 'ready')
+        command = {'sequence': 1, 'expected_revision': 0, 'command_id': 'pause', 'change': 'pause'}
+        request_id = controller.submit_control('series', command)
+        with self.assertRaises(RuntimeError):
+            controller.submit_control('series', command)
+        path = self.host.with_suffix('.command')
+        deadline = time.monotonic() + 5
+        while not path.exists() or not path.stat().st_size:
+            self.assertLess(time.monotonic(), deadline)
+            time.sleep(.02)
+        self.assertEqual(json.loads(path.read_text()),
+                         {'request_id': request_id, 'control': {'kind': 'series', 'command': command}})
+        controller.request_stop()
+        result = next_event(controller, 'control_result')
+        self.assertEqual(result['request_id'], request_id)
+        self.assertFalse(result['ok'])
+        self.assertIn('offen', result['error']['message'])
+        self.assertEqual(next_event(controller, 'finished')['code'], 0)
+
 
 if __name__ == '__main__':
     unittest.main()

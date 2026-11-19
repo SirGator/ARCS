@@ -3,6 +3,7 @@ use arcs::approval::ApprovalDecision;
 use arcs::core::{Actor, ActorType, VersionId};
 use serde::{Deserialize, Serialize};
 
+use crate::task_runtime::goal::GoalReview;
 use crate::task_runtime::scheduler::{SeriesControlCommand, SeriesControlReceipt};
 use crate::task_runtime::suspension::{TaskControlCommand, TaskControlReceipt};
 use crate::{Host, HostError, task_runtime::TaskRuntime};
@@ -16,6 +17,10 @@ pub enum PlanCommand {
 #[derive(Deserialize)]
 #[serde(tag = "command", rename_all = "snake_case", deny_unknown_fields)]
 pub enum GoalCommand {
+    Inspect {
+        sequence: u64,
+        candidate_version_id: VersionId,
+    },
     ReleaseResources {
         sequence: u64,
         reservation_versions: Vec<VersionId>,
@@ -55,6 +60,7 @@ pub enum OperatorCommand {
 pub enum CommandReceipt {
     Task(TaskControlReceipt),
     Series(SeriesControlReceipt),
+    GoalReview(GoalReview),
 }
 
 impl OperatorCommand {
@@ -73,14 +79,26 @@ impl OperatorCommand {
             Self::Plan(PlanCommand::Cancel { sequence, reason }) => {
                 runtime.cancel_plan(host, sequence, reason).map(|()| None)
             }
-            Self::Goal(command) => command.apply(runtime, host).map(|()| None),
+            Self::Goal(command) => command.apply(runtime, host),
         }
     }
 }
 
 impl GoalCommand {
-    fn apply(self, runtime: &mut TaskRuntime, host: &Host) -> Result<(), HostError> {
+    fn apply(
+        self,
+        runtime: &mut TaskRuntime,
+        host: &Host,
+    ) -> Result<Option<CommandReceipt>, HostError> {
         match self {
+            Self::Inspect {
+                sequence,
+                candidate_version_id,
+            } => {
+                return runtime
+                    .inspect_goal_review(host, sequence, &candidate_version_id)
+                    .map(|review| Some(CommandReceipt::GoalReview(review)));
+            }
             Self::ReleaseResources {
                 sequence,
                 reservation_versions,
@@ -111,6 +129,7 @@ impl GoalCommand {
             ),
             Self::Cancel { sequence, reason } => runtime.cancel_goal(host, sequence, reason),
         }
+        .map(|()| None)
     }
 }
 

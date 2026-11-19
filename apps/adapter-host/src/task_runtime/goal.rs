@@ -172,6 +172,15 @@ pub struct GoalTask {
     pub detail: String,
 }
 
+#[derive(Debug, Serialize)]
+pub struct GoalReview {
+    pub sequence: u64,
+    pub candidate_version_id: VersionId,
+    pub capability: CapabilityRef,
+    pub verification_version_id: VersionId,
+    pub payload: Value,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum GoalVerdict {

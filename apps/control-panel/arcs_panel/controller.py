@@ -13,6 +13,7 @@ import subprocess
 import tempfile
 import threading
 from dataclasses import dataclass
+from uuid import uuid4
 
 from .input_bridge import configured_inputs, connected_inputs, make_submission, enqueue_submission
 from .process_environment import process_environment, inherited_environment, validate_names
@@ -85,6 +86,8 @@ class SessionController:
         self._submission_thread = None
         self._submission_pending = False
         self._retry_submission = None
+        self._accepting_control = False
+        self._control_request: str | None = None
 
     @property
     def busy(self) -> bool:
@@ -129,6 +132,48 @@ class SessionController:
                 self._submission_pending = False
             self._push("input_queued", adapter_id=target.adapter_id, id=event["id"])
 
+    def submit_control(self, kind: str, command: dict) -> str:
+        if kind not in {"task", "series", "plan", "goal"}:
+            raise ValueError("Unbekannter Steuerungsbefehl.")
+        request_id = uuid4().hex
+        request = {"request_id": request_id, "control": {"kind": kind, "command": command}}
+        frame = (json.dumps(request, ensure_ascii=True, allow_nan=False) + "\n").encode("ascii")
+        if len(frame) > 65_537:
+            raise ValueError("Der Steuerungsbefehl ist zu groß.")
+        with self._lock:
+            process = self._process
+            if not self._accepting_control or self._stop.is_set() or process is None or process.poll() is not None:
+                raise RuntimeError("Für die Steuerung muss eine unterstützte ARCS-Runtime laufen.")
+            if self._control_request is not None:
+                raise RuntimeError("Der vorherige Befehl wartet auf eine Rückmeldung.")
+            # The writer owns this descriptor. Closing the session's stream can
+            # never block the event reader behind a pending write.
+            fd = os.dup(process.stdin.fileno())
+            self._control_request = request_id
+            writer = threading.Thread(target=self._write_control, args=(fd, frame, request_id), daemon=True)
+            try:
+                writer.start()
+            except RuntimeError:
+                self._control_request = None
+                os.close(fd)
+                raise
+        return request_id
+
+    def _write_control(self, fd: int, frame: bytes, request_id: str) -> None:
+        try:
+            with os.fdopen(fd, "wb") as writer:
+                writer.write(frame)
+        except OSError:
+            self._control_result({"event": "control_result", "request_id": request_id, "ok": False,
+                "error": {"message": "Verbindung zum Host verloren. Der Ausgang des Befehls ist offen."}})
+
+    def _control_result(self, event: dict) -> None:
+        with self._lock:
+            if self._control_request is None or event.get("request_id") != self._control_request:
+                return
+            self._control_request = None
+            self.events.put(event)
+
     def start(self, configuration: Configuration, credentials=None) -> None:
         read_configuration(configuration)
         self._begin(configuration, credentials)
@@ -144,16 +189,17 @@ class SessionController:
             self._stop.clear()
             self._forced.clear()
             self._accepting_input = False
+            self._accepting_control = False
             self._input_targets = []
         threading.Thread(target=self._worker, args=(configuration, credentials), daemon=True).start()
 
     def _push(self, event: str, **values) -> None:
         self.events.put({"event": event, **values})
 
-    def _run_process(self, command: list[str], json_events: bool, environment=None) -> int:
+    def _run_process(self, command: list[str], json_events: bool, environment=None, control_pipe=False) -> int:
         if self._stop.is_set():
             return 0
-        process = subprocess.Popen(command, cwd=self.root, stdin=subprocess.DEVNULL,
+        process = subprocess.Popen(command, cwd=self.root, stdin=subprocess.PIPE if control_pipe else subprocess.DEVNULL,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8",
             errors="replace", start_new_session=True, bufsize=1,
             env=process_environment(environment) if json_events else None)
@@ -184,6 +230,12 @@ class SessionController:
                             with self._lock:
                                 self._input_targets = targets
                                 self._accepting_input = not self._stop.is_set()
+                                control = event.get("control") or {}
+                                self._accepting_control = control_pipe and not self._stop.is_set() and (
+                                    control.get("transport") == "stdin_jsonl" and control.get("protocol_version") == 1)
+                        if event["event"] == "control_result":
+                            self._control_result(event)
+                            continue
                         self.events.put(event)
                         if event["event"] == "ready":
                             self._push("inputs", targets=targets, has_runtime=event["has_runtime"])
@@ -199,6 +251,21 @@ class SessionController:
             process.stderr.close()
             with self._lock:
                 self._process = None
+                self._accepting_control = False
+                pending = self._control_request
+            if pending is not None:
+                self._control_result({"event": "control_result", "request_id": pending, "ok": False,
+                    "error": {"message": "Die Sitzung endete vor der Rückmeldung. Der Ausgang des Befehls ist offen."}})
+            if process.stdin is not None:
+                process.stdin.close()
+
+    def _supports_live_control(self, binary: Path) -> bool:
+        try:
+            result = subprocess.run([str(binary), "--help"], cwd=self.root, stdin=subprocess.DEVNULL,
+                capture_output=True, timeout=5, env=process_environment())
+            return result.returncode == 0 and b"--control-stdin" in result.stdout
+        except (OSError, subprocess.TimeoutExpired):
+            return False
 
     def _worker(self, configuration: Configuration | None, credentials=None) -> None:
         lock_file = None
@@ -236,12 +303,16 @@ class SessionController:
                     self._push("state", state="starting")
                     command = [str(binary), "--config", str(configuration.host.expanduser().resolve()),
                         "--monitor", "--stop-file", str(stop_file)]
+                    control_pipe = False
                     if configuration.runtime:
                         command += ["--runtime", str(configuration.runtime.expanduser().resolve())]
+                        control_pipe = self._supports_live_control(binary)
+                        if control_pipe:
+                            command.append("--control-stdin")
                     environment = inherited_environment(preview["inherit_env"])
                     if credentials:
                         environment.update(credentials(configuration))
-                    result = self._run_process(command, True, environment)
+                    result = self._run_process(command, True, environment, control_pipe=control_pipe)
                     if result and not self._stop.is_set():
                         raise RuntimeError(f"ARCS wurde mit Status {result} beendet. Details stehen im Protokoll.")
         except Exception as error:
@@ -265,6 +336,7 @@ class SessionController:
         self._stop.set()
         with self._lock:
             self._accepting_input = False
+            self._accepting_control = False
             if self._stop_file is not None:
                 try:
                     self._stop_file.touch(exist_ok=True)

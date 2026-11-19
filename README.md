@@ -46,7 +46,8 @@ ergänzt Slice 23. Der [Bericht zur Neuplanung](docs/ZWISCHENBERICHT_2026-11-19_
 dokumentiert Slice 24. Der [Bericht zu wiederkehrenden Prüfungen](docs/ZWISCHENBERICHT_2026-11-19_RECURRENCE.md)
 dokumentiert Slice 25. Der [Bericht zur Steuerung von Prüfserien](docs/ZWISCHENBERICHT_2026-11-19_SERIES_CONTROL.md)
 dokumentiert Slice 26. Der [Bericht zur Steuerung im laufenden Host](docs/ZWISCHENBERICHT_2026-11-19_MONITOR_CONTROL.md)
-dokumentiert Slice 27. Die Berichte vom
+dokumentiert Slice 27. Der [Bericht zur Desktop-Steuerung](docs/ZWISCHENBERICHT_2026-11-19_DESKTOP_CONTROL.md)
+dokumentiert Slice 28. Die Berichte vom
 [17. November](docs/ZWISCHENBERICHT_2026-11-17.md) und
 [16. November](docs/ZWISCHENBERICHT_2026-11-16.md) dokumentieren frühere
 Umsetzungsstände, Prüfergebnisse und offene Grenzen.

@@ -56,7 +56,7 @@ impl MonitorControl {
     }
 
     pub(super) fn description(&self) -> Value {
-        json!({"transport":"stdin_jsonl","protocol_version":1,"max_line_bytes":MAX_LINE_BYTES,"commands_per_tick":COMMANDS_PER_TICK})
+        json!({"transport":"stdin_jsonl","protocol_version":1,"max_line_bytes":MAX_LINE_BYTES,"commands_per_tick":COMMANDS_PER_TICK,"goal_review_preview":true})
     }
 
     pub(super) fn apply_pending(

@@ -245,6 +245,27 @@ fn live_goal_review_requires_the_current_candidate_and_executes_once() {
         "reason":"test approval for the local fan simulator"})
     };
     assert_eq!(fan_count(), 0);
+    let inspect = |candidate: &Value| json!({"command":"inspect","sequence":task["sequence"],"candidate_version_id":candidate});
+    assert_eq!(
+        monitor.command("old-preview", "goal", inspect(&json!("wrong-candidate")))["ok"],
+        false
+    );
+    let preview = monitor.command("preview", "goal", inspect(&task["candidate"]));
+    assert_eq!(preview["ok"], true);
+    assert_eq!(
+        preview["receipt"]["candidate_version_id"],
+        task["candidate"]
+    );
+    assert_eq!(
+        preview["receipt"]["verification_version_id"],
+        task["verification"]
+    );
+    assert_eq!(preview["receipt"]["capability"], task["capability"]);
+    assert_eq!(
+        preview["receipt"]["payload"],
+        json!({"device_id":"fan-01","enabled":true})
+    );
+    assert_eq!(fan_count(), 0);
     let stale = monitor.command(
         "stale-candidate",
         "goal",

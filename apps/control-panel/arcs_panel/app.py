@@ -14,6 +14,7 @@ gi.require_version("Gdk", "3.0")
 from gi.repository import Gdk, GdkPixbuf, Gio, GLib, Gtk, Pango
 
 from .controller import Configuration, PROJECT_ROOT, SessionController, read_configuration
+from .control_page import ControlPage
 from .input_page import InputPage
 from .models_page import ModelsPage
 
@@ -78,6 +79,8 @@ class ControlWindow(Gtk.ApplicationWindow):
         self._updating = False
         self._stopping_since = None
         self._source_id = None
+        self._control_protocol = False
+        self._review_preview = False
         self.presets = [
             ("Aufgaben per Text · Beispiel", Configuration(self.root / "apps/adapter-host/config/text-tasks/host.json", self.root / "apps/adapter-host/config/text-tasks/runtime.json")),
             ("Mehrere Adapter", Configuration(self.root / "apps/adapter-host/config/multiple-adapters/host.json")),
@@ -128,7 +131,7 @@ class ControlWindow(Gtk.ApplicationWindow):
         nav.pack_start(kicker, False, False, 0)
         self.stack = Gtk.Stack(transition_type=Gtk.StackTransitionType.NONE)
         self.nav_buttons = {}
-        for key, title, icon in [("overview", "Übersicht", "view-grid-symbolic"), ("input", "Eingabe", "mail-message-new-symbolic"), ("models", "Modelle", "preferences-system-symbolic"), ("adapters", "Adapter", "network-workgroup-symbolic"), ("logs", "Protokolle", "utilities-terminal-symbolic")]:
+        for key, title, icon in [("overview", "Übersicht", "view-grid-symbolic"), ("input", "Eingabe", "mail-message-new-symbolic"), ("control", "Steuerung", "system-run-symbolic"), ("models", "Modelle", "preferences-system-symbolic"), ("adapters", "Adapter", "network-workgroup-symbolic"), ("logs", "Protokolle", "utilities-terminal-symbolic")]:
             item = button(title, icon, "nav", lambda _, name=key: self.show_page(name))
             self.nav_buttons[key] = item
             nav.pack_start(item, False, False, 0)
@@ -200,6 +203,8 @@ class ControlWindow(Gtk.ApplicationWindow):
         self._build_overview()
         self.input_page = InputPage(self.controller.submit_input)
         self.stack.add_named(self.input_page, "input")
+        self.control_page = ControlPage(self.controller.submit_control)
+        self.stack.add_named(self.control_page, "control")
         self.models_page = ModelsPage(self.root, self._use_models, self._model_connections)
         self.stack.add_named(self.models_page, "models")
         self._build_adapters()
@@ -361,6 +366,8 @@ class ControlWindow(Gtk.ApplicationWindow):
         self.snapshot = {}
         self.recent = []
         self.input_page.reset()
+        self.control_page.reset()
+        self._control_protocol = False
         try:
             preview = read_configuration(configuration)
             self.catalog = preview["adapters"]
@@ -421,6 +428,8 @@ class ControlWindow(Gtk.ApplicationWindow):
             self._last_ready = None
             self._last_goals = {}
             self.input_page.reset()
+            self.control_page.reset()
+            self._control_protocol = False
             self.snapshot = {}
             self.metrics["artifacts"][0].set_text("—")
             self.metrics["review"][0].set_text("—")
@@ -455,6 +464,7 @@ class ControlWindow(Gtk.ApplicationWindow):
     def _set_state(self, state):
         self.state = state
         self.input_page.set_running(state == "running")
+        self.control_page.set_connected(state == "running" and self._control_protocol, self._review_preview)
         text, sub = {
             "idle": ("Bereit", "Wartet auf den Start"), "building": ("Build", "Programme werden gebaut"),
             "starting": ("Startet", "Adapter werden verbunden"), "running": ("Läuft", "Verarbeitung ist aktiv"),
@@ -552,6 +562,9 @@ class ControlWindow(Gtk.ApplicationWindow):
                 self.footer_status.set_text(f"Lokaler Prozess · PID {event['pid']}")
             elif kind == "ready":
                 self.catalog = event["catalog"]
+                control = event.get("control") or {}
+                self._control_protocol = control.get("protocol_version") == 1 and control.get("transport") == "stdin_jsonl"
+                self._review_preview = control.get("goal_review_preview") is True
                 self.metrics["adapters"][0].set_text(str(len(self.catalog)))
                 self.metrics["adapters"][1].set_text("angeschlossen")
                 if self.state != "stopping":
@@ -562,6 +575,7 @@ class ControlWindow(Gtk.ApplicationWindow):
                 self.metrics["artifacts"][0].set_text(f"{event['stored_artifacts']:,}".replace(",", "."))
                 runtime = event.get("runtime")
                 self.input_page.goal_progress(runtime.get("goals", []) if runtime else [])
+                self.control_page.snapshot(runtime or {})
                 self.metrics["review"][0].set_text(str(runtime["ready_for_review"] + runtime.get("awaiting_approval", 0)) if runtime else "—")
                 self.metrics["review"][1].set_text(f"{runtime['pending_jobs']} offen · {runtime['failed_jobs']} fehlgeschlagen" if runtime else "Keine Aufgaben-Runtime")
                 if runtime and runtime.get("goals"):
@@ -593,6 +607,8 @@ class ControlWindow(Gtk.ApplicationWindow):
                 self._render_activity()
             elif kind == "inputs":
                 self.input_page.connect_targets(event["targets"], event["has_runtime"])
+            elif kind == "control_result":
+                self.control_page.result(event)
             elif kind in ["input_queued", "input_error"]:
                 self.input_page.result(event)
                 if kind == "input_queued":

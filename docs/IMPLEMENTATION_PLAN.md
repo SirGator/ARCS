@@ -372,6 +372,13 @@
 > einzelnen CLI-Kommandos. Die Laufzeitprüfung umfasst fehlerhafte Eingaben,
 > dauerhaft gespeicherte Pausen und eine versionsgebundene Simulatorfreigabe.
 
+> Achtundzwanzigster Schritt gemäß v3 §7.2 PAR-07/PAR-08 und §8.2 LNG-05/
+> LNG-08. Das GTK-Kontrollpanel steuert gemeldete Goals, Pläne und Prüfserien
+> über den laufenden Monitor. Eine gezielte Leseabfrage liefert für den aktuell
+> wartenden und geprüften Goal-Vorschlag die genauen Aktionsparameter. Das
+> Panel bindet die Entscheidung an die angezeigte Candidate-Version. Der Host
+> prüft Revision, Verification und Freigabe weiterhin im vorhandenen Pfad.
+
 **Leitbild:** ARCS ist ein universeller Agent. Es soll sich einfach bedienen lassen, beliebige kompatible Systeme verbinden, eigenständig Probleme lösen und langfristige Aufgaben über Monate verfolgen.
 
 ## 1. Verbindliche Architekturregeln

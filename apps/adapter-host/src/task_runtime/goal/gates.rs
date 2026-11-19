@@ -242,6 +242,52 @@ impl TaskRuntime {
         Ok(())
     }
 
+    /// Read the parameters of the currently reviewable proposal for the local operator.
+    pub fn inspect_goal_review(
+        &self,
+        host: &Host,
+        sequence: u64,
+        candidate: &VersionId,
+    ) -> Result<GoalReview, HostError> {
+        self.check_goal_host(host)?;
+        let task = self.review_task(sequence, candidate)?;
+        let verification = task
+            .verification
+            .ok_or_else(|| invalid("missing verification"))?;
+        let report = load(host, &verification)?;
+        if report.schema_id.0 != "arcs.verification_report.v1"
+            || report.created_by.id != "arcs.verification"
+            || report.payload["target_version"] != candidate.0
+            || report.payload["verdict"] != "pass"
+        {
+            return Err(invalid("verification does not match the current proposal"));
+        }
+        let proposal = load(host, candidate)?;
+        let review = GoalReview {
+            sequence,
+            candidate_version_id: candidate.clone(),
+            capability: task
+                .capability
+                .ok_or_else(|| invalid("missing action capability"))?,
+            verification_version_id: verification,
+            payload: proposal.payload,
+        };
+        if serde_json::to_vec(&review).map_err(service_error)?.len() > 65_536 {
+            return Err(invalid("goal review exceeds the local preview size limit"));
+        }
+        Ok(review)
+    }
+
+    fn review_task(&self, sequence: u64, candidate: &VersionId) -> Result<GoalTask, HostError> {
+        let task = self
+            .saved_goal(sequence)?
+            .ok_or_else(|| invalid("unknown goal"))?;
+        if task.state != GoalState::AwaitingApproval || task.candidate.as_ref() != Some(candidate) {
+            return Err(invalid("goal is not waiting for this candidate's approval"));
+        }
+        Ok(task)
+    }
+
     /// Vertrauenswürdiger Anwendungseinstieg. Der Aufrufer authentifiziert den
     /// Menschen/die Systempolicy; ein Reasoner kann diesen Port nicht aufrufen.
     /// Die konkrete Candidate-Version ist Pflicht, damit keine neuere Runde
@@ -269,12 +315,7 @@ impl TaskRuntime {
                 "review needs a human/system actor and a bounded reason",
             ));
         }
-        let mut task = self
-            .saved_goal(sequence)?
-            .ok_or_else(|| invalid("unknown goal"))?;
-        if task.state != GoalState::AwaitingApproval || task.candidate.as_ref() != Some(candidate) {
-            return Err(invalid("goal is not waiting for this candidate's approval"));
-        }
+        let mut task = self.review_task(sequence, candidate)?;
         let route = self.route_for_job(host, sequence, &task.route_id)?;
         let config = route
             .goal

@@ -89,6 +89,13 @@ des Checkouts lassen sie sich mit demselben Befehl aktualisieren.
   Sprachverständnis benötigt eine entsprechend leistungsfähige Implementierung.
 - **Protokolle:** Prozessmeldungen, Build-Ausgabe und Fehler; als Datei exportierbar.
   Bei Goal-Routen außerdem die tatsächlichen Zielzustände und Schrittzahlen.
+- **Steuerung:** Zeigt die vom laufenden Host gemeldeten Goals, Pläne und
+  Prüfserien. Wähle einen Eintrag aus und gib für Pause, Fortsetzung oder
+  Abbruch eine Begründung ein. Bei einem Goal mit offener Freigabe öffnet
+  **Vorschlag prüfen** die konkrete Fähigkeit und ihre vollständigen Parameter.
+  **Freigeben** und **Ablehnen** beziehen sich auf genau den angezeigten
+  Vorschlag. Der Dialog verlangt die Begründung der Entscheidung. Nach der
+  Bestätigung zeigt der Host den weiteren Verlauf im nächsten Snapshot.
 - **Stoppen:** Fordert einen geordneten Stopp zwischen den Host-Runden an.
   Auch das Schließen des Fensters wartet zunächst auf diesen Stopp. Nach acht
   Sekunden erscheint bei Bedarf **Sofort beenden**, das ausschließlich die
@@ -100,9 +107,10 @@ wird einmalig auf „Aufgaben per Text · Beispiel“ umgestellt. Eigene Konfigu
 und danach ausdrücklich gewählte Beispiele bleiben erhalten.
 Eine Sperre verhindert, dass zwei Kontrollpanels dieselbe Core-Datenbank
 gleichzeitig starten. Diese Sperre gilt zwischen Kontrollpanels.
-Die Oberfläche bietet keine manuellen Approval-Buttons. Freigaben folgen der
-Runtime-Konfiguration beziehungsweise dem dokumentierten Betreiberkommando.
-Adapter werden weiterhin durch die Host-Konfiguration beim Start angeschlossen.
+Manuelle Entscheidungen sind im Kontrollpanel verfügbar, wenn die ausgewählte
+Runtime eine Freigabe verlangt und der Host die Vorschau anbietet. Ältere
+Host-Binärprogramme unterstützen weiterhin die Statusansicht. **Bauen**
+aktualisiert den Host auf den lokalen Quellstand.
 
 ## Modellverbindungen und Schlüssel
 
@@ -181,7 +189,7 @@ Das Panel startet den bestehenden Host mit:
 
 ```bash
 ./target/debug/arcs-host --config <host.json> \
-  --monitor --stop-file <frischer-stop-pfad> [--runtime <runtime.json>]
+  --monitor --stop-file <frischer-stop-pfad> [--runtime <runtime.json> --control-stdin]
 ```
 
 `ready` enthält den echten Anschlusskatalog und `input_contracts` mit den
@@ -191,6 +199,11 @@ Artefakte. Dabei werden keine vollständigen Artefakt-Payloads übertragen.
 Goal-Meldungen enthalten zusätzlich `input_source` (Adapter-ID und Referenz),
 damit die Eingabeseite den Fortschritt dem passenden Auftrag zuordnen kann.
 `stopped` signalisiert den abgeschlossenen Stopp, `error` einen Fehler.
+Mit unterstützter Runtime überträgt das Panel Steuerungsbefehle im Hintergrund
+über die Pipe des eigenen Host-Prozesses. Es verarbeitet eine ausstehende
+Anfrage zur Zeit und ordnet die Rückmeldung anhand der Request-ID zu. Die
+Aktionsvorschau wird gezielt abgefragt. In den regulären Snapshots stehen
+weiterhin nur Zusammenfassungen und die Referenz auf den Vorschlag.
 `--ticks` begrenzt einen Testlauf. Eine vorhandene Stop-Datei wird vor dem
 Host-Start abgewiesen. Der Standard-CLI-Lauf ohne `--monitor` bleibt erhalten.
 

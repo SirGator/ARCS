@@ -132,7 +132,7 @@ CLI-Befehls.
 | `task` | `--task-command` | Aufgabe pausieren oder fortsetzen |
 | `series` | `--series-command` | Prüfserie pausieren, fortsetzen oder abbrechen |
 | `plan` | `--plan-command` | Plan abbrechen |
-| `goal` | `--goal-command` | Goal-Vorschlag freigeben oder ablehnen, Goal abbrechen oder Ressourcen anhand von Belegen klären |
+| `goal` | `--goal-command` | Aktionsvorschlag ansehen, freigeben oder ablehnen, Goal abbrechen oder Ressourcen anhand von Belegen klären |
 
 Die Antwort `control_result` erscheint im selben JSON-Lines-Strom wie die
 Snapshots. `request_id` korreliert sie mit der Eingabe. `ok: true` bestätigt
@@ -143,6 +143,14 @@ zuordenbaren Zeilen ist `request_id` `null`. Wer einen Aufgaben- oder
 Serienbefehl nach einem verlorenen Beleg wiederholt, verwendet dessen
 unveränderte `command_id`. Für Goal-Freigaben nennt der Befehl weiterhin die
 konkrete aktuelle Candidate-Version.
+
+`ready.control.goal_review_preview` zeigt an, dass der Host eine genaue
+Aktionsvorschau liefern kann. Ein Goal-Befehl mit `command: "inspect"`,
+`sequence` und `candidate_version_id` liest den aktuellen geprüften
+Vorschlag. Sein Beleg enthält `payload`, `capability` und
+`verification_version_id`. Im Einzelkommando steht die Vorschau unter
+`goal_review`. Die Vorschau ist auf 65.536 Byte begrenzt und enthält die
+vollständigen Parameter des angezeigten Vorschlags.
 
 Der Monitor nimmt vollständige Zeilen bis 65.536 Byte an. Die interne Queue
 fasst 16 Zeilen und der Host verarbeitet bis zu acht davon vor einer Runde.

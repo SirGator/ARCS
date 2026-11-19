@@ -9,6 +9,7 @@ button.primary { background: #75dfc2; color: #102d25; border-color: #75dfc2; fon
 button.primary:hover { background: #93ead2; border-color: #93ead2; }
 button.primary:disabled { background: #2b4843; color: #77a399; border-color: #35574e; }
 button.danger { color: #ffaaaa; border-color: #684249; background: #37272e; }
+button.danger:disabled { color: #697282; background: #242932; border-color: #303640; }
 button.flat, button.nav { border-color: transparent; background: transparent; box-shadow: none; }
 button.flat:hover { background: #2a3039; }
 button.nav { padding: 13px 16px; border-radius: 7px; color: #929cab; }
