@@ -29,6 +29,7 @@ und überschreibt die benötigten Methoden:
 | `transform` | Einen geprüften Payload deterministisch in einen Ergebnis-Payload übersetzen |
 | `output` | Einen bereits autorisierten Ausgabeauftrag dauerhaft idempotent zustellen |
 | `execute` | Einen autorisierten Auftrag fachlich prüfen und idempotent ausführen |
+| `execute_fenced` | Einen autorisierten Auftrag an die geprüfte Reservierungsrevision binden |
 | `read_data` | Unveränderliche referenzierte Daten als begrenzten Block liefern |
 
 `serve` übernimmt das begrenzte JSON-Lines-Framing, den Hello-Dialog, die
@@ -40,6 +41,12 @@ Die interne Action-Struktur und ihr fachlicher Eingabevertrag bleiben beim
 Treiber. JSON-Schema-Payloadvalidierung und Autorisierung erfolgen weiterhin
 im Host/Core. Das SDK prüft zusätzlich Antwortkorrelation, Request-Payloadlimit
 und die Identität und Capability ausgehender Observations.
+
+Das SDK leitet Aufträge mit passender `ActFence` an `Adapter::execute_fenced`
+einer `fenced_act`-Capability weiter. Der Treiber prüft die Revision gegen seinen
+dauerhaften Gerätestand und bindet den Vergleich an die eigentliche Wirkung.
+Der [Adaptervertrag](../../ADAPTER_PROTOCOL.md#reservierungsrevision-an-der-act-grenze)
+beschreibt die Felder und den Simulator-Nachweis.
 
 Eine neue Implementierung verwendet im ausführbaren Programm etwa:
 

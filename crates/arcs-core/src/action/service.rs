@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::adapters::{AdapterRegistry, CapabilityContract, CapabilityRef};
+use crate::adapters::{AdapterRegistry, CapabilityRef};
 use crate::approval::ApprovalDecision;
 use crate::core::{
     Actor, ActorType, Artifact, ArtifactFactory, ArtifactFactoryInput, ArtifactIdGenerator, Clock,
@@ -95,20 +95,15 @@ impl<'a> ActionService<'a> {
         let (_, descriptor) = self
             .policy
             .authorized_capability(&capability.adapter_id, &capability.capability_id)?;
-        let CapabilityContract::Act {
-            accepts,
-            idempotent,
-            ..
-        } = &descriptor.contract
-        else {
+        let Some(contract) = descriptor.contract.act() else {
             return Err(ActionError::CapabilityIsNotAct(capability.clone()));
         };
-        if !idempotent {
+        if !contract.idempotent {
             return Err(ActionError::ActCapabilityIsNotIdempotent(
                 capability.clone(),
             ));
         }
-        if !accepts.contains(&candidate.schema_id) {
+        if !contract.accepts.contains(&candidate.schema_id) {
             return Err(ActionError::CandidateSchemaNotAccepted {
                 capability: capability.clone(),
                 schema: candidate.schema_id.clone(),

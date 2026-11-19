@@ -1,6 +1,7 @@
 use crate::adapters::{AdapterCallError, AdapterId, AdapterRegistryError, CapabilityRef};
 use crate::core::{ArtifactFactoryError, SchemaId, SchemaViolation, VersionId};
 use crate::runtime::InvocationError;
+use crate::runtime::reservations::ReservationError;
 use crate::store::StoreError;
 
 #[derive(Debug)]
@@ -30,6 +31,8 @@ pub enum ExecutionError {
     EndpointAdapterMismatch,
     CapabilityIsNotAct(CapabilityRef),
     ActCapabilityIsNotIdempotent(CapabilityRef),
+    ReservationFenceMismatch(CapabilityRef),
+    Reservation(ReservationError),
     CapabilityNotRequired(CapabilityRef),
     ExecutorClassRequired(AdapterId),
     InputSchemaNotAccepted {

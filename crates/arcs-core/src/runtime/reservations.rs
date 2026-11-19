@@ -3,6 +3,7 @@ mod records;
 #[cfg(test)]
 mod tests;
 
+use crate::adapters::ActFence;
 use crate::core::{Actor, ActorType, Artifact, Clock, SchemaRegistry, VersionId};
 use crate::store::{SqliteArtifactStore, StoreError};
 use serde::{Deserialize, Serialize};
@@ -96,6 +97,30 @@ impl<'a> ReservationService<'a> {
 
     pub fn current(&self, resource: &str) -> Result<Option<Reservation>, ReservationError> {
         self.load(resource)?.map(|a| records::parse(&a)).transpose()
+    }
+
+    pub(crate) fn act_fence(&self, expected: &Reservation) -> Result<ActFence, ReservationError> {
+        let artifact = self
+            .load(&expected.resource)?
+            .ok_or(ReservationError::Conflict)?;
+        let current = records::parse(&artifact)?;
+        if current.version_id != expected.version_id
+            || current.owner != expected.owner
+            || current.state != ReservationState::Held
+            || expected.state != ReservationState::Held
+        {
+            return Err(ReservationError::Conflict);
+        }
+        let fence = ActFence {
+            authority: self.store.authority_id()?,
+            resource: current.resource,
+            revision: artifact.version,
+            reservation_version_id: current.version_id,
+        };
+        if !fence.is_valid() {
+            return Err(invalid("invalid current reservation fence"));
+        }
+        Ok(fence)
     }
 
     pub fn acquire(
@@ -289,13 +314,7 @@ impl<'a> ReservationService<'a> {
 pub fn validate_resources(resources: &[String]) -> Result<Vec<String>, ReservationError> {
     if resources.is_empty()
         || resources.len() > 16
-        || resources.iter().any(|name| {
-            name.is_empty()
-                || name.len() > 64
-                || !name
-                    .bytes()
-                    .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
-        })
+        || resources.iter().any(|name| !ActFence::valid_resource(name))
         || resources.iter().collect::<BTreeSet<_>>().len() != resources.len()
     {
         return Err(invalid(

@@ -73,6 +73,9 @@ pub struct ActionRule {
     /// Zusätzlicher, vom Betreiber registrierter Payload-Vertrag für die
     /// Verification (z.B. erlaubte Zielgeräte, Wertebereiche, Pflichtfelder).
     pub verification_schema_id: SchemaId,
+    /// The resource revision to carry for a controller that requires fencing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fenced_resource: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -341,10 +344,25 @@ impl GoalConfig {
                     "goal action must be unique and allowed to the planner",
                 ));
             }
-            if !matches!(contract(&action.capability)?, CapabilityContract::Act {accepts,idempotent:true,..} if accepts.contains(&route.target_schema_id))
-            {
+            let capability = contract(&action.capability)?;
+            let Some(act) = capability.act() else {
                 return Err(invalid(
                     "goal action must be idempotent and accept planner candidates",
+                ));
+            };
+            if !act.idempotent || !act.accepts.contains(&route.target_schema_id) {
+                return Err(invalid(
+                    "goal action must be idempotent and accept planner candidates",
+                ));
+            }
+            if act.fenced_resource != action.fenced_resource.as_deref()
+                || action
+                    .fenced_resource
+                    .as_ref()
+                    .is_some_and(|resource| !self.exclusive_resources.contains(resource))
+            {
+                return Err(invalid(
+                    "goal action requires a matching fenced resource in exclusive_resources",
                 ));
             }
             let schema = host

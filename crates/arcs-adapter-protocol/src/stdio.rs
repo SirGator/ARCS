@@ -5,7 +5,7 @@ use std::io::{BufRead, Read, Write};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use crate::{
-    ActInvocation, ActResponse, AdapterManifest, DataChunk, DataRead, InputMessage,
+    ActFence, ActInvocation, ActResponse, AdapterManifest, DataChunk, DataRead, InputMessage,
     ObservationMessage, OutputInvocation, OutputResponse, RequestInvocation, RequestResponse,
     TransformInvocation, TransformResponse,
 };
@@ -56,6 +56,10 @@ pub enum HostMessage {
     },
     Execute {
         invocation: ActInvocation,
+    },
+    ExecuteFenced {
+        invocation: ActInvocation,
+        fence: ActFence,
     },
     ReadData {
         request: DataRead,

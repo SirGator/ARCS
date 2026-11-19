@@ -2,6 +2,7 @@
 mod goal_support;
 mod support;
 use arcs::{
+    adapters::{ActFence, ActInvocation},
     approval::ApprovalDecision,
     core::{Actor, ActorType},
     runtime::reservations::ReservationState,
@@ -130,6 +131,83 @@ fn competing_goals_acquire_exclusively_before_reading_state_and_release_after_as
     let second = runtime.goals_after(1, 10).unwrap().remove(0);
     let before = host.store().get(&second.before[0]).unwrap().unwrap();
     assert_eq!(before.payload["actuation_count"], 1);
+    host.shutdown().unwrap();
+}
+
+#[test]
+fn a_fenced_goal_passes_its_exact_held_revision_to_the_simulated_controller() {
+    let f = fixture(false);
+    let mut profile = f.read("fan-profile.json");
+    profile["fenced_resource"] = json!("device.fan-01");
+    f.write("fan-profile.json", profile);
+    let mut host = f.host();
+
+    let runtime_path = f.directory.join("runtime.json");
+    let mut config = f.read("runtime.json");
+    assert!(TaskRuntime::open(&host, RuntimeConfig::load(&runtime_path).unwrap()).is_err());
+    let goal = &mut config["routes"][0]["goal"];
+    goal["exclusive_resources"] = json!(["device.fan-02"]);
+    goal["actions"][0]["fenced_resource"] = json!("device.fan-02");
+    f.write("runtime.json", config.clone());
+    assert!(TaskRuntime::open(&host, RuntimeConfig::load(&runtime_path).unwrap()).is_err());
+    config["routes"][0]["goal"]["exclusive_resources"] = json!(["device.fan-01"]);
+    config["routes"][0]["goal"]["actions"][0]["fenced_resource"] = json!("device.fan-01");
+    f.write("runtime.json", config);
+
+    let mut runtime = f.runtime(&host);
+    let goal = waiting(&mut host, &mut runtime);
+    let held = runtime.exclusive_resources(&host).unwrap().remove(0);
+    approve(&host, &mut runtime, &goal);
+    until(&mut host, &mut runtime, |r| {
+        r.goals_after(0, 1).unwrap()[0].state == GoalState::Observing
+    });
+    let dispatched = runtime.goals_after(0, 1).unwrap().remove(0);
+    let json: String = f
+        .db("fan")
+        .query_row(
+        "SELECT input_json FROM invocations WHERE json_extract(input_json,'$[0]')='execute_fenced'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let (_, invocation, fence): (String, ActInvocation, ActFence) =
+        serde_json::from_str(&json).unwrap();
+    assert_eq!(fence.resource, "device.fan-01");
+    assert_eq!(fence.reservation_version_id, held.version_id);
+    assert_eq!(fence.revision, 1);
+    let result = host
+        .store()
+        .get(dispatched.execution.as_ref().unwrap())
+        .unwrap()
+        .unwrap();
+    assert!(
+        result
+            .provenance
+            .unwrap()
+            .parents
+            .contains(&held.version_id.0)
+    );
+    assert!(
+        host.execute_approved(
+            &invocation.capability.adapter_id,
+            dispatched.action.as_ref().unwrap(),
+        )
+        .is_err()
+    );
+    assert_eq!(acts(&f), 1);
+    host.shutdown().unwrap();
+    drop((runtime, host));
+
+    let mut host = f.host();
+    let mut runtime = f.runtime(&host);
+    until(&mut host, &mut runtime, |r| {
+        r.report(0).unwrap().completed_goals == 1
+    });
+    assert_eq!(
+        runtime.exclusive_resources(&host).unwrap()[0].state,
+        ReservationState::Released
+    );
+    assert_eq!(acts(&f), 1);
     host.shutdown().unwrap();
 }
 

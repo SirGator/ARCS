@@ -401,6 +401,13 @@
 > Begründung. Die vorhandene Freigabe vergleicht den vollständigen Satz
 > gehaltener Revisionen und speichert die Entscheidung im Artifact-Netz.
 
+> Zweiunddreißigster Schritt gemäß v3 §7.2 PAR-04/PAR-10 und §7.3:
+> Ein Act-Adapter kann die exakte Revision einer benannten Ressource
+> verlangen. Der Core bindet sie an Invocation und Ausführungsbeleg.
+> Der Lüftersimulator prüft und speichert die höchste angenommene Revision
+> atomar mit dem Effekt. Eine Controller-Bestätigung beim Schließen einer
+> Reservierung und die Übertragung auf reale Controller stehen aus.
+
 **Leitbild:** ARCS ist ein universeller Agent. Es soll sich einfach bedienen lassen, beliebige kompatible Systeme verbinden, eigenständig Probleme lösen und langfristige Aufgaben über Monate verfolgen.
 
 ## 1. Verbindliche Architekturregeln

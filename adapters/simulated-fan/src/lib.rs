@@ -4,7 +4,7 @@ use arcs_adapter_protocol::{
     ADAPTER_PROTOCOL_VERSION, AdapterId, AdapterManifest, CapabilityContract, CapabilityDescriptor,
     CapabilityId,
 };
-use arcs_adapter_protocol::{SchemaId, VersionId};
+use arcs_adapter_protocol::{ActFence, SchemaId, VersionId};
 use serde::{Deserialize, Serialize};
 
 pub const ADAPTER: &str = "demo.fan";
@@ -26,6 +26,8 @@ pub struct Profile {
     pub unit: String,
     pub activate_above_celsius: f64,
     pub max_auto_approve_celsius: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fenced_resource: Option<String>,
 }
 
 impl Profile {
@@ -42,6 +44,10 @@ impl Profile {
             || !profile.activate_above_celsius.is_finite()
             || !profile.max_auto_approve_celsius.is_finite()
             || profile.max_auto_approve_celsius <= profile.activate_above_celsius
+            || profile
+                .fenced_resource
+                .as_deref()
+                .is_some_and(|name| !ActFence::valid_resource(name))
         {
             return Err("invalid simulated fan profile".into());
         }
@@ -86,11 +92,29 @@ pub fn manifest() -> AdapterManifest {
 /// Eine Installation darf dieselben lokalen Fähigkeiten wie andere
 /// Installationen anbieten; ihre Adapter-ID unterscheidet die Ziele.
 pub fn manifest_with_id(adapter_id: AdapterId) -> AdapterManifest {
+    manifest_for(adapter_id, None)
+}
+
+pub fn manifest_for(adapter_id: AdapterId, fenced_resource: Option<&str>) -> AdapterManifest {
     let descriptor = |id: &str, contract, permission: &str| CapabilityDescriptor {
         description: None,
         id: CapabilityId(id.into()),
         contract,
         required_permissions: vec![permission.into()],
+    };
+    let accepts = vec![SchemaId(CANDIDATE.into())];
+    let emits = vec![SchemaId(RESULT.into())];
+    let action = match fenced_resource {
+        Some(resource) => CapabilityContract::FencedAct {
+            accepts,
+            emits,
+            fenced_resource: resource.to_owned(),
+        },
+        None => CapabilityContract::Act {
+            accepts,
+            emits,
+            idempotent: true,
+        },
     };
     AdapterManifest {
         protocol_version: ADAPTER_PROTOCOL_VERSION,
@@ -127,15 +151,7 @@ pub fn manifest_with_id(adapter_id: AdapterId) -> AdapterManifest {
                 },
                 "sensor.read",
             ),
-            descriptor(
-                "fan.set",
-                CapabilityContract::Act {
-                    accepts: vec![SchemaId(CANDIDATE.into())],
-                    emits: vec![SchemaId(RESULT.into())],
-                    idempotent: true,
-                },
-                "fan.write",
-            ),
+            descriptor("fan.set", action, "fan.write"),
         ],
     }
 }

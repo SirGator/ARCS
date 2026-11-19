@@ -166,6 +166,11 @@ impl SqliteArtifactStore {
                 epoch INTEGER PRIMARY KEY AUTOINCREMENT,
                 node TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS store_identity (
+                singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+                authority TEXT NOT NULL
+            );
+            INSERT OR IGNORE INTO store_identity VALUES (1, lower(hex(randomblob(16))));
             CREATE TABLE IF NOT EXISTS ingress_receipts (
                 receipt_key TEXT PRIMARY KEY,
                 input_json TEXT NOT NULL,
@@ -176,6 +181,14 @@ impl SqliteArtifactStore {
         ensure_subject_history_schema(&connection)?;
         connection.execute("CREATE INDEX IF NOT EXISTS idx_artifact_versions_schema_subject_sequence ON artifact_versions(schema_id,subject,sequence)",[])?;
         Ok(Self { connection })
+    }
+
+    pub(crate) fn authority_id(&self) -> Result<String, StoreError> {
+        Ok(self.connection.query_row(
+            "SELECT authority FROM store_identity WHERE singleton=1",
+            [],
+            |row| row.get(0),
+        )?)
     }
 
     /// Reserviert vor der ersten ID einen dauerhaften, exklusiven Namensraum.

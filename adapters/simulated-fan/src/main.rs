@@ -1,5 +1,7 @@
 //! Persistenter Simulator; keine Hardware und kein Gerätewissen im Core.
 
+mod fence;
+
 use arcs_simulated_fan as fan;
 
 use std::io::{self, BufReader};
@@ -7,10 +9,10 @@ use std::io::{self, BufReader};
 use arcs_adapter_protocol::ObservationMessage;
 use arcs_adapter_protocol::SchemaId;
 use arcs_adapter_protocol::stdio::AdapterMessage;
-use arcs_adapter_protocol::{ActInvocation, ActResponse, CapabilityId, CapabilityRef};
+use arcs_adapter_protocol::{ActFence, ActInvocation, ActResponse, CapabilityId, CapabilityRef};
 use arcs_adapter_protocol::{RequestInvocation, RequestResponse};
 use arcs_adapter_sdk::{Adapter, AdapterError, PendingObservation, serve};
-use rusqlite::{Connection, OptionalExtension, Transaction, params};
+use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -98,7 +100,7 @@ impl Simulator {
         path: &std::path::Path,
         adapter_id: arcs_adapter_protocol::AdapterId,
     ) -> Result<Self, String> {
-        fan::manifest_with_id(adapter_id.clone())
+        fan::manifest_for(adapter_id.clone(), profile.fenced_resource.as_deref())
             .validate()
             .map_err(error)?;
         let mut database = Connection::open(path).map_err(error)?;
@@ -141,6 +143,7 @@ impl Simulator {
                 [&adapter_id.0],
             )
             .map_err(error)?;
+        fence::bind(&transaction, profile.fenced_resource.as_deref())?;
         let inserted = transaction
             .execute(
                 "INSERT OR IGNORE INTO fan_state VALUES (1, ?1, 0, 0)",
@@ -232,7 +235,11 @@ impl Simulator {
         Ok(response)
     }
 
-    fn execute(&mut self, invocation: ActInvocation) -> Result<AdapterMessage, String> {
+    fn execute_action(
+        &mut self,
+        invocation: ActInvocation,
+        fence: Option<ActFence>,
+    ) -> Result<ActResponse, String> {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Materialized {
@@ -261,10 +268,22 @@ impl Simulator {
             return Err("materialized action mismatch".into());
         }
 
-        let input = serde_json::to_string(&("execute", &invocation)).map_err(error)?;
-        let transaction = self.database.transaction().map_err(error)?;
+        let input = match &fence {
+            Some(fence) => serde_json::to_string(&("execute_fenced", &invocation, fence)),
+            None => serde_json::to_string(&("execute", &invocation)),
+        }
+        .map_err(error)?;
+        let transaction = self
+            .database
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(error)?;
+        fence::accept(
+            &transaction,
+            self.profile.fenced_resource.as_deref(),
+            fence.as_ref(),
+        )?;
         if let Some(response) = cached(&transaction, &invocation.invocation_id, &input)? {
-            return Ok(response);
+            return act_response(response);
         }
         // Simulierter Gerätezustand, Journal und Observation werden atomar
         // geschrieben. Bei echter Hardware braucht der Treiber deren eigene
@@ -294,7 +313,7 @@ impl Simulator {
         };
         remember(&transaction, &invocation.invocation_id, &input, &response)?;
         transaction.commit().map_err(error)?;
-        Ok(response)
+        act_response(response)
     }
 
     fn poll(&self) -> Result<AdapterMessage, String> {
@@ -325,6 +344,13 @@ impl Simulator {
     }
 }
 
+fn act_response(message: AdapterMessage) -> Result<ActResponse, String> {
+    match message {
+        AdapterMessage::ExecutionResult { response } => Ok(response),
+        _ => Err("unexpected simulator execution result".into()),
+    }
+}
+
 fn run() -> Result<(), String> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     let adapter_id = match args.as_slice() {
@@ -349,7 +375,10 @@ fn run() -> Result<(), String> {
 
 impl Adapter for Simulator {
     fn manifest(&self) -> arcs_adapter_protocol::AdapterManifest {
-        fan::manifest_with_id(self.adapter_id.clone())
+        fan::manifest_for(
+            self.adapter_id.clone(),
+            self.profile.fenced_resource.as_deref(),
+        )
     }
 
     fn poll(&mut self) -> Result<Option<PendingObservation>, AdapterError> {
@@ -382,12 +411,17 @@ impl Adapter for Simulator {
     }
 
     fn execute(&mut self, invocation: ActInvocation) -> Result<ActResponse, AdapterError> {
-        match Simulator::execute(self, invocation).map_err(AdapterError::rejected)? {
-            AdapterMessage::ExecutionResult { response } => Ok(response),
-            _ => Err(AdapterError::rejected(
-                "unexpected simulator execution result",
-            )),
-        }
+        self.execute_action(invocation, None)
+            .map_err(AdapterError::rejected)
+    }
+
+    fn execute_fenced(
+        &mut self,
+        invocation: ActInvocation,
+        fence: ActFence,
+    ) -> Result<ActResponse, AdapterError> {
+        self.execute_action(invocation, Some(fence))
+            .map_err(AdapterError::rejected)
     }
 }
 
@@ -470,5 +504,118 @@ mod installation_tests {
                 .unwrap(),
             fan::ADAPTER
         );
+    }
+
+    fn fenced_action(revision: u64, enabled: bool) -> (ActInvocation, ActFence) {
+        let capability = CapabilityRef::new(fan::ADAPTER, "fan.set");
+        let invocation = ActInvocation {
+            invocation_id: format!("act-{revision}"),
+            action_version_id: VersionId(format!("action-{revision}")),
+            action_schema_id: SchemaId("arcs.action.v1".into()),
+            payload: json!({"target_version":"candidate","approval_version":"approval",
+                "capability":capability,"input_schema_id":fan::CANDIDATE,
+                "payload":{"device_id":"fan-01","enabled":enabled}}),
+            capability,
+            result_schema_id: SchemaId(fan::RESULT.into()),
+        };
+        (
+            invocation,
+            ActFence {
+                authority: "a".repeat(32),
+                resource: "device.fan-01".into(),
+                revision,
+                reservation_version_id: VersionId(format!("reservation:v{revision}")),
+            },
+        )
+    }
+
+    #[test]
+    fn the_fan_rejects_an_older_fence_and_a_foreign_authority_after_restart() {
+        let directory = Directory::new();
+        let path = directory.0.join("fan.sqlite");
+        let mut fenced_profile = profile();
+        fenced_profile.fenced_resource = Some("device.fan-01".into());
+        let id = AdapterId(fan::ADAPTER.into());
+        let mut legacy = Simulator::open(profile(), &path, id.clone()).unwrap();
+        let mut simulator = Simulator::open(fenced_profile.clone(), &path, id.clone()).unwrap();
+        let (first, old_fence) = fenced_action(1, true);
+        assert!(simulator.execute(first.clone()).is_err());
+        assert!(legacy.execute(first.clone()).is_err());
+        drop(legacy);
+        assert_eq!(state(&simulator.database).unwrap().actuation_count, 0);
+        let receipt = simulator
+            .execute_fenced(first.clone(), old_fence.clone())
+            .unwrap();
+        drop(simulator);
+
+        assert!(Simulator::open(profile(), &path, id.clone()).is_err());
+        let mut simulator = Simulator::open(fenced_profile.clone(), &path, id.clone()).unwrap();
+        assert_eq!(
+            simulator
+                .execute_fenced(first.clone(), old_fence.clone())
+                .unwrap(),
+            receipt
+        );
+        assert_eq!(state(&simulator.database).unwrap().actuation_count, 1);
+        let (next, next_fence) = fenced_action(3, false);
+        simulator.execute_fenced(next, next_fence).unwrap();
+        drop(simulator);
+
+        let mut simulator = Simulator::open(fenced_profile, &path, id).unwrap();
+        assert!(
+            simulator
+                .execute_fenced(first.clone(), old_fence.clone())
+                .is_err()
+        );
+        let mut delayed = first;
+        delayed.invocation_id = "distinct-delayed-action".into();
+        assert!(simulator.execute_fenced(delayed, old_fence).is_err());
+        let (foreign, mut foreign_fence) = fenced_action(5, true);
+        foreign_fence.authority = "b".repeat(32);
+        assert!(simulator.execute_fenced(foreign, foreign_fence).is_err());
+        let (mut mismatch, mut wrong_fence) = fenced_action(3, true);
+        mismatch.invocation_id = "different-reservation".into();
+        wrong_fence.reservation_version_id = VersionId("other:v3".into());
+        assert!(simulator.execute_fenced(mismatch, wrong_fence).is_err());
+        let final_state = state(&simulator.database).unwrap();
+        assert!(!final_state.enabled);
+        assert_eq!(final_state.actuation_count, 2);
+    }
+
+    #[test]
+    fn a_failed_simulated_effect_rolls_back_the_fence_and_receipt() {
+        let directory = Directory::new();
+        let path = directory.0.join("fan.sqlite");
+        let mut fenced_profile = profile();
+        fenced_profile.fenced_resource = Some("device.fan-01".into());
+        let mut simulator =
+            Simulator::open(fenced_profile, &path, AdapterId(fan::ADAPTER.into())).unwrap();
+        let (first, first_fence) = fenced_action(1, true);
+        simulator.execute_fenced(first, first_fence).unwrap();
+        simulator
+            .database
+            .execute_batch(
+                "CREATE TRIGGER fail_effect BEFORE UPDATE ON fan_state
+             BEGIN SELECT RAISE(ABORT,'injected actuator transaction failure'); END;",
+            )
+            .unwrap();
+        let (next, next_fence) = fenced_action(3, false);
+        assert!(
+            simulator
+                .execute_fenced(next.clone(), next_fence.clone())
+                .is_err()
+        );
+        let revision: i64 = simulator
+            .database
+            .query_row("SELECT revision FROM act_fence", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(revision, 1);
+        assert_eq!(state(&simulator.database).unwrap().actuation_count, 1);
+        simulator
+            .database
+            .execute_batch("DROP TRIGGER fail_effect")
+            .unwrap();
+        simulator.execute_fenced(next, next_fence).unwrap();
+        assert_eq!(state(&simulator.database).unwrap().actuation_count, 2);
     }
 }

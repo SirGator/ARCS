@@ -14,8 +14,8 @@ use std::time::Duration;
 
 use crate::adapters::data::{DataAdapter, DataChunk, DataRead};
 use crate::adapters::{
-    ActAdapter, ActInvocation, ActResponse, AdapterCallError, AdapterGrant, AdapterManifest,
-    AdapterRegistry, AdapterRegistryError,
+    ActAdapter, ActFence, ActInvocation, ActResponse, AdapterCallError, AdapterGrant,
+    AdapterManifest, AdapterRegistry, AdapterRegistryError,
 };
 use crate::core::SchemaRegistry;
 use crate::output::{OutputAdapter, OutputInvocation, OutputResponse};
@@ -510,23 +510,18 @@ impl RequestAdapter for StdioAdapter {
     }
 }
 
-impl ActAdapter for StdioAdapter {
-    fn manifest(&self) -> &AdapterManifest {
-        &self.manifest
-    }
-
-    fn execute(&self, invocation: &ActInvocation) -> Result<ActResponse, AdapterCallError> {
+impl StdioAdapter {
+    fn dispatch_action(
+        &self,
+        invocation: &ActInvocation,
+        message: HostMessage,
+    ) -> Result<ActResponse, AdapterCallError> {
         if invocation.capability.adapter_id != self.manifest.adapter_id {
             return Err(AdapterCallError::Protocol(
                 "action endpoint identity mismatch".into(),
             ));
         }
-        match self
-            .exchange(HostMessage::Execute {
-                invocation: invocation.clone(),
-            })
-            .map_err(call_error)?
-        {
+        match self.exchange(message).map_err(call_error)? {
             AdapterMessage::ExecutionResult { response }
                 if response.invocation_id == invocation.invocation_id =>
             {
@@ -534,6 +529,35 @@ impl ActAdapter for StdioAdapter {
             }
             _ => Err(self.protocol_error("invalid execution response type or invocation ID")),
         }
+    }
+}
+
+impl ActAdapter for StdioAdapter {
+    fn manifest(&self) -> &AdapterManifest {
+        &self.manifest
+    }
+
+    fn execute(&self, invocation: &ActInvocation) -> Result<ActResponse, AdapterCallError> {
+        self.dispatch_action(
+            invocation,
+            HostMessage::Execute {
+                invocation: invocation.clone(),
+            },
+        )
+    }
+
+    fn execute_fenced(
+        &self,
+        invocation: &ActInvocation,
+        fence: &ActFence,
+    ) -> Result<ActResponse, AdapterCallError> {
+        self.dispatch_action(
+            invocation,
+            HostMessage::ExecuteFenced {
+                invocation: invocation.clone(),
+                fence: fence.clone(),
+            },
+        )
     }
 }
 

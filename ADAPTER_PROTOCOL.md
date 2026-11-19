@@ -76,6 +76,7 @@ Retries. Der Host entscheidet über Reconnect und erneute Verarbeitung.
 | `transform` mit `invocation` | `transform_result` mit `response` | Deterministische Ableitung über `TransformService` |
 | `output` mit `invocation` | `output_result` mit `response` | Geprüften und freigegebenen Ausgabeauftrag liefern |
 | `execute` mit `invocation` | `execution_result` mit `response` | Freigegebenen Action-Auftrag über `ExecutionService` ausführen |
+| `execute_fenced` mit `invocation` und `fence` | `execution_result` mit `response` | Freigegebenen Auftrag an eine Reservierungsrevision binden |
 | `read_data` mit `request` | `data_chunk` mit `chunk` | Referenzierte Daten unter den Limits des `DataService` lesen |
 | `shutdown` | `bye` | Verbindung geordnet schließen |
 
@@ -207,6 +208,38 @@ Damit erhalten die bestehenden Invocation-Dienste die Information für ihre
 Recovery-Regeln. Es gibt weiterhin keine automatischen Verbindungs-Retries.
 Neue Nachrichten erweitern stdio v1 additiv; ein Adapter bietet nur die
 Fähigkeiten an, die er auch tatsächlich implementiert.
+
+### Reservierungsrevision an der Act-Grenze
+
+Eine Capability mit `kind: "fenced_act"` gehört zur Act-Rolle und
+verlangt Idempotenz sowie eine `fenced_resource` im Manifest. Ihre
+Goal-Aktionsregel nennt dieselbe Ressource in `fenced_resource` und das Goal
+führt sie in `exclusive_resources`. Der Core erzeugt den Umschlag
+`execute_fenced` mit dem bisherigen `invocation`-Objekt und einem
+`fence`-Objekt aus der exakt gehaltenen Reservierungsrevision.
+
+| Feld | Bedeutung |
+| --- | --- |
+| `authority` | Dauerhafte Kennung der ausstellenden Core-Datenbank, 32 kleine Hex-Zeichen |
+| `resource` | Im Manifest deklarierte Ressourcen-ID |
+| `revision` | Positive Core-Artefaktrevision der gehaltenen Reservierung |
+| `reservation_version_id` | Exakte Version der Reservierung im Artifact-Netz |
+
+Die Revision ist Bestandteil des Invocation-Fingerprints. Vor der Abgabe an
+den Adapter prüft der Core nochmals den erwarteten gehaltenen Stand.
+Der Ausführungsbeleg verweist auf dieselbe Reservierungsversion. Das SDK
+weist fehlende, unerwartete oder strukturell ungültige Angaben ab. Die
+dauerhafte Prüfung beim Effekt liegt beim Adapter oder Gerätecontroller.
+Der Simulator bindet nach dem ersten angenommenen Auftrag die ausstellende
+Core-Kennung und weist danach niedrigere Revisionen oder eine andere
+Core-Kennung ab. Die Kennung ist ein Namensraum für eine vertrauenswürdige
+Hostverbindung.
+
+Capabilities vom Typ `act` verwenden weiterhin `execute` und denselben
+Invocation-Fingerprint. Die Simulator-
+Implementierung und ihre Übergabegrenzen sind beim
+[reservierten Goal](apps/adapter-host/examples/exclusive-goals.md#reservierungsrevision-am-aktor)
+beschrieben.
 
 ## Deterministische Transforms
 

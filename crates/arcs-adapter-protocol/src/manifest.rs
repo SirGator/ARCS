@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
 
-use crate::SchemaId;
+use crate::{ActFence, SchemaId};
 mod description;
 pub use description::CapabilityDescription;
 
@@ -103,12 +103,26 @@ pub enum CapabilityContract {
         /// haben. Ohne diesen Vertrag wird die Fähigkeit nicht installiert.
         idempotent: bool,
     },
+    /// Idempotent Act capability that enforces a reservation for a named resource.
+    FencedAct {
+        accepts: Vec<SchemaId>,
+        emits: Vec<SchemaId>,
+        fenced_resource: String,
+    },
     /// Liefert geprüfte Daten an eine externe Darstellung oder Senke.
     Output {
         accepts: Vec<SchemaId>,
         emits: Vec<SchemaId>,
         idempotent: bool,
     },
+}
+
+/// The shared contract of both Act capability types.
+pub struct ActContract<'a> {
+    pub accepts: &'a [SchemaId],
+    pub emits: &'a [SchemaId],
+    pub idempotent: bool,
+    pub fenced_resource: Option<&'a str>,
 }
 
 impl CapabilityContract {
@@ -119,7 +133,7 @@ impl CapabilityContract {
             Self::Request { .. } => AdapterRole::Request,
             Self::Transform { .. } => AdapterRole::Transform,
             Self::Reason { .. } => AdapterRole::Reason,
-            Self::Act { .. } => AdapterRole::Act,
+            Self::Act { .. } | Self::FencedAct { .. } => AdapterRole::Act,
             Self::Output { .. } => AdapterRole::Output,
         }
     }
@@ -132,6 +146,7 @@ impl CapabilityContract {
             | Self::Request { emits, .. }
             | Self::Reason { emits }
             | Self::Act { emits, .. }
+            | Self::FencedAct { emits, .. }
             | Self::Output { emits, .. } => emits,
         }
     }
@@ -142,8 +157,35 @@ impl CapabilityContract {
             Self::Transform { accepts, .. }
             | Self::Request { accepts, .. }
             | Self::Act { accepts, .. }
+            | Self::FencedAct { accepts, .. }
             | Self::Output { accepts, .. } => accepts,
             Self::Input { .. } | Self::Observe { .. } | Self::Reason { .. } => &[],
+        }
+    }
+
+    pub fn act(&self) -> Option<ActContract<'_>> {
+        match self {
+            Self::Act {
+                accepts,
+                emits,
+                idempotent,
+            } => Some(ActContract {
+                accepts,
+                emits,
+                idempotent: *idempotent,
+                fenced_resource: None,
+            }),
+            Self::FencedAct {
+                accepts,
+                emits,
+                fenced_resource,
+            } => Some(ActContract {
+                accepts,
+                emits,
+                idempotent: true,
+                fenced_resource: Some(fenced_resource),
+            }),
+            _ => None,
         }
     }
 
@@ -219,6 +261,7 @@ pub enum ManifestError {
         permission: String,
     },
     UnsafeExternalAction(CapabilityId),
+    InvalidFencedResource(CapabilityId),
     InvalidCapabilityDescription(CapabilityId),
 }
 
@@ -278,6 +321,7 @@ fn validate_capability(capability: &CapabilityDescriptor) -> Result<(), Manifest
         CapabilityContract::Transform { .. }
             | CapabilityContract::Request { .. }
             | CapabilityContract::Act { .. }
+            | CapabilityContract::FencedAct { .. }
             | CapabilityContract::Output { .. }
     );
     if (needs_accepts && accepts.is_empty()) || emits.is_empty() {
@@ -300,13 +344,16 @@ fn validate_capability(capability: &CapabilityDescriptor) -> Result<(), Manifest
         }
     }
 
-    if let CapabilityContract::Act { idempotent, .. } = capability.contract
-        && (!idempotent || capability.required_permissions.is_empty())
-    {
-        // Jede Act-Fähigkeit liegt konservativ an einer Effektgrenze. Ein
-        // Adapter kann die Schutzpflicht nicht durch `external_effect: false`
-        // selbst abschalten.
-        return Err(ManifestError::UnsafeExternalAction(capability.id.clone()));
+    if let Some(act) = capability.contract.act() {
+        if !act.idempotent || capability.required_permissions.is_empty() {
+            return Err(ManifestError::UnsafeExternalAction(capability.id.clone()));
+        }
+        if act
+            .fenced_resource
+            .is_some_and(|resource| !ActFence::valid_resource(resource))
+        {
+            return Err(ManifestError::InvalidFencedResource(capability.id.clone()));
+        }
     }
     if let CapabilityContract::Output { idempotent, .. } = capability.contract
         && (!idempotent || capability.required_permissions.is_empty())

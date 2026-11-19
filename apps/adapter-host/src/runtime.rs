@@ -25,6 +25,7 @@ use arcs::core::{
 use arcs::execution::ExecutionService;
 use arcs::input::{InputMessage, InputService};
 use arcs::request::RequestService;
+use arcs::runtime::reservations::Reservation;
 use arcs::store::{ArtifactRelations, SqliteArtifactStore, relation_kinds};
 use arcs::transform::TransformService;
 use arcs::world::observation::{ObservationLog, ObservationService};
@@ -726,21 +727,34 @@ impl Host {
         adapter_id: &AdapterId,
         action: &VersionId,
     ) -> Result<Artifact, HostError> {
+        self.execute_approved_with_reservation(adapter_id, action, None)
+    }
+
+    pub(crate) fn execute_approved_with_reservation(
+        &mut self,
+        adapter_id: &AdapterId,
+        action: &VersionId,
+        reservation: Option<&Reservation>,
+    ) -> Result<Artifact, HostError> {
         self.ensure_adapter_available(adapter_id)?;
         let adapter = self
             .adapters
             .iter()
             .find(|a| a.config.grant.adapter_id == *adapter_id)
             .ok_or_else(|| invalid(format!("unknown adapter {}", adapter_id.0)))?;
-        ExecutionService::new(
+        let mut execution = ExecutionService::new(
             &self.registry,
             &self.schemas,
             &self.store,
             &mut self.ids,
             &SystemClock,
-        )
-        .execute(adapter.endpoint.as_ref(), action)
-        .map_err(|source| HostError::Execution {
+        );
+        let endpoint = adapter.endpoint.as_ref();
+        let result = match reservation {
+            Some(reservation) => execution.execute_reserved(endpoint, action, reservation),
+            None => execution.execute(endpoint, action),
+        };
+        result.map_err(|source| HostError::Execution {
             adapter: adapter_id.clone(),
             source,
         })

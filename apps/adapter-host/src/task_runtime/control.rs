@@ -54,9 +54,10 @@ impl TaskRuntime {
         host: &Host,
         sequence: u64,
         config: &GoalConfig,
-    ) -> Result<(), HostError> {
+        fenced_resource: Option<&str>,
+    ) -> Result<Option<Reservation>, HostError> {
         if config.exclusive_resources.is_empty() {
-            return Ok(());
+            return Ok(None);
         }
         let session = self
             .journal
@@ -66,16 +67,21 @@ impl TaskRuntime {
             return Err(invalid("control session already closed"));
         }
         let service = ReservationService::new(host.store(), host.schemas(), &SystemClock);
+        let mut fence = None;
         for resource in &session.resources {
-            if !service
+            let reservation = service
                 .current(resource)
                 .map_err(error)?
-                .is_some_and(|r| r.state == ReservationState::Held && r.owner == session.owner)
-            {
-                return Err(invalid("goal no longer owns its exclusive resource"));
+                .filter(|r| r.state == ReservationState::Held && r.owner == session.owner)
+                .ok_or_else(|| invalid("goal no longer owns its exclusive resource"))?;
+            if fenced_resource == Some(resource.as_str()) {
+                fence = Some(reservation);
             }
         }
-        Ok(())
+        if fenced_resource.is_some() && fence.is_none() {
+            return Err(invalid("goal does not own the configured fenced resource"));
+        }
+        Ok(fence)
     }
     pub(super) fn acquire_control(
         &self,

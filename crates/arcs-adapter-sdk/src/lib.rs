@@ -10,7 +10,7 @@ mod input_data;
 use std::io::{BufRead, Write};
 
 use arcs_adapter_protocol::{
-    ActInvocation, ActResponse, AdapterManifest, CapabilityContract, DataChunk, DataRead,
+    ActFence, ActInvocation, ActResponse, AdapterManifest, CapabilityContract, DataChunk, DataRead,
     ManifestError, ObservationMessage, OutputInvocation, OutputResponse, RequestInvocation,
     RequestResponse, TransformInvocation, TransformResponse,
     stdio::{
@@ -136,6 +136,15 @@ pub trait Adapter {
 
     /// Der Treiber prüft den fachlichen Payload und garantiert seine Idempotenz.
     fn execute(&mut self, _invocation: ActInvocation) -> Result<ActResponse, AdapterError> {
+        Err(AdapterError::unsupported())
+    }
+
+    /// Apply and persist the fence at the same boundary as the effect.
+    fn execute_fenced(
+        &mut self,
+        _invocation: ActInvocation,
+        _fence: ActFence,
+    ) -> Result<ActResponse, AdapterError> {
         Err(AdapterError::unsupported())
     }
 
@@ -459,24 +468,9 @@ fn dispatch(
             }
             Ok(AdapterMessage::RequestResult { response })
         }
-        HostMessage::Execute { invocation } => {
-            let contract = manifest
-                .capability(&invocation.capability.capability_id)
-                .map(|cap| &cap.contract);
-            if invocation.capability.adapter_id != manifest.adapter_id
-                || invocation.invocation_id.trim().is_empty()
-                || invocation.action_version_id.0.trim().is_empty()
-                || !matches!(contract, Some(CapabilityContract::Act { emits, .. })
-                    if emits.contains(&invocation.result_schema_id))
-            {
-                return Err(AdapterError::rejected("action contract mismatch"));
-            }
-            let id = invocation.invocation_id.clone();
-            let response = adapter.execute(invocation)?;
-            if response.invocation_id != id || response.external_reference.trim().is_empty() {
-                return Err(invalid_response("action correlation or reference mismatch"));
-            }
-            Ok(AdapterMessage::ExecutionResult { response })
+        HostMessage::Execute { invocation } => dispatch_action(adapter, manifest, invocation, None),
+        HostMessage::ExecuteFenced { invocation, fence } => {
+            dispatch_action(adapter, manifest, invocation, Some(fence))
         }
         _ => Err(AdapterError {
             code: "invalid_state".into(),
@@ -484,4 +478,35 @@ fn dispatch(
             retryable: false,
         }),
     }
+}
+
+fn dispatch_action(
+    adapter: &mut impl Adapter,
+    manifest: &AdapterManifest,
+    invocation: ActInvocation,
+    fence: Option<ActFence>,
+) -> Result<AdapterMessage, AdapterError> {
+    let contract = manifest
+        .capability(&invocation.capability.capability_id)
+        .and_then(|cap| cap.contract.act());
+    if invocation.capability.adapter_id != manifest.adapter_id
+        || invocation.invocation_id.trim().is_empty()
+        || invocation.action_version_id.0.trim().is_empty()
+        || !contract.is_some_and(|contract| {
+            contract.emits.contains(&invocation.result_schema_id)
+                && contract.fenced_resource == fence.as_ref().map(|fence| fence.resource.as_str())
+        })
+        || fence.as_ref().is_some_and(|fence| !fence.is_valid())
+    {
+        return Err(AdapterError::rejected("action contract mismatch"));
+    }
+    let id = invocation.invocation_id.clone();
+    let response = match fence {
+        Some(fence) => adapter.execute_fenced(invocation, fence),
+        None => adapter.execute(invocation),
+    }?;
+    if response.invocation_id != id || response.external_reference.trim().is_empty() {
+        return Err(invalid_response("action correlation or reference mismatch"));
+    }
+    Ok(AdapterMessage::ExecutionResult { response })
 }

@@ -1,15 +1,14 @@
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::adapters::{
-    ActAdapter, ActInvocation, AdapterRegistry, CapabilityContract, CapabilityRef, ProducerClass,
-};
+use crate::adapters::{ActAdapter, ActInvocation, AdapterRegistry, CapabilityRef, ProducerClass};
 use crate::approval::ApprovalDecision;
 use crate::core::{
     Actor, ActorType, Artifact, ArtifactFactory, ArtifactFactoryInput, ArtifactIdGenerator, Clock,
     Provenance, SchemaId, SchemaRegistry, Source, SourceClass, SourceKind, SubjectId, Trust,
     VersionId,
 };
+use crate::runtime::reservations::{Reservation, ReservationService};
 use crate::runtime::{
     InvocationKind, InvocationService, InvocationSpec, InvocationStatus,
     deterministic_input_fingerprint, deterministic_invocation_id,
@@ -67,6 +66,24 @@ impl<'a> ExecutionService<'a> {
         &mut self,
         endpoint: &dyn ActAdapter,
         action_version: &VersionId,
+    ) -> Result<Artifact, ExecutionError> {
+        self.execute_inner(endpoint, action_version, None)
+    }
+
+    pub fn execute_reserved(
+        &mut self,
+        endpoint: &dyn ActAdapter,
+        action_version: &VersionId,
+        reservation: &Reservation,
+    ) -> Result<Artifact, ExecutionError> {
+        self.execute_inner(endpoint, action_version, Some(reservation))
+    }
+
+    fn execute_inner(
+        &mut self,
+        endpoint: &dyn ActAdapter,
+        action_version: &VersionId,
+        reservation: Option<&Reservation>,
     ) -> Result<Artifact, ExecutionError> {
         let action = self
             .store
@@ -158,29 +175,27 @@ impl<'a> ExecutionService<'a> {
                 capability.adapter_id.clone(),
             ));
         }
-        let CapabilityContract::Act {
-            accepts,
-            emits,
-            idempotent,
-        } = &descriptor.contract
-        else {
+        let Some(contract) = descriptor.contract.act() else {
             return Err(ExecutionError::CapabilityIsNotAct(capability));
         };
-        if !idempotent {
+        if !contract.idempotent {
             return Err(ExecutionError::ActCapabilityIsNotIdempotent(capability));
         }
-        if !accepts.contains(&materialized.input_schema_id) {
+        if contract.fenced_resource != reservation.map(|record| record.resource.as_str()) {
+            return Err(ExecutionError::ReservationFenceMismatch(capability));
+        }
+        if !contract.accepts.contains(&materialized.input_schema_id) {
             return Err(ExecutionError::InputSchemaNotAccepted {
                 capability: capability.clone(),
                 schema: materialized.input_schema_id,
             });
         }
-        if emits.len() != 1 {
+        if contract.emits.len() != 1 {
             return Err(ExecutionError::InvalidResultSchemaCount {
-                actual: emits.len(),
+                actual: contract.emits.len(),
             });
         }
-        let result_schema = emits[0].clone();
+        let result_schema = contract.emits[0].clone();
         let result_definition = self
             .schemas
             .get(&result_schema)
@@ -212,7 +227,16 @@ impl<'a> ExecutionService<'a> {
             payload: action.payload.clone(),
             result_schema_id: result_schema.clone(),
         };
-        let serialized_invocation = serde_json::to_string(&invocation)?;
+        let fence = reservation
+            .map(|expected| {
+                ReservationService::new(self.store, self.schemas, self.clock).act_fence(expected)
+            })
+            .transpose()
+            .map_err(ExecutionError::Reservation)?;
+        let serialized_invocation = match &fence {
+            Some(fence) => serde_json::to_string(&(&invocation, fence)),
+            None => serde_json::to_string(&invocation),
+        }?;
         let dispatched = {
             let invocations = InvocationService::new(self.store, self.schemas, self.clock);
             let prepared = invocations.prepare(InvocationSpec {
@@ -237,7 +261,15 @@ impl<'a> ExecutionService<'a> {
         };
 
         let outcome = (|| {
-            let response = endpoint.execute(&invocation)?;
+            if let Some(expected) = reservation {
+                ReservationService::new(self.store, self.schemas, self.clock)
+                    .act_fence(expected)
+                    .map_err(ExecutionError::Reservation)?;
+            }
+            let response = match &fence {
+                Some(fence) => endpoint.execute_fenced(&invocation, fence),
+                None => endpoint.execute(&invocation),
+            }?;
             if response.invocation_id != invocation_id {
                 return Err(ExecutionError::InvocationResponseMismatch);
             }
@@ -262,6 +294,15 @@ impl<'a> ExecutionService<'a> {
                 .validate(&result_schema, &response.result_payload)
                 .map_err(ExecutionError::InvalidPayload)?;
 
+            let mut parents = vec![action.version_id.0.clone()];
+            let mut relations = vec![(action.version_id.clone(), relation_kinds::result_of())];
+            if let Some(fence) = &fence {
+                parents.push(fence.reservation_version_id.0.clone());
+                relations.push((
+                    fence.reservation_version_id.clone(),
+                    relation_kinds::based_on(),
+                ));
+            }
             let mut factory = ArtifactFactory::new(self.clock, self.ids);
             let artifact = factory.create(ArtifactFactoryInput {
                 schema: result_definition,
@@ -288,7 +329,7 @@ impl<'a> ExecutionService<'a> {
                 ],
                 payload: response.result_payload,
                 provenance: Some(Provenance {
-                    parents: vec![action.version_id.0.clone()],
+                    parents,
                     rules_applied: vec![
                         "execution.action_validated".into(),
                         "execution.capability_authorized".into(),
@@ -302,7 +343,7 @@ impl<'a> ExecutionService<'a> {
             InvocationService::new(self.store, self.schemas, self.clock).succeed_with_event(
                 &dispatched,
                 &artifact,
-                &[(action.version_id.clone(), relation_kinds::result_of())],
+                &relations,
             )?;
             Ok(artifact)
         })();

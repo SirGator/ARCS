@@ -25,3 +25,11 @@ und eigenen Freigaben. Die
 [Bewegungs- und Wirkungspipeline des Lüfterbeispiels](../../ADAPTER_PROTOCOL.md)
 beschreibt Verification, Approval, Action und Outcome. Der allgemeine Host
 erteilt keine automatische Freigabe.
+
+Mit `"fenced_resource": "device.fan-01"` im Profil verlangt `fan.set` die
+Reservierungsrevision dieser Ressource. Der allgemeine Host muss dieselbe
+Ressource am Goal und seiner Aktionsregel deklarieren. Der Simulator
+speichert die höchste angenommene Revision, Geräteänderung, Ergebnis und
+Observation in einer Transaktion. Nach der Aktivierung bindet das Journal
+das Fencing an dieselbe konfigurierte Ressource. Die vollständige
+Konfiguration steht im [Goal-Beispiel](../../apps/adapter-host/examples/exclusive-goals.md#reservierungsrevision-am-aktor).

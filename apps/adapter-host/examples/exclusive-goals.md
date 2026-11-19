@@ -6,12 +6,12 @@ Besitz und Freigaben liegen als versionierte `arcs.resource_reservation.v1`-
 Artefakte im vorhandenen Core-Store. Auch verschiedene Hosts mit demselben
 Core-Datenbankpfad sehen denselben Besitzer.
 
-Das ist eine **kooperative Ablaufreservierung**. Es gibt keine automatische
-Übernahme nach Zeitablauf und noch keine Absicherung veralteter Befehle im
-Gerätecontroller. Fremde Programme, direkte Act-Aufrufe und Goals ohne dieselbe
-Ressourcendeklaration werden damit nicht ausgeschlossen. Für reale Drohnen
-bleiben eine Controller-seitige Besitzprüfung und eine sichere Geräteübergabe
-erforderlich.
+Die Ablaufreservierung koordiniert Goals mit derselben Ressourcendeklaration
+und hält den Besitz bis zur Freigabe. Eine konfigurierte
+[Act-Reservierungsprüfung](#reservierungsrevision-am-aktor) weist ältere
+Befehle am Simulator ab, sobald er eine neuere Revision angenommen hat.
+Für reale Geräte stehen die bestätigte Übergabe und die Absicherung
+weiterer Befehlswege aus.
 
 ## Beispiel mit simuliertem Gerät
 
@@ -140,6 +140,31 @@ dieser noch aktuell ist. Eine alte Bestätigung kann eine spätere Besitznahme
 nicht aufheben. Eine freigegebene Sitzung kann keine Ressourcen erneut erwerben;
 ein weiterer regulärer Goal-Abschnitt braucht eine neue Sitzung.
 
+## Reservierungsrevision am Aktor
+
+Im Lüftersimulator aktiviert `"fenced_resource": "device.fan-01"` in
+`fan-profile.json` die Prüfung am Empfänger. Für die dazugehörige Goal-Route
+ergänzt du `"device.fan-01"` in `goal.exclusive_resources` und setzt
+`fenced_resource` für jede Regel, die `fan.set` aufruft, auf denselben
+Ressourcenbezeichner. Eine getrennte Beispielinstallation verwendet
+eigene Core-, Runtime- und Simulator-Journale.
+Der Host prüft Manifest, Route und Besitz, bevor er die genaue gehaltene
+Revision an den Aktor übergibt.
+
+Der Simulator akzeptiert Wiederholungen derselben Invocation bei
+gleicher gültiger Revision. Sobald er eine neuere Revision angenommen hat,
+weist er ältere Aufträge auch nach einem Neustart ab. Der Vergleich findet in
+derselben Transaktion wie die simulierte Gerätewirkung statt. Der
+Ausführungsbeleg im Core verweist auf die Reservierung, unter der der
+Auftrag angenommen wurde.
+
+Der Simulator erfährt eine neue Revision beim nächsten angenommenen
+Act-Auftrag. Eine Freigabe im Core installiert am Controller noch keine
+Sperre gegen einen bereits unterwegs befindlichen Auftrag. Diese Lücke
+betrifft die Übergabe vor dem ersten Act-Auftrag des Nachfolgers und
+bleibt getrennte Architekturarbeit.
+[Protokoll](../../../ADAPTER_PROTOCOL.md#reservierungsrevision-an-der-act-grenze)
+
 ## Status und Grenzen
 
 `TaskRuntime::exclusive_resources(host)` liest die aktuellen Core-Belege der
@@ -165,7 +190,8 @@ Der vorhandene Planabbruch aktualisiert weiterhin Goal-Checkpoints, damit eine
 verspätete Freigabe keinen abgebrochenen Auftrag wieder aktiviert.
 
 Offen bleiben zeitlich begrenzte Leases mit sicherer Übernahme,
-Controller-Fencing, die Absicherung beliebiger Act-Clients, verteilte
+die Bestätigung der Übergabe durch reale Controller, die Absicherung
+beliebiger Act-Clients, verteilte
 Koordination über getrennte Core-Datenbanken und ein allgemeines Vorrangsystem.
 Auch diese Reservierung ist keine neue Action-Berechtigung; Grants,
 Verification und Approval gelten weiterhin.

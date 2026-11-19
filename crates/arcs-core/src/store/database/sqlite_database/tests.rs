@@ -77,14 +77,19 @@ fn appends_and_reads_artifact() {
 fn durable_id_namespaces_are_distinct_for_reopened_and_parallel_hosts() {
     let database = TemporaryDatabase::new();
     let first_store = SqliteArtifactStore::open(&database.path).unwrap();
+    let authority = first_store.authority_id().unwrap();
     let mut first_ids = first_store.durable_id_generator("same-node").unwrap();
     let first = first_ids.next("input");
     let other_store = SqliteArtifactStore::open(&database.path).unwrap();
+    assert_eq!(other_store.authority_id().unwrap(), authority);
     let mut parallel_ids = other_store.durable_id_generator("same-node").unwrap();
     let parallel = parallel_ids.next("input");
     assert_ne!(first, parallel);
     drop(other_store);
     let reopened_store = SqliteArtifactStore::open(&database.path).unwrap();
+    assert_eq!(reopened_store.authority_id().unwrap(), authority);
+    let separate_store = SqliteArtifactStore::in_memory().unwrap();
+    assert_ne!(separate_store.authority_id().unwrap(), authority);
     let mut restarted = reopened_store.durable_id_generator("same-node").unwrap();
     let restarted = restarted.next("input");
     assert_ne!(restarted, first);

@@ -12,10 +12,11 @@ use super::engine::load;
 use super::*;
 use crate::task_runtime::TaskRuntime;
 
-struct Gate {
+struct Gate<'a> {
     result: VerificationResult,
+    fenced_resource: Option<&'a str>,
 }
-impl Verifier for Gate {
+impl Verifier for Gate<'_> {
     fn verify(&self, _: &Artifact) -> Result<VerificationResult, VerificationError> {
         Ok(self.result.clone())
     }
@@ -68,13 +69,13 @@ impl TaskRuntime {
         }
         Ok(())
     }
-    fn gate(
+    fn gate<'a>(
         &self,
         host: &Host,
         route: &ReasoningRoute,
-        config: &GoalConfig,
+        config: &'a GoalConfig,
         task: &GoalTask,
-    ) -> Result<Gate, HostError> {
+    ) -> Result<Gate<'a>, HostError> {
         let candidate = load(
             host,
             task.candidate
@@ -119,6 +120,7 @@ impl TaskRuntime {
             VerificationVerdict::Fail
         };
         Ok(Gate {
+            fenced_resource: rule.fenced_resource.as_deref(),
             result: VerificationResult {
                 verdict,
                 findings: vec![VerificationFinding {
@@ -368,10 +370,12 @@ impl TaskRuntime {
     ) -> Result<(), HostError> {
         // Revalidate policy on resume as well. Core independently checks approval,
         // schema, capability grant and idempotent execution before dispatch.
-        self.verify_goal_control(host, task.sequence, config)?;
-        if self.gate(host, route, config, task)?.result.verdict != VerificationVerdict::Pass {
+        let gate = self.gate(host, route, config, task)?;
+        if gate.result.verdict != VerificationVerdict::Pass {
             return Err(invalid("action no longer passes verification"));
         }
+        let reservation =
+            self.verify_goal_control(host, task.sequence, config, gate.fenced_resource)?;
         let approval = task
             .approval
             .as_ref()
@@ -389,7 +393,11 @@ impl TaskRuntime {
         )
         .materialize(approval, capability)
         .map_err(service_error)?;
-        let execution = host.execute_approved(&capability.adapter_id, &action.version_id)?;
+        let execution = host.execute_approved_with_reservation(
+            &capability.adapter_id,
+            &action.version_id,
+            reservation.as_ref(),
+        )?;
         task.action = Some(action.version_id);
         task.execution = Some(execution.version_id);
         Ok(())

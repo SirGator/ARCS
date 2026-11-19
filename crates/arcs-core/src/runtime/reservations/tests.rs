@@ -71,6 +71,9 @@ fn all_or_nothing_ownership_is_versioned_and_stale_releases_cannot_touch_a_new_o
     let owner = seed(&store, &schemas);
     let service = ReservationService::new(&store, &schemas, &Time);
     let held = service.acquire(&owner, &["b".into()]).unwrap();
+    let fence = service.act_fence(&held[0]).unwrap();
+    assert_eq!(fence.revision, 1);
+    assert_eq!(fence.reservation_version_id, held[0].version_id);
     let before = store.len().unwrap();
     assert_eq!(
         service.acquire(&owner, &["b".into()]).unwrap()[0].version_id,
@@ -105,6 +108,7 @@ fn all_or_nothing_ownership_is_versioned_and_stale_releases_cannot_touch_a_new_o
         )
         .unwrap();
     let released_count = store.len().unwrap();
+    assert!(service.act_fence(&held[0]).is_err());
     service
         .release(
             &owner,
@@ -117,6 +121,10 @@ fn all_or_nothing_ownership_is_versioned_and_stale_releases_cannot_touch_a_new_o
     assert_eq!(store.len().unwrap(), released_count);
     assert!(service.acquire(&owner, &["b".into()]).is_err());
     let newer = service.acquire(&other, &["b".into()]).unwrap();
+    let successor = service.act_fence(&newer[0]).unwrap();
+    assert_eq!(successor.authority, fence.authority);
+    assert_eq!(successor.revision, 3);
+    assert!(service.act_fence(&held[0]).is_err());
     assert_ne!(newer[0].version_id, held[0].version_id);
     assert!(
         service
