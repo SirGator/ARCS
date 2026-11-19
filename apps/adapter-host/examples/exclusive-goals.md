@@ -7,11 +7,11 @@ Artefakte im vorhandenen Core-Store. Auch verschiedene Hosts mit demselben
 Core-Datenbankpfad sehen denselben Besitzer.
 
 Die Ablaufreservierung koordiniert Goals mit derselben Ressourcendeklaration
-und hält den Besitz bis zur Freigabe. Eine konfigurierte
-[Act-Reservierungsprüfung](#reservierungsrevision-am-aktor) weist ältere
-Befehle am Simulator ab, sobald er eine neuere Revision angenommen hat.
-Für reale Geräte stehen die bestätigte Übergabe und die Absicherung
-weiterer Befehlswege aus.
+und hält den Besitz bis zur Freigabe. Bei einer konfigurierten
+[Act-Reservierungsprüfung](#reservierungsrevision-am-aktor) sperrt der
+Simulator die betreffende Revision vor der Freigabe. Für reale Geräte
+stehen der entsprechende Controllernachweis und die Absicherung weiterer
+Befehlswege aus.
 
 ## Beispiel mit simuliertem Gerät
 
@@ -158,11 +158,26 @@ derselben Transaktion wie die simulierte Gerätewirkung statt. Der
 Ausführungsbeleg im Core verweist auf die Reservierung, unter der der
 Auftrag angenommen wurde.
 
-Der Simulator erfährt eine neue Revision beim nächsten angenommenen
-Act-Auftrag. Eine Freigabe im Core installiert am Controller noch keine
-Sperre gegen einen bereits unterwegs befindlichen Auftrag. Diese Lücke
-betrifft die Übergabe vor dem ersten Act-Auftrag des Nachfolgers und
-bleibt getrennte Architekturarbeit.
+Vor einer automatischen Freigabe oder einer bestätigten Betreiberübergabe
+sperrt der Controller die alte Revision per `close_fence`. Dadurch werden
+verspätete Aufträge bereits vor dem ersten Act-Auftrag des Nachfolgers
+abgewiesen. Der Core hält die Ressource bis zu den korrelierten Bestätigungen
+der beteiligten Controller. Unterbrochene Freigaben verwenden bestätigte
+Controller-Einträge nach einem Neustart weiter. Bei älteren gehaltenen
+Sitzungen ergänzt der Host die Controller aus der eingefrorenen Goal-Route.
+Für neu angelegte Reservierungen zählen die tatsächlich eingetragenen
+Controller. Eine Ablehnung vor dem ersten Dispatch kann dadurch direkt
+freigeben.
+
+Beim Upgrade auf diesen Übergabepfad verwenden die beteiligten Hosts und
+Controller die neue Version. Beim ersten Öffnen erfasst der Core die
+Migrationsgrenze für die bereits gespeicherten Reservierungen.
+
+Bei einer abgelehnten oder fehlenden Bestätigung bleibt die Ressource
+reserviert. Automatische Übergaben werden weiter geprüft. Das Laufzeitfeld
+`control_release_waits` enthält Aufgabensequenz, Sitzung und letzte Meldung.
+Controllerdialoge verwenden das vorhandene synchrone stdio-Verfahren und
+die Deadline des jeweiligen Adapters.
 [Protokoll](../../../ADAPTER_PROTOCOL.md#reservierungsrevision-an-der-act-grenze)
 
 ## Status und Grenzen
@@ -190,8 +205,8 @@ Der vorhandene Planabbruch aktualisiert weiterhin Goal-Checkpoints, damit eine
 verspätete Freigabe keinen abgebrochenen Auftrag wieder aktiviert.
 
 Offen bleiben zeitlich begrenzte Leases mit sicherer Übernahme,
-die Bestätigung der Übergabe durch reale Controller, die Absicherung
-beliebiger Act-Clients, verteilte
+die Abnahme des Übergabeverfahrens an realen Controllern, die Absicherung
+beliebiger Act-Clients und die verteilte
 Koordination über getrennte Core-Datenbanken und ein allgemeines Vorrangsystem.
 Auch diese Reservierung ist keine neue Action-Berechtigung; Grants,
 Verification und Approval gelten weiterhin.

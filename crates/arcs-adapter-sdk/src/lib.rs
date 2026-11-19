@@ -10,9 +10,9 @@ mod input_data;
 use std::io::{BufRead, Write};
 
 use arcs_adapter_protocol::{
-    ActFence, ActInvocation, ActResponse, AdapterManifest, CapabilityContract, DataChunk, DataRead,
-    ManifestError, ObservationMessage, OutputInvocation, OutputResponse, RequestInvocation,
-    RequestResponse, TransformInvocation, TransformResponse,
+    ActFence, ActInvocation, ActResponse, AdapterManifest, CapabilityContract, CapabilityRef,
+    DataChunk, DataRead, ManifestError, ObservationMessage, OutputInvocation, OutputResponse,
+    RequestInvocation, RequestResponse, TransformInvocation, TransformResponse,
     stdio::{
         AdapterMessage, Envelope, HostMessage, WIRE_VERSION, WireError, read_frame, write_frame,
     },
@@ -150,6 +150,15 @@ pub trait Adapter {
 
     /// Liest unveränderliche Daten ausschließlich anhand einer angebotenen Referenz.
     fn read_data(&mut self, _request: DataRead) -> Result<DataChunk, AdapterError> {
+        Err(AdapterError::unsupported())
+    }
+
+    /// Persistently retire this revision before acknowledging it.
+    fn close_fence(
+        &mut self,
+        _capability: &CapabilityRef,
+        _fence: &ActFence,
+    ) -> Result<(), AdapterError> {
         Err(AdapterError::unsupported())
     }
 }
@@ -471,6 +480,20 @@ fn dispatch(
         HostMessage::Execute { invocation } => dispatch_action(adapter, manifest, invocation, None),
         HostMessage::ExecuteFenced { invocation, fence } => {
             dispatch_action(adapter, manifest, invocation, Some(fence))
+        }
+        HostMessage::CloseFence { capability, fence } => {
+            let resource = manifest
+                .capability(&capability.capability_id)
+                .and_then(|cap| cap.contract.act())
+                .and_then(|act| act.fenced_resource);
+            if capability.adapter_id != manifest.adapter_id
+                || resource != Some(fence.resource.as_str())
+                || !fence.is_valid()
+            {
+                return Err(AdapterError::rejected("controller fence contract mismatch"));
+            }
+            adapter.close_fence(&capability, &fence)?;
+            Ok(AdapterMessage::FenceClosed { capability, fence })
         }
         _ => Err(AdapterError {
             code: "invalid_state".into(),

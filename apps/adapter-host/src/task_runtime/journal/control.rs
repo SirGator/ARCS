@@ -6,7 +6,17 @@ use rusqlite::{Connection, OptionalExtension, params};
 
 pub(super) fn initialize(connection: &Connection) -> Result<(), HostError> {
     connection.execute_batch("CREATE TABLE IF NOT EXISTS runtime_control_sessions(sequence INTEGER NOT NULL REFERENCES runtime_jobs(sequence),session INTEGER NOT NULL,owner_json TEXT NOT NULL,resources_json TEXT NOT NULL,closed INTEGER NOT NULL DEFAULT 0 CHECK(closed IN (0,1)),PRIMARY KEY(sequence,session));
-        CREATE UNIQUE INDEX IF NOT EXISTS runtime_control_open ON runtime_control_sessions(sequence) WHERE closed=0;").map_err(db)
+        CREATE UNIQUE INDEX IF NOT EXISTS runtime_control_open ON runtime_control_sessions(sequence) WHERE closed=0;").map_err(db)?;
+    let has_column: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('runtime_control_sessions') WHERE name='closure_error')",
+        [], |row| row.get(0),
+    ).map_err(db)?;
+    if !has_column {
+        connection
+            .execute_batch("ALTER TABLE runtime_control_sessions ADD COLUMN closure_error TEXT;")
+            .map_err(db)?;
+    }
+    Ok(())
 }
 pub(in crate::task_runtime) struct ControlSession {
     pub owner: ReservationOwner,
@@ -69,11 +79,48 @@ impl Journal {
     ) -> Result<(), HostError> {
         self.connection
             .execute(
-                "UPDATE runtime_control_sessions SET closed=1 WHERE sequence=?1 AND session=?2",
+                "UPDATE runtime_control_sessions SET closed=1,closure_error=NULL WHERE sequence=?1 AND session=?2",
                 params![owner.task_sequence as i64, owner.session],
             )
             .map_err(db)?;
         Ok(())
+    }
+
+    pub(in crate::task_runtime) fn note_control_release_error(
+        &self,
+        owner: &ReservationOwner,
+        error: &str,
+    ) -> Result<(), HostError> {
+        self.connection
+            .execute(
+                "UPDATE runtime_control_sessions SET closure_error=?3
+             WHERE sequence=?1 AND session=?2 AND closed=0 AND closure_error IS NOT ?3",
+                params![owner.task_sequence as i64, owner.session, error],
+            )
+            .map_err(db)?;
+        Ok(())
+    }
+
+    pub(in crate::task_runtime) fn control_release_waits(
+        &self,
+    ) -> Result<Vec<crate::task_runtime::ControlReleaseWait>, HostError> {
+        let mut query = self
+            .connection
+            .prepare(
+                "SELECT sequence,session,closure_error FROM runtime_control_sessions
+             WHERE closed=0 AND closure_error IS NOT NULL ORDER BY sequence LIMIT 50",
+            )
+            .map_err(db)?;
+        let rows = query
+            .query_map([], |row| {
+                Ok(crate::task_runtime::ControlReleaseWait {
+                    sequence: row.get::<_, i64>(0)? as u64,
+                    session: row.get(1)?,
+                    error: row.get(2)?,
+                })
+            })
+            .map_err(db)?;
+        rows.map(|row| row.map_err(db)).collect()
     }
     pub(in crate::task_runtime) fn control_cleanup_candidates(
         &self,

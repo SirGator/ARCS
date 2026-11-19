@@ -77,6 +77,7 @@ Retries. Der Host entscheidet über Reconnect und erneute Verarbeitung.
 | `output` mit `invocation` | `output_result` mit `response` | Geprüften und freigegebenen Ausgabeauftrag liefern |
 | `execute` mit `invocation` | `execution_result` mit `response` | Freigegebenen Action-Auftrag über `ExecutionService` ausführen |
 | `execute_fenced` mit `invocation` und `fence` | `execution_result` mit `response` | Freigegebenen Auftrag an eine Reservierungsrevision binden |
+| `close_fence` mit `capability` und `fence` | `fence_closed` mit derselben Capability und derselben Revision | Eine Reservierungsrevision am Controller dauerhaft für weitere Aufträge sperren |
 | `read_data` mit `request` | `data_chunk` mit `chunk` | Referenzierte Daten unter den Limits des `DataService` lesen |
 | `shutdown` | `bye` | Verbindung geordnet schließen |
 
@@ -234,6 +235,19 @@ Der Simulator bindet nach dem ersten angenommenen Auftrag die ausstellende
 Core-Kennung und weist danach niedrigere Revisionen oder eine andere
 Core-Kennung ab. Die Kennung ist ein Namensraum für eine vertrauenswürdige
 Hostverbindung.
+
+Beim Schließen sendet der Host `close_fence` an die betroffene Act-Capability.
+Der Controller bestätigt über `fence_closed` exakt dieselbe Capability und
+Revision, sobald er die Sperre dauerhaft gespeichert und noch laufende Arbeit
+der Revision abgeschlossen hat. Wiederholungen bestätigen dieselbe Sperre.
+Liegt bereits eine neuere Revision vor, bleibt deren Zustand bei einer alten
+Bestätigungswiederholung erhalten.
+
+Der Core speichert vor dem Dispatch, welche Capability die gehaltene
+Revision erhalten kann. Er übernimmt die korrelierte Bestätigung in diesen
+operativen Eintrag. Bei der Freigabe prüft seine Schreibtransaktion erneut,
+ob die Reservierung aktuell ist und alle eingetragenen Controller bestätigt
+haben. Während des Controllerdialoges bleibt die Ressource gehalten.
 
 Capabilities vom Typ `act` verwenden weiterhin `execute` und denselben
 Invocation-Fingerprint. Die Simulator-

@@ -261,9 +261,9 @@ impl<'a> ExecutionService<'a> {
         };
 
         let outcome = (|| {
-            if let Some(expected) = reservation {
+            if let Some(fence) = &fence {
                 ReservationService::new(self.store, self.schemas, self.clock)
-                    .act_fence(expected)
+                    .register_fenced_dispatch(fence, &capability)
                     .map_err(ExecutionError::Reservation)?;
             }
             let response = match &fence {

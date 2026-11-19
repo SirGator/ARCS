@@ -423,6 +423,27 @@ impl Adapter for Simulator {
         self.execute_action(invocation, Some(fence))
             .map_err(AdapterError::rejected)
     }
+
+    fn close_fence(
+        &mut self,
+        capability: &CapabilityRef,
+        fence: &ActFence,
+    ) -> Result<(), AdapterError> {
+        if *capability != CapabilityRef::new(&self.adapter_id.0, "fan.set") {
+            return Err(AdapterError::rejected(
+                "controller fence capability mismatch",
+            ));
+        }
+        let transaction = self
+            .database
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|error| AdapterError::rejected(error.to_string()))?;
+        fence::close(&transaction, self.profile.fenced_resource.as_deref(), fence)
+            .map_err(AdapterError::rejected)?;
+        transaction
+            .commit()
+            .map_err(|error| AdapterError::rejected(error.to_string()))
+    }
 }
 
 fn main() {
@@ -616,6 +637,52 @@ mod installation_tests {
             .execute_batch("DROP TRIGGER fail_effect")
             .unwrap();
         simulator.execute_fenced(next, next_fence).unwrap();
+        assert_eq!(state(&simulator.database).unwrap().actuation_count, 2);
+    }
+
+    #[test]
+    fn a_closed_revision_stays_retired_before_any_successor_command() {
+        let directory = Directory::new();
+        let path = directory.0.join("fan.sqlite");
+        let mut profile = profile();
+        profile.fenced_resource = Some("device.fan-01".into());
+        let id = AdapterId(fan::ADAPTER.into());
+        let mut simulator = Simulator::open(profile.clone(), &path, id.clone()).unwrap();
+        let (first, fence) = fenced_action(1, true);
+        simulator
+            .execute_fenced(first.clone(), fence.clone())
+            .unwrap();
+        // Emulate a persisted controller journal from before the close operation.
+        simulator
+            .database
+            .execute_batch("ALTER TABLE act_fence DROP COLUMN closed;")
+            .unwrap();
+        drop(simulator);
+        let mut simulator = Simulator::open(profile.clone(), &path, id.clone()).unwrap();
+        simulator.close_fence(&first.capability, &fence).unwrap();
+        assert_eq!(state(&simulator.database).unwrap().actuation_count, 1);
+        drop(simulator);
+
+        let mut simulator = Simulator::open(profile, &path, id).unwrap();
+        simulator.close_fence(&first.capability, &fence).unwrap();
+        let mut late = first.clone();
+        late.invocation_id = "late-command".into();
+        late.payload["payload"]["enabled"] = json!(false);
+        assert!(simulator.execute_fenced(late, fence.clone()).is_err());
+        assert!(
+            simulator
+                .execute_fenced(first.clone(), fence.clone())
+                .is_err()
+        );
+        assert!(state(&simulator.database).unwrap().enabled);
+        assert_eq!(state(&simulator.database).unwrap().actuation_count, 1);
+
+        let (next, next_fence) = fenced_action(3, false);
+        let result = simulator
+            .execute_fenced(next.clone(), next_fence.clone())
+            .unwrap();
+        simulator.close_fence(&first.capability, &fence).unwrap();
+        assert_eq!(simulator.execute_fenced(next, next_fence).unwrap(), result);
         assert_eq!(state(&simulator.database).unwrap().actuation_count, 2);
     }
 }

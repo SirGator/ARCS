@@ -212,6 +212,168 @@ fn a_fenced_goal_passes_its_exact_held_revision_to_the_simulated_controller() {
 }
 
 #[test]
+fn controller_confirmation_precedes_release_and_survives_a_failed_core_commit() {
+    let f = fixture(true);
+    let mut profile = f.read("fan-profile.json");
+    profile["fenced_resource"] = json!("device.fan-01");
+    f.write("fan-profile.json", profile);
+    let mut config = f.read("runtime.json");
+    for route in config["routes"].as_array_mut().unwrap() {
+        route["goal"]["actions"][0]["fenced_resource"] = json!("device.fan-01");
+    }
+    f.write("runtime.json", config);
+
+    let mut host = f.host();
+    let mut runtime = f.runtime(&host);
+    let first = waiting(&mut host, &mut runtime);
+    let held = runtime.exclusive_resources(&host).unwrap().remove(0);
+    approve(&host, &mut runtime, &first);
+    until(&mut host, &mut runtime, |r| {
+        r.goals_after(0, 1).unwrap()[0].state == GoalState::Observing
+    });
+    let effect = runtime
+        .goals_after(0, 1)
+        .unwrap()
+        .remove(0)
+        .execution
+        .unwrap();
+
+    // A revision issued by the earlier host had no Core controller guard.
+    f.db("core")
+        .execute_batch(
+            "DELETE FROM reservation_act_controllers;
+         UPDATE reservation_controller_migration
+         SET legacy_through_sequence=(SELECT MAX(sequence) FROM artifact_versions);",
+        )
+        .unwrap();
+    f.db("fan")
+        .execute_batch(
+            "CREATE TRIGGER refuse_close BEFORE UPDATE OF closed ON act_fence
+         WHEN NEW.closed=1 BEGIN SELECT RAISE(ABORT,'controller refuses closure'); END;",
+        )
+        .unwrap();
+    until(&mut host, &mut runtime, |r| {
+        r.report(0).unwrap().completed_goals == 1
+    });
+    let report = runtime.report(0).unwrap();
+    assert_eq!(report.control_release_waits[0].sequence, first.sequence);
+    assert!(
+        report.control_release_waits[0]
+            .error
+            .contains("controller refuses closure"),
+        "{:?}",
+        report.control_release_waits,
+    );
+    assert_eq!(
+        runtime.exclusive_resources(&host).unwrap()[0].version_id,
+        held.version_id
+    );
+    assert!(runtime.goals_after(first.sequence, 1).unwrap().is_empty());
+    assert!(
+        runtime
+            .reconcile_goal_resources(
+                &host,
+                first.sequence,
+                std::slice::from_ref(&held.version_id),
+                std::slice::from_ref(&effect),
+                actor(),
+                "simulated handover".into(),
+            )
+            .is_err()
+    );
+    assert_eq!(
+        runtime.exclusive_resources(&host).unwrap()[0].state,
+        ReservationState::Held
+    );
+
+    f.db("fan")
+        .execute_batch("DROP TRIGGER refuse_close")
+        .unwrap();
+    f.db("core").execute_batch(
+        "CREATE TRIGGER refuse_release BEFORE INSERT ON artifact_versions
+         WHEN NEW.schema_id='arcs.resource_reservation.v1' AND json_extract(NEW.artifact_json,'$.payload.state')='released'
+         BEGIN SELECT RAISE(ABORT,'release commit interrupted'); END;",
+    ).unwrap();
+    assert!(runtime.tick(&mut host).is_err());
+    let retired: bool = f
+        .db("fan")
+        .query_row("SELECT closed FROM act_fence", [], |row| row.get(0))
+        .unwrap();
+    assert!(retired);
+    let confirmed: bool = f.db("core").query_row(
+        "SELECT closed_at IS NOT NULL FROM reservation_act_controllers WHERE reservation_version=?1",
+        [&held.version_id.0], |row| row.get(0),
+    ).unwrap();
+    assert!(confirmed);
+    assert_eq!(
+        runtime.exclusive_resources(&host).unwrap()[0].version_id,
+        held.version_id
+    );
+    assert_eq!(acts(&f), 1);
+
+    host.shutdown().unwrap();
+    drop((runtime, host));
+    f.db("core")
+        .execute_batch("DROP TRIGGER refuse_release")
+        .unwrap();
+    let mut host = f.host();
+    let mut runtime = f.runtime(&host);
+    until(&mut host, &mut runtime, |r| {
+        r.report(0).unwrap().completed_goals == 2
+    });
+    assert!(runtime.report(0).unwrap().control_release_waits.is_empty());
+    assert_eq!(
+        runtime.exclusive_resources(&host).unwrap()[0]
+            .owner
+            .task_sequence,
+        first.sequence + 1
+    );
+    assert_eq!(
+        runtime.exclusive_resources(&host).unwrap()[0].state,
+        ReservationState::Released
+    );
+    assert_eq!(acts(&f), 1);
+    host.shutdown().unwrap();
+}
+
+#[test]
+fn a_new_reservation_rejected_before_dispatch_needs_no_controller_confirmation() {
+    let f = fixture(false);
+    let mut profile = f.read("fan-profile.json");
+    profile["fenced_resource"] = json!("device.fan-01");
+    f.write("fan-profile.json", profile);
+    let mut config = f.read("runtime.json");
+    config["routes"][0]["goal"]["actions"][0]["fenced_resource"] = json!("device.fan-01");
+    f.write("runtime.json", config);
+    let mut host = f.host();
+    let mut runtime = f.runtime(&host);
+    let goal = waiting(&mut host, &mut runtime);
+    f.db("fan")
+        .execute_batch(
+            "CREATE TRIGGER reject_close BEFORE UPDATE OF closed ON act_fence
+         BEGIN SELECT RAISE(ABORT,'unexpected controller close'); END;",
+        )
+        .unwrap();
+    runtime
+        .review_goal(
+            &host,
+            goal.sequence,
+            goal.candidate.as_ref().unwrap(),
+            ApprovalDecision::Rejected,
+            actor(),
+            "operator declined the simulated action".into(),
+        )
+        .unwrap();
+    assert!(runtime.report(0).unwrap().control_release_waits.is_empty());
+    assert_eq!(
+        runtime.exclusive_resources(&host).unwrap()[0].state,
+        ReservationState::Released
+    );
+    assert_eq!(acts(&f), 0);
+    host.shutdown().unwrap();
+}
+
+#[test]
 fn a_restart_keeps_the_same_owner_and_revision_until_the_goal_finishes() {
     let f = fixture(false);
     let mut host = f.host();

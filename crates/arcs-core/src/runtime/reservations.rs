@@ -1,9 +1,9 @@
-//! Persistent cooperative ownership. No expiry or controller fencing is implied.
+//! Persistent ownership and retirement of dispatched reservation fences.
 mod records;
 #[cfg(test)]
 mod tests;
 
-use crate::adapters::ActFence;
+use crate::adapters::{ActAdapter, ActFence, AdapterCallError, CapabilityRef};
 use crate::core::{Actor, ActorType, Artifact, Clock, SchemaRegistry, VersionId};
 use crate::store::{SqliteArtifactStore, StoreError};
 use serde::{Deserialize, Serialize};
@@ -37,6 +37,14 @@ pub struct Reservation {
     pub reason: String,
     pub evidence: Vec<VersionId>,
 }
+
+pub struct ReservationRelease<'a> {
+    pub owner: &'a ReservationOwner,
+    pub expected: &'a [VersionId],
+    pub actor: &'a Actor,
+    pub reason: &'a str,
+    pub evidence: &'a [VersionId],
+}
 #[derive(Debug)]
 pub enum ReservationError {
     Store(StoreError),
@@ -46,6 +54,11 @@ pub enum ReservationError {
         owner: ReservationOwner,
     },
     Conflict,
+    ControllersPending,
+    ControllerAcknowledgement {
+        capability: CapabilityRef,
+        source: AdapterCallError,
+    },
 }
 impl From<StoreError> for ReservationError {
     fn from(e: StoreError) -> Self {
@@ -67,7 +80,7 @@ impl<'a> ReservationService<'a> {
         artifacts: &[Artifact],
         expected: &[(crate::core::SubjectId, Option<VersionId>)],
     ) -> Result<(), StoreError> {
-        self.store.append_current_compared(
+        self.store.append_reservations_compared(
             artifacts,
             self.schemas,
             &expected
@@ -121,6 +134,39 @@ impl<'a> ReservationService<'a> {
             return Err(invalid("invalid current reservation fence"));
         }
         Ok(fence)
+    }
+
+    fn register_controller(
+        &self,
+        fence: &ActFence,
+        controller: &CapabilityRef,
+    ) -> Result<bool, ReservationError> {
+        self.store
+            .register_act_controller(
+                &records::subject(&fence.resource),
+                &crate::core::SchemaId(SCHEMA.into()),
+                &fence.reservation_version_id,
+                controller,
+            )
+            .map_err(|error| match error {
+                StoreError::IdempotencyConflict => ReservationError::Conflict,
+                error => error.into(),
+            })
+    }
+
+    // Register in the same Current-State guard used by release. This transaction
+    // finishes before any adapter I/O.
+    pub(crate) fn register_fenced_dispatch(
+        &self,
+        fence: &ActFence,
+        controller: &CapabilityRef,
+    ) -> Result<(), ReservationError> {
+        if !self.register_controller(fence, controller)? {
+            return Err(invalid(
+                "reservation fence is already closed for this controller",
+            ));
+        }
+        Ok(())
     }
 
     pub fn acquire(
@@ -198,6 +244,34 @@ impl<'a> ReservationService<'a> {
         reason: &str,
         evidence: &[VersionId],
     ) -> Result<(), ReservationError> {
+        self.release_with_controllers(
+            ReservationRelease {
+                owner,
+                expected,
+                actor,
+                reason,
+                evidence,
+            },
+            &[],
+            |_| Err(ReservationError::ControllersPending),
+        )
+    }
+
+    /// Confirm every controller before the guarded Core release. Configured
+    /// controllers also cover reservations dispatched before the guard existed.
+    pub fn release_with_controllers<'endpoint>(
+        &self,
+        request: ReservationRelease<'_>,
+        configured: &[(String, CapabilityRef)],
+        mut endpoint: impl FnMut(&CapabilityRef) -> Result<&'endpoint dyn ActAdapter, ReservationError>,
+    ) -> Result<(), ReservationError> {
+        let ReservationRelease {
+            owner,
+            expected,
+            actor,
+            reason,
+            evidence,
+        } = request;
         self.validate_owner(owner)?;
         if expected.is_empty()
             || expected.len() > 16
@@ -223,6 +297,7 @@ impl<'a> ReservationService<'a> {
         }
         let mut artifacts = Vec::new();
         let mut guards = Vec::new();
+        let mut held = Vec::new();
         for version in expected {
             let previous = self
                 .store
@@ -263,14 +338,73 @@ impl<'a> ReservationService<'a> {
                 self.schemas,
             )?);
             guards.push((records::subject(&record.resource), Some(version.clone())));
+            held.push(record);
         }
         if artifacts.is_empty() {
             return Ok(());
+        }
+        // Finish validation of the entire batch before any controller call.
+        let mut closures = Vec::new();
+        for reservation in held {
+            let legacy = !configured.is_empty()
+                && self
+                    .store
+                    .needs_legacy_act_controllers(&reservation.version_id)?;
+            let mut declared = configured
+                .iter()
+                .filter(|(resource, _)| legacy && *resource == reservation.resource)
+                .map(|(_, capability)| capability)
+                .peekable();
+            let mut pending: BTreeSet<_> = self
+                .store
+                .pending_act_controllers(&reservation.version_id)?
+                .into_iter()
+                .collect();
+            if pending.is_empty() && declared.peek().is_none() {
+                continue;
+            }
+            let fence = self.act_fence(&reservation)?;
+            for controller in declared {
+                if self.register_controller(&fence, controller)? {
+                    pending.insert(controller.clone());
+                } else {
+                    pending.remove(controller);
+                }
+            }
+            closures.push((fence, pending));
+        }
+        for (fence, pending) in closures {
+            for controller in pending {
+                let endpoint = endpoint(&controller)?;
+                let manifest = endpoint.manifest();
+                let matches = manifest.adapter_id == controller.adapter_id
+                    && manifest
+                        .capability(&controller.capability_id)
+                        .and_then(|cap| cap.contract.act())
+                        .is_some_and(|act| act.fenced_resource == Some(fence.resource.as_str()));
+                if !matches {
+                    return Err(ReservationError::ControllerAcknowledgement {
+                        capability: controller,
+                        source: AdapterCallError::Rejected(
+                            "controller fence contract changed".into(),
+                        ),
+                    });
+                }
+                endpoint
+                    .close_fence(&controller, &fence)
+                    .map_err(|source| ReservationError::ControllerAcknowledgement {
+                        capability: controller.clone(),
+                        source,
+                    })?;
+                self.store
+                    .confirm_act_controller_closed(&fence.reservation_version_id, &controller)?;
+            }
         }
         self.commit(&artifacts, &guards).map_err(|e| match e {
             StoreError::VersionConflict { .. } | StoreError::IdempotencyConflict => {
                 ReservationError::Conflict
             }
+            StoreError::OpenActFences => ReservationError::ControllersPending,
             e => e.into(),
         })
     }

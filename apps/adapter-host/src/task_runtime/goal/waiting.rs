@@ -16,6 +16,13 @@ impl TaskRuntime {
         if schedule.released_at_unix_ms.is_none() {
             return Ok(false);
         }
+        if self
+            .journal
+            .control_session(task.sequence)?
+            .is_some_and(|session| !session.closed)
+        {
+            return Ok(false);
+        }
         // The following checkpoint precedes fresh acquisition. Historical
         // candidates and approvals remain in the Core, without active authority.
         task.observation_cursor = host.store().latest_sequence().map_err(HostError::Store)?;

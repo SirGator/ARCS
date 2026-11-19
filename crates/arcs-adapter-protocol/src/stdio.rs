@@ -61,6 +61,10 @@ pub enum HostMessage {
         invocation: ActInvocation,
         fence: ActFence,
     },
+    CloseFence {
+        capability: crate::CapabilityRef,
+        fence: ActFence,
+    },
     ReadData {
         request: DataRead,
     },
@@ -110,6 +114,10 @@ pub enum AdapterMessage {
     },
     ExecutionResult {
         response: ActResponse,
+    },
+    FenceClosed {
+        capability: crate::CapabilityRef,
+        fence: ActFence,
     },
     DataChunk {
         chunk: DataChunk,

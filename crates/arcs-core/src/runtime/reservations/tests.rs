@@ -65,6 +65,108 @@ fn actor() -> Actor {
 }
 
 #[test]
+fn controller_registration_during_acknowledgement_keeps_the_reservation_held() {
+    use crate::adapters::{
+        ActInvocation, ActResponse, AdapterManifest, CapabilityContract, CapabilityDescriptor,
+    };
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct Controller {
+        manifest: AdapterManifest,
+        acknowledgements: AtomicUsize,
+    }
+    impl ActAdapter for Controller {
+        fn manifest(&self) -> &AdapterManifest {
+            &self.manifest
+        }
+        fn execute(&self, _: &ActInvocation) -> Result<ActResponse, AdapterCallError> {
+            panic!("the closure must not execute a device action")
+        }
+        fn close_fence(&self, _: &CapabilityRef, fence: &ActFence) -> Result<(), AdapterCallError> {
+            assert_eq!(fence.revision, 1);
+            self.acknowledgements.fetch_add(1, Ordering::Relaxed);
+            Ok(())
+        }
+    }
+    let controller = |id: &CapabilityRef| Controller {
+        manifest: AdapterManifest {
+            protocol_version: 1,
+            adapter_id: id.adapter_id.clone(),
+            adapter_version: "test".into(),
+            capabilities: vec![CapabilityDescriptor {
+                id: id.capability_id.clone(),
+                description: None,
+                contract: CapabilityContract::FencedAct {
+                    accepts: vec![SchemaId("command".into())],
+                    emits: vec![SchemaId("result".into())],
+                    fenced_resource: "device".into(),
+                },
+                required_permissions: vec!["test.act".into()],
+            }],
+        },
+        acknowledgements: AtomicUsize::new(0),
+    };
+
+    let store = SqliteArtifactStore::in_memory().unwrap();
+    let schemas = schemas();
+    let owner = seed(&store, &schemas);
+    let actor = actor();
+    let service = ReservationService::new(&store, &schemas, &Time);
+    let held = service
+        .acquire(&owner, &["device".into()])
+        .unwrap()
+        .remove(0);
+    let expected = [held.version_id.clone()];
+    let fence = service.act_fence(&held).unwrap();
+    let first = CapabilityRef::new("first", "act");
+    let next = CapabilityRef::new("next", "act");
+    let first_controller = controller(&first);
+    let next_controller = controller(&next);
+    service.register_fenced_dispatch(&fence, &first).unwrap();
+    assert!(matches!(
+        service.release(&owner, &expected, &actor, "checked", &[]),
+        Err(ReservationError::ControllersPending)
+    ));
+    let release = || ReservationRelease {
+        owner: &owner,
+        expected: &expected,
+        actor: &actor,
+        reason: "checked",
+        evidence: &[],
+    };
+    let interrupted = service.release_with_controllers(release(), &[], |capability| {
+        assert_eq!(capability, &first);
+        service.register_fenced_dispatch(&fence, &next).unwrap();
+        Ok(&first_controller)
+    });
+    assert!(matches!(
+        interrupted,
+        Err(ReservationError::ControllersPending)
+    ));
+    assert_eq!(
+        service.current("device").unwrap().unwrap().state,
+        ReservationState::Held
+    );
+    assert!(service.register_fenced_dispatch(&fence, &first).is_err());
+    service
+        .release_with_controllers(release(), &[], |capability| {
+            assert_eq!(capability, &next);
+            Ok(&next_controller)
+        })
+        .unwrap();
+    assert_eq!(first_controller.acknowledgements.load(Ordering::Relaxed), 1);
+    assert_eq!(next_controller.acknowledgements.load(Ordering::Relaxed), 1);
+    assert_eq!(
+        service.current("device").unwrap().unwrap().state,
+        ReservationState::Released
+    );
+    assert!(service.register_fenced_dispatch(&fence, &next).is_err());
+    service
+        .release_with_controllers(release(), &[], |_| panic!("replayed controller closure"))
+        .unwrap();
+}
+
+#[test]
 fn all_or_nothing_ownership_is_versioned_and_stale_releases_cannot_touch_a_new_owner() {
     let store = SqliteArtifactStore::in_memory().unwrap();
     let schemas = schemas();

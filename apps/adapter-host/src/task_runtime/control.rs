@@ -5,13 +5,13 @@ pub use review::ResourceEvidenceReview;
 use super::{
     TaskRuntime,
     config::invalid,
-    goal::{GoalConfig, GoalState},
+    goal::{GoalConfig, GoalState, GoalTask},
     journal::ControlSession,
 };
 use crate::{Host, HostError};
 use arcs::core::{Actor, ActorType, SystemClock, VersionId};
 use arcs::runtime::reservations::{
-    Reservation, ReservationError, ReservationService, ReservationState,
+    Reservation, ReservationError, ReservationRelease, ReservationService, ReservationState,
 };
 use std::collections::{BTreeSet, HashSet};
 
@@ -152,7 +152,8 @@ impl TaskRuntime {
             return Ok(());
         }
         let mut evidence = Vec::new();
-        if let Some(goal) = self.saved_goal(sequence)? {
+        let goal = self.saved_goal(sequence)?;
+        if let Some(goal) = &goal {
             if !goal.state.terminal()
                 && !matches!(goal.state, GoalState::WaitingTime | GoalState::WaitingEvent)
             {
@@ -181,8 +182,8 @@ impl TaskRuntime {
                     return Ok(());
                 }
                 evidence.push(outcome.version_id);
-            } else if let Some(version) = goal.approval.or(goal.assessment) {
-                evidence.push(version);
+            } else if let Some(version) = goal.approval.as_ref().or(goal.assessment.as_ref()) {
+                evidence.push(version.clone());
             }
         }
         let service = ReservationService::new(host.store(), host.schemas(), &SystemClock);
@@ -190,21 +191,65 @@ impl TaskRuntime {
             .into_iter()
             .map(|r| r.version_id)
             .collect::<Vec<_>>();
-        if !held.is_empty() {
-            service
-                .release(
-                    &session.owner,
-                    &held,
-                    &Actor {
-                        actor_type: ActorType::System,
-                        id: "arcs.host.runtime".into(),
-                    },
-                    "goal control session closed",
-                    &evidence,
-                )
-                .map_err(error)?;
+        if held.is_empty() {
+            return self.journal.close_control_session(&session.owner);
         }
-        self.journal.close_control_session(&session.owner)
+        let released = self.release_control(
+            host,
+            goal.as_ref(),
+            ReservationRelease {
+                owner: &session.owner,
+                expected: &held,
+                actor: &Actor {
+                    actor_type: ActorType::System,
+                    id: "arcs.host.runtime".into(),
+                },
+                reason: "goal control session closed",
+                evidence: &evidence,
+            },
+        );
+        match released {
+            Err(HostError::ControlReleasePending(_)) => Ok(()),
+            result => result,
+        }
+    }
+
+    fn release_control(
+        &self,
+        host: &Host,
+        goal: Option<&GoalTask>,
+        release: ReservationRelease<'_>,
+    ) -> Result<(), HostError> {
+        // Include frozen route targets to cover older held reservations for
+        // which a controller may have received work before dispatch guards.
+        let mut configured = Vec::new();
+        if let Some(goal) = goal {
+            let route = self.raw_route_for_job(host, goal.sequence, &goal.route_id)?;
+            let config = route
+                .goal
+                .ok_or_else(|| invalid("control session route has no goal"))?;
+            for action in config.actions {
+                if let Some(resource) = action.fenced_resource {
+                    configured.push((resource, action.capability));
+                }
+            }
+        }
+        let owner = release.owner;
+        let service = ReservationService::new(host.store(), host.schemas(), &SystemClock);
+        match service.release_with_controllers(release, &configured, |capability| {
+            host.reservation_controller(capability)
+        }) {
+            Ok(()) => self.journal.close_control_session(owner),
+            Err(
+                failure @ (ReservationError::ControllersPending
+                | ReservationError::ControllerAcknowledgement { .. }),
+            ) => {
+                let detail: String = format!("{failure:?}").chars().take(512).collect();
+                self.journal.note_control_release_error(owner, &detail)?;
+                Err(HostError::ControlReleasePending(detail))
+            }
+            Err(failure) => Err(error(failure)),
+        }
     }
 
     pub fn exclusive_resources(&self, host: &Host) -> Result<Vec<Reservation>, HostError> {
@@ -292,9 +337,16 @@ impl TaskRuntime {
                 return Err(invalid("reconciliation resource set changed"));
             }
         }
-        service
-            .release(&session.owner, expected, &actor, &reason, evidence)
-            .map_err(error)?;
-        self.journal.close_control_session(&session.owner)
+        self.release_control(
+            host,
+            Some(&goal),
+            ReservationRelease {
+                owner: &session.owner,
+                expected,
+                actor: &actor,
+                reason: &reason,
+                evidence,
+            },
+        )
     }
 }

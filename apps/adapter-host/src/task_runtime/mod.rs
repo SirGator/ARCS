@@ -69,9 +69,17 @@ pub struct FailedTask {
     pub error: String,
 }
 #[derive(Debug, Serialize)]
+pub struct ControlReleaseWait {
+    pub sequence: u64,
+    pub session: u32,
+    pub error: String,
+}
+#[derive(Debug, Serialize)]
 pub struct RuntimeReport {
     pub paused_jobs: u64,
     pub task_controls: Vec<suspension::TaskControlStatus>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub control_release_waits: Vec<ControlReleaseWait>,
     pub runtime_id: String,
     pub ticks: u64,
     pub pending_jobs: usize,
@@ -428,6 +436,7 @@ impl TaskRuntime {
         Ok(RuntimeReport {
             paused_jobs: self.journal.paused_count()?,
             task_controls: self.journal.task_controls_report()?,
+            control_release_waits: self.journal.control_release_waits()?,
             runtime_id: self.config.runtime_id.clone(),
             ticks,
             pending_jobs: self.journal.pending(self.config.retry_failed_jobs())?,

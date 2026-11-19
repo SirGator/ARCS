@@ -10,6 +10,25 @@ impl SqliteArtifactStore {
         schemas: &SchemaRegistry,
         expected: &[(SubjectId, SchemaId, Option<VersionId>)],
     ) -> Result<(), StoreError> {
+        self.append_current_compared_inner(artifacts, schemas, expected, false)
+    }
+
+    pub(crate) fn append_reservations_compared(
+        &self,
+        artifacts: &[Artifact],
+        schemas: &SchemaRegistry,
+        expected: &[(SubjectId, SchemaId, Option<VersionId>)],
+    ) -> Result<(), StoreError> {
+        self.append_current_compared_inner(artifacts, schemas, expected, true)
+    }
+
+    fn append_current_compared_inner(
+        &self,
+        artifacts: &[Artifact],
+        schemas: &SchemaRegistry,
+        expected: &[(SubjectId, SchemaId, Option<VersionId>)],
+        require_closed_controllers: bool,
+    ) -> Result<(), StoreError> {
         let mut seen = std::collections::HashSet::new();
         if !(1..=16).contains(&artifacts.len())
             || !(1..=16).contains(&expected.len())
@@ -42,6 +61,15 @@ impl SqliteArtifactStore {
                 .optional()?;
             if actual.as_deref() != expected.as_ref().map(|id| id.0.as_str()) {
                 return Err(StoreError::IdempotencyConflict);
+            }
+            if require_closed_controllers && let Some(version) = expected {
+                let open: bool = transaction.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM reservation_act_controllers WHERE reservation_version=?1 AND closed_at IS NULL)",
+                    [&version.0], |row| row.get(0),
+                )?;
+                if open {
+                    return Err(StoreError::OpenActFences);
+                }
             }
         }
         for artifact in artifacts {

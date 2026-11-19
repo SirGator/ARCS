@@ -15,8 +15,9 @@ use std::time::Duration;
 
 use arcs::adapters::stdio::StdioAdapter;
 use arcs::adapters::{
-    ADAPTER_PROTOCOL_VERSION, AdapterGrant, AdapterId, AdapterManifest, AdapterRegistry,
-    CapabilityContract, CapabilityDescriptor, CapabilityId, CapabilityRef, ProducerClass,
+    ADAPTER_PROTOCOL_VERSION, ActAdapter, AdapterCallError, AdapterGrant, AdapterId,
+    AdapterManifest, AdapterRegistry, CapabilityContract, CapabilityDescriptor, CapabilityId,
+    CapabilityRef, ProducerClass,
 };
 use arcs::core::{
     Artifact, SchemaId, SchemaRegistry, SequenceIdGenerator, SourceKind, SystemClock, Trust,
@@ -25,7 +26,7 @@ use arcs::core::{
 use arcs::execution::ExecutionService;
 use arcs::input::{InputMessage, InputService};
 use arcs::request::RequestService;
-use arcs::runtime::reservations::Reservation;
+use arcs::runtime::reservations::{Reservation, ReservationError};
 use arcs::store::{ArtifactRelations, SqliteArtifactStore, relation_kinds};
 use arcs::transform::TransformService;
 use arcs::world::observation::{ObservationLog, ObservationService};
@@ -758,6 +759,37 @@ impl Host {
             adapter: adapter_id.clone(),
             source,
         })
+    }
+
+    pub(crate) fn reservation_controller(
+        &self,
+        capability: &CapabilityRef,
+    ) -> Result<&dyn ActAdapter, ReservationError> {
+        let failure = |source| ReservationError::ControllerAcknowledgement {
+            capability: capability.clone(),
+            source,
+        };
+        let (registered, _) = self
+            .registry
+            .authorized_capability(&capability.adapter_id, &capability.capability_id)
+            .map_err(|error| failure(AdapterCallError::Rejected(format!("{error:?}"))))?;
+        if registered.grant().producer_class != ProducerClass::Executor {
+            return Err(failure(AdapterCallError::Rejected(
+                "controller requires an executor grant".into(),
+            )));
+        }
+        self.ensure_adapter_available(&capability.adapter_id)
+            .map_err(|error| failure(AdapterCallError::Unavailable(error.to_string())))?;
+        let adapter = self
+            .adapters
+            .iter()
+            .find(|adapter| adapter.config.grant.adapter_id == capability.adapter_id)
+            .ok_or_else(|| {
+                failure(AdapterCallError::Unavailable(
+                    "controller is not installed".into(),
+                ))
+            })?;
+        Ok(adapter.endpoint.as_ref())
     }
 
     /// Begrenzte Runde mit fairem Budget je Adapter. Ein erreichter Grenzwert

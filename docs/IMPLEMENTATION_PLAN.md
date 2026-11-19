@@ -408,6 +408,13 @@
 > atomar mit dem Effekt. Eine Controller-Bestätigung beim Schließen einer
 > Reservierung und die Übertragung auf reale Controller stehen aus.
 
+> Dreiunddreißigster Schritt gemäß v3 §7.2 PAR-04/PAR-08/PAR-10 und §7.3:
+> Die Laufzeit schließt eine gehaltene Revision beim Controller, bevor der
+> Core die Ressource freigibt. Jede Act-Capability wird vor dem Dispatch
+> eingetragen. Der Freigabe-Commit verlangt Bestätigungen aller dabei
+> eingetragenen Controller. Der Simulator speichert die Sperre dauerhaft.
+> Ablehnung und unterbrochene Freigabe bleiben sichtbar und halten den Besitz.
+
 **Leitbild:** ARCS ist ein universeller Agent. Es soll sich einfach bedienen lassen, beliebige kompatible Systeme verbinden, eigenständig Probleme lösen und langfristige Aufgaben über Monate verfolgen.
 
 ## 1. Verbindliche Architekturregeln

@@ -33,3 +33,8 @@ speichert die höchste angenommene Revision, Geräteänderung, Ergebnis und
 Observation in einer Transaktion. Nach der Aktivierung bindet das Journal
 das Fencing an dieselbe konfigurierte Ressource. Die vollständige
 Konfiguration steht im [Goal-Beispiel](../../apps/adapter-host/examples/exclusive-goals.md#reservierungsrevision-am-aktor).
+
+Der Simulator speichert `close_fence` dauerhaft, bevor er bestätigt.
+Anschließend weist er dieselbe Revision auch bei Wiederöffnung und vor
+dem ersten Auftrag des Nachfolgers ab. Der Lüfterzustand bleibt bis zur
+nächsten genehmigten Aktion bestehen.

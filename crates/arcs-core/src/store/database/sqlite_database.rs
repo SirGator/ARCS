@@ -1,5 +1,6 @@
 //! SQLite-Implementierung des unveränderlichen Artefakt-Stores.
 
+mod act_fences;
 mod current_updates;
 mod graph;
 mod metadata;
@@ -43,6 +44,7 @@ pub enum StoreError {
     InvalidPageLimits,
     InvalidEventBatch,
     InvalidCurrentBatch,
+    OpenActFences,
     ProjectionTooLarge,
 }
 
@@ -171,6 +173,19 @@ impl SqliteArtifactStore {
                 authority TEXT NOT NULL
             );
             INSERT OR IGNORE INTO store_identity VALUES (1, lower(hex(randomblob(16))));
+            CREATE TABLE IF NOT EXISTS reservation_act_controllers (
+                reservation_version TEXT NOT NULL REFERENCES artifact_versions(version_id),
+                adapter_id TEXT NOT NULL,
+                capability_id TEXT NOT NULL,
+                closed_at TEXT,
+                PRIMARY KEY (reservation_version, adapter_id, capability_id)
+            );
+            CREATE TABLE IF NOT EXISTS reservation_controller_migration (
+                singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+                legacy_through_sequence INTEGER NOT NULL
+            );
+            INSERT OR IGNORE INTO reservation_controller_migration
+                SELECT 1, COALESCE(MAX(sequence), 0) FROM artifact_versions;
             CREATE TABLE IF NOT EXISTS ingress_receipts (
                 receipt_key TEXT PRIMARY KEY,
                 input_json TEXT NOT NULL,

@@ -15,7 +15,7 @@ use std::time::Duration;
 use crate::adapters::data::{DataAdapter, DataChunk, DataRead};
 use crate::adapters::{
     ActAdapter, ActFence, ActInvocation, ActResponse, AdapterCallError, AdapterGrant,
-    AdapterManifest, AdapterRegistry, AdapterRegistryError,
+    AdapterManifest, AdapterRegistry, AdapterRegistryError, CapabilityRef,
 };
 use crate::core::SchemaRegistry;
 use crate::output::{OutputAdapter, OutputInvocation, OutputResponse};
@@ -559,6 +559,30 @@ impl ActAdapter for StdioAdapter {
             },
         )
     }
+    fn close_fence(
+        &self,
+        capability: &CapabilityRef,
+        fence: &ActFence,
+    ) -> Result<(), AdapterCallError> {
+        if capability.adapter_id != self.manifest.adapter_id {
+            return Err(AdapterCallError::Protocol(
+                "controller endpoint identity mismatch".into(),
+            ));
+        }
+        match self
+            .exchange(HostMessage::CloseFence {
+                capability: capability.clone(),
+                fence: fence.clone(),
+            })
+            .map_err(call_error)?
+        {
+            AdapterMessage::FenceClosed {
+                capability: actual,
+                fence: closed,
+            } if &actual == capability && &closed == fence => Ok(()),
+            _ => Err(self.protocol_error("controller did not confirm the exact reservation fence")),
+        }
+    }
 }
 
 fn call_error(error: StdioError) -> AdapterCallError {
@@ -583,8 +607,14 @@ fn call_error(error: StdioError) -> AdapterCallError {
 
 impl Session {
     fn exchange(&mut self, message: HostMessage) -> Result<AdapterMessage, StdioError> {
+        let closes_fence = matches!(message, HostMessage::CloseFence { .. });
         let result = self.exchange_inner(message);
-        if result.is_err() {
+        // A correlated controller refusal leaves the resource held and can
+        // be retried. Transport failures still retire the session.
+        if result
+            .as_ref()
+            .is_err_and(|error| !(closes_fence && matches!(error, StdioError::Remote { .. })))
+        {
             self.stop();
         }
         result

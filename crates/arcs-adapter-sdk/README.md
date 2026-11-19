@@ -30,6 +30,7 @@ und überschreibt die benötigten Methoden:
 | `output` | Einen bereits autorisierten Ausgabeauftrag dauerhaft idempotent zustellen |
 | `execute` | Einen autorisierten Auftrag fachlich prüfen und idempotent ausführen |
 | `execute_fenced` | Einen autorisierten Auftrag an die geprüfte Reservierungsrevision binden |
+| `close_fence` | Die angegebene Reservierungsrevision dauerhaft am Controller schließen |
 | `read_data` | Unveränderliche referenzierte Daten als begrenzten Block liefern |
 
 `serve` übernimmt das begrenzte JSON-Lines-Framing, den Hello-Dialog, die
@@ -45,6 +46,9 @@ und die Identität und Capability ausgehender Observations.
 Das SDK leitet Aufträge mit passender `ActFence` an `Adapter::execute_fenced`
 einer `fenced_act`-Capability weiter. Der Treiber prüft die Revision gegen seinen
 dauerhaften Gerätestand und bindet den Vergleich an die eigentliche Wirkung.
+Mit `Adapter::close_fence` bestätigt er den abgeschlossenen Übergabeschritt.
+Die Methode wartet auf die dauerhafte Sperre und auf den Abschluss bereits
+laufender Arbeit der betreffenden Revision.
 Der [Adaptervertrag](../../ADAPTER_PROTOCOL.md#reservierungsrevision-an-der-act-grenze)
 beschreibt die Felder und den Simulator-Nachweis.
 

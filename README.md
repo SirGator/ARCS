@@ -51,7 +51,8 @@ dokumentiert Slice 28. Der [Bericht zur Aufgabenwarteschlange](docs/ZWISCHENBERI
 dokumentiert Slice 29. Der [Bericht zum Aufgabenabbruch](docs/ZWISCHENBERICHT_2026-11-19_TASK_CANCELLATION.md)
 dokumentiert Slice 30. Der [Bericht zur Klärung von Gerätereservierungen](docs/ZWISCHENBERICHT_2026-11-19_RESOURCE_REVIEW.md)
 dokumentiert Slice 31. Der [Bericht zur Reservierungsprüfung am Aktor](docs/ZWISCHENBERICHT_2026-11-19_ACT_FENCE.md)
-dokumentiert Slice 32. Die Berichte vom
+dokumentiert Slice 32. Der [Bericht zur bestätigten Controller-Übergabe](docs/ZWISCHENBERICHT_2026-11-19_CONTROLLER_CLOSE.md)
+dokumentiert Slice 33. Die Berichte vom
 [17. November](docs/ZWISCHENBERICHT_2026-11-17.md) und
 [16. November](docs/ZWISCHENBERICHT_2026-11-16.md) dokumentieren frühere
 Umsetzungsstände, Prüfergebnisse und offene Grenzen.
