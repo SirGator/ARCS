@@ -20,6 +20,8 @@ const BUNDLED_SCHEMAS: &[&str] = &[
     include_str!("../../../schemas/v1/resource-reservation.schema.json"),
     include_str!("../../../schemas/v1/plan-candidate.schema.json"),
     include_str!("../../../schemas/v1/plan.schema.json"),
+    include_str!("../../../schemas/v2/plan.schema.json"),
+    include_str!("../../../schemas/v1/plan-replanning.schema.json"),
     include_str!("../../../schemas/v1/context-selection.schema.json"),
     include_str!("../../../schemas/v2/reasoning-request.schema.json"),
     include_str!("../../../schemas/v2/reasoning-result.schema.json"),
@@ -722,6 +724,39 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn versioned_plans_require_revision_metadata_without_changing_v1() {
+        let registry = SchemaRegistry::with_bundled_schemas().unwrap();
+        let mut plan = json!({"runtime_id":"test","parent_sequence":1,"parent_route_id":"root","input_version_id":"input:1","proposal_version_id":"proposal:1","steps":[{"id":"step","template_id":"allowed","route":{}}]});
+        assert!(
+            registry
+                .validate(&SchemaId("arcs.plan.v1".into()), &plan)
+                .is_ok()
+        );
+        assert!(
+            registry
+                .validate(&SchemaId("arcs.plan.v2".into()), &plan)
+                .is_err()
+        );
+        plan["revision"] = json!({"index":0});
+        assert!(
+            registry
+                .validate(&SchemaId("arcs.plan.v1".into()), &plan)
+                .is_err()
+        );
+        assert!(
+            registry
+                .validate(&SchemaId("arcs.plan.v2".into()), &plan)
+                .is_ok()
+        );
+        plan["revision"]["index"] = json!(8);
+        assert!(
+            registry
+                .validate(&SchemaId("arcs.plan.v2".into()), &plan)
+                .is_err()
+        );
+    }
 
     #[test]
     // Ein Input ohne Rohtext muss blockiert werden.

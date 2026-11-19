@@ -352,15 +352,12 @@ fn a_completed_goal_exports_its_assessment_to_a_dependent_reasoning_step() {
     let f = fixture();
     // A separate Rules peer consumes only the selected assessment fields.
     // The actual goal assessor remains the bundled adapter.
-    let script=include_str!("support/planner_peer.py")
-        .replace("'adapter_id':'planner'","'adapter_id':'reporter'")
-        .replace("arcs.plan_candidate.v1","arcs.goal_assessment_candidate.v1")
-        .replace("'task_planning' in inv['constraints']","'task_dependencies' in inv['constraints']")
-        .replace("'planner.sqlite'","'reporter.sqlite'")
-        .replace("'iterations':None","'iterations':1")
-        .replace("payload=c['proposal']","payload=c['proposal']; payload['evidence_version_ids']=[i['version_id'] for i in inv['context'] if i['schema_id']=='arcs.goal_assessment_candidate.v1']; assert any(i['payload']=={'goal_status':'achieved','effect':'success'} for i in inv['context']), 'goal assessment fields were not selectively exported'");
-    std::fs::write(f.directory.join("reporter.py"), script).unwrap();
-    f.write("reporter.json",json!({"proposal":{"goal_status":"achieved","effect":"unknown","detail":"dependency report","evidence_version_ids":[]}}));
+    std::fs::write(
+        f.directory.join("reporter.py"),
+        include_str!("support/planner_peer.py"),
+    )
+    .unwrap();
+    f.write("reporter.json",json!({"adapter_id":"reporter","target_schema_id":"arcs.goal_assessment_candidate.v1","context_namespace":"task_dependencies","iterations":1,"copy_assessment":true,"proposal":{"goal_status":"achieved","effect":"unknown","detail":"dependency report","evidence_version_ids":[]}}));
     let mut grant = f.read("assessor-grant.json");
     grant["adapter_id"] = json!("reporter");
     f.write("reporter-grant.json", grant);
@@ -533,26 +530,12 @@ fn plan_and_individual_goal_cancellation_reap_the_actual_goal_phase_invocation()
     use arcs_host::HostError;
     for whole_plan in [true, false] {
         let f = fixture();
-        let script = include_str!("support/planner_peer.py")
-            .replace("'adapter_id':'planner'", "'adapter_id':'goal.planner'")
-            .replace("arcs.plan_candidate.v1", "arcs.fan_candidate.v1")
-            .replace(
-                "'task_planning' in inv['constraints']",
-                "'goal_runtime' in inv['constraints']",
-            )
-            .replace("planner.sqlite", "goal-worker.sqlite")
-            .replace("planner.started", "goal-worker.started")
-            .replace("planner.release", "goal-worker.release")
-            .replace("'iterations':None", "'iterations':1")
-            .replace(
-                "'required_capabilities':[]",
-                "'required_capabilities':[{'adapter_id':'demo.fan','capability_id':'fan.set'}]",
-            );
-        std::fs::write(f.directory.join("goal-worker.py"), script).unwrap();
-        f.write(
-            "goal-worker.json",
-            json!({"proposal":{"device_id":"fan-01","enabled":true},"gate":true}),
-        );
+        std::fs::write(
+            f.directory.join("goal-worker.py"),
+            include_str!("support/planner_peer.py"),
+        )
+        .unwrap();
+        f.write("goal-worker.json",json!({"adapter_id":"goal.planner","journal_name":"goal-worker","target_schema_id":"arcs.fan_candidate.v1","context_namespace":"goal_runtime","iterations":1,"required_capabilities":[{"adapter_id":"demo.fan","capability_id":"fan.set"}],"proposal":{"device_id":"fan-01","enabled":true},"gate":true}));
         let mut config = f.read("host.json");
         config["adapters"][2] = json!({"program":"/usr/bin/python3","args":[{"path":"goal-worker.py"},{"path":"goal-worker.json"}],"grant_file":"planner-grant.json","timeout_ms":15000});
         f.write("host.json", config);

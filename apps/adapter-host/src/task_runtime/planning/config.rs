@@ -31,6 +31,22 @@ impl PlanningConfig {
                 "planning needs a bounded step/catalog budget, plan candidate target, one proposal and no direct action authority",
             ));
         }
+        if let Some(policy) = &self.replanning {
+            let mut budget = super::budgets::PlanBudget::default();
+            budget.add(owner, self.max_total_output_tokens.is_some())?;
+            budget.check(self)?;
+            if !(1..=7).contains(&policy.max_revisions)
+                || owner.constraints.get("task_replanning").is_some()
+                || owner
+                    .permitted_reasoner_choices()
+                    .iter()
+                    .any(|c| c.budget.max_context_items < 3)
+            {
+                return Err(invalid(
+                    "replanning needs 1..7 revisions, three context slots and its reserved constraint namespace",
+                ));
+            }
+        }
         let mut ids = HashSet::new();
         for template in &self.templates {
             let route = &template.route;
@@ -52,6 +68,16 @@ impl PlanningConfig {
             {
                 return Err(invalid(
                     "plan templates must be distinct authorized routes for the same input, without nested plans or fixed dependencies, with explicit exports and action authority confined to goals",
+                ));
+            }
+            if self.replanning.is_some()
+                && route
+                    .goal
+                    .as_ref()
+                    .is_some_and(|g| g.exclusive_resources.is_empty())
+            {
+                return Err(invalid(
+                    "goal replanning requires explicit exclusive control resource identities",
                 ));
             }
             if let Some(goal) = &route.goal
@@ -87,6 +113,9 @@ impl PlanningConfig {
             }).collect::<Vec<_>>()});
         // Keep existing pure Reasoning catalogs byte-for-byte equivalent on
         // recovery. New optional configuration must not change old requests.
+        if let Some(policy) = &self.replanning {
+            catalog["replanning"] = json!(policy);
+        }
         if let Some(limit) = self.max_total_actions {
             catalog["max_total_actions"] = json!(limit);
         }
@@ -152,11 +181,12 @@ impl PlanningConfig {
         Ok(catalog)
     }
 
-    pub(super) fn compile(
+    pub(super) fn compile_revision(
         &self,
         parent: u64,
         proposal: &PlanProposal,
         static_routes: &[ReasoningRoute],
+        revision: u8,
     ) -> Result<Vec<AcceptedStep>, HostError> {
         if proposal.steps.is_empty() || proposal.steps.len() > self.max_steps {
             return Err(invalid("plan step count exceeds configured limit"));
@@ -184,7 +214,7 @@ impl PlanningConfig {
         let mut accepted = Vec::new();
         for step in &proposal.steps {
             let mut route = templates[step.template.as_str()].route.clone();
-            route.id = route_id(parent, &step.id);
+            route.id = route_id(parent, &step.id, self.replanning.as_ref().map(|_| revision));
             if static_routes.iter().any(|fixed| fixed.id == route.id) {
                 return Err(invalid("generated plan route collides with a static route"));
             }
@@ -203,7 +233,11 @@ impl PlanningConfig {
                         "plan requests a field outside the template exports",
                     ));
                 }
-                route.dependencies.push(dependency(parent, edge));
+                route.dependencies.push(dependency(
+                    parent,
+                    edge,
+                    self.replanning.as_ref().map(|_| revision),
+                ));
             }
             accepted.push(AcceptedStep {
                 id: step.id.clone(),

@@ -486,6 +486,11 @@ fn is_core_failure(error: &HostError) -> bool {
         error,
         HostError::Store(_)
             | HostError::Reduction(_)
+            | HostError::Input {
+                source: arcs::input::InputError::Store(_),
+                ..
+            }
+            | HostError::Registration(arcs::adapters::AdapterRegistryError::Store(_))
             | HostError::Request {
                 source: arcs::request::RequestError::Store(_)
                     | arcs::request::RequestError::Invocation(_)

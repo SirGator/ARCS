@@ -81,15 +81,13 @@ impl TaskRuntime {
         };
         let owner =
             self.selection_owner(completion.sequence, completion.input_version_id.clone())?;
-        let request_id = arcs::runtime::deterministic_invocation_id(
-            arcs::runtime::InvocationKind::Reasoning,
-            &[
-                "task-runtime",
-                &self.config.runtime_id,
-                &route.id,
-                &completion.input_version_id.0,
-            ],
-        );
+        let revision = if route.plan.as_ref().is_some_and(|p| p.replanning.is_some()) {
+            self.journal
+                .planner_request_revision(completion.sequence, &completion.request_version_id)?
+        } else {
+            0
+        };
+        let request_id = self.task_request_id(route, &completion.input_version_id, revision);
         arcs::reasoning::recovery::completed_choice(
             host.registry(),
             host.schemas(),

@@ -102,7 +102,10 @@ impl TaskRuntime {
         if matches!(error, HostError::AdapterBusy(_)) {
             return Ok(());
         }
-        if self.config.retry_failed_jobs() || is_core_failure(&error) {
+        if is_core_failure(&error) {
+            return Err(error);
+        }
+        if self.config.retry_failed_jobs() {
             self.journal.fail(sequence, &error)?;
             return Err(error);
         }

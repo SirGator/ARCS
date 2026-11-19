@@ -4,6 +4,7 @@ mod cancellation;
 mod config;
 mod engine;
 mod publication;
+mod replanning;
 
 use super::{ReasoningRoute, dependencies::TaskDependency};
 use arcs::core::VersionId;
@@ -11,6 +12,48 @@ use serde::{Deserialize, Serialize};
 
 pub const PLAN_CANDIDATE: &str = "arcs.plan_candidate.v1";
 pub const ACCEPTED_PLAN: &str = "arcs.plan.v1";
+pub const VERSIONED_PLAN: &str = "arcs.plan.v2";
+pub const REPLANNING_CONTEXT: &str = "arcs.plan_replanning.v1";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReplanningPolicy {
+    pub max_revisions: u8,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlanRevision {
+    pub index: u8,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_plan_version_id: Option<VersionId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_version_id: Option<VersionId>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReplanningContext {
+    pub runtime_id: String,
+    pub parent_sequence: u64,
+    pub input_version_id: VersionId,
+    pub revision: u8,
+    pub previous_plan_version_id: VersionId,
+    pub previous_proposal_version_id: VersionId,
+    pub steps: Vec<ReplanningStep>,
+    pub context: Vec<arcs::reasoning::ContextSelection>,
+    pub omitted_output_items: usize,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReplanningStep {
+    pub sequence: u64,
+    pub id: String,
+    pub template_id: String,
+    pub state: String,
+    pub resolution: String,
+    pub output_version_ids: Vec<VersionId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result_version_id: Option<VersionId>,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -22,6 +65,8 @@ pub struct PlanningConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_total_actions: Option<usize>,
     pub templates: Vec<StepTemplate>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replanning: Option<ReplanningPolicy>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -58,6 +103,8 @@ pub struct AcceptedPlan {
     pub input_version_id: VersionId,
     pub proposal_version_id: VersionId,
     pub steps: Vec<AcceptedStep>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revision: Option<PlanRevision>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -70,6 +117,7 @@ pub struct AcceptedStep {
 #[serde(rename_all = "snake_case")]
 pub enum PlanState {
     Running,
+    Replanning,
     ReadyForReview,
     Rejected,
     Blocked,
@@ -87,7 +135,17 @@ pub struct PlanReceipt {
     pub detail: Option<String>,
     pub cancelled_at_unix_ms: Option<u64>,
     pub steps: Vec<PlanStepReport>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub revisions: Vec<PlanRevisionReceipt>,
 }
+#[derive(Debug, Serialize)]
+pub struct PlanRevisionReceipt {
+    pub index: u8,
+    pub plan_version_id: VersionId,
+    pub proposal_version_id: VersionId,
+    pub context_version_id: Option<VersionId>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct PlanStepReport {
     pub sequence: u64,
@@ -95,6 +153,7 @@ pub struct PlanStepReport {
     pub template_id: String,
     pub route_id: String,
     pub state: String,
+    pub revision: u8,
 }
 
 /// Planner-Root vor der Aufnahme eines Vorschlags, auch in Terminpausen.
@@ -106,13 +165,16 @@ pub struct PlannerJob {
     pub state: String,
 }
 
-fn route_id(parent: u64, id: &str) -> String {
-    format!("p{parent}.{id}")
+fn route_id(parent: u64, id: &str, revision: Option<u8>) -> String {
+    match revision {
+        None => format!("p{parent}.{id}"),
+        Some(revision) => format!("p{parent}.r{revision}.{id}"),
+    }
 }
 
-fn dependency(parent: u64, proposed: &StepDependency) -> TaskDependency {
+fn dependency(parent: u64, proposed: &StepDependency, revision: Option<u8>) -> TaskDependency {
     TaskDependency {
-        route_id: route_id(parent, &proposed.step_id),
+        route_id: route_id(parent, &proposed.step_id, revision),
         payload_fields: proposed.payload_fields.clone(),
     }
 }

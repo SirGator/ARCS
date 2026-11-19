@@ -409,21 +409,9 @@ fn generated_steps_keep_their_selected_producer_through_the_join() {
 #[test]
 fn an_alternative_root_planner_is_recognized_when_loading_accepted_steps() {
     let f = plan_support::fixture("normal", "normal");
-    let path = f.directory.join("planner.py");
-    let source = std::fs::read_to_string(&path)
-        .unwrap()
-        .replace(
-            "'adapter_id':'planner'",
-            "'adapter_id':c.get('id','planner')",
-        )
-        .replace(
-            "root/'planner.sqlite'",
-            "root/(c.get('id','planner')+'.sqlite')",
-        );
-    std::fs::write(path, source).unwrap();
     f.write(
         "planneralt.json",
-        json!({"id":"planneralt","proposal":plan_support::proposal()}),
+        json!({"adapter_id":"planneralt","proposal":plan_support::proposal()}),
     );
     let mut grant = f.read("planner-grant.json");
     grant["adapter_id"] = json!("planneralt");

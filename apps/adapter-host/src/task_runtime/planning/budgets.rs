@@ -83,6 +83,11 @@ impl PlanBudget {
         }
         Ok(())
     }
+    pub(super) fn remaining(&self, config: &PlanningConfig) -> serde_json::Value {
+        serde_json::json!({"max_runtime_ms":config.max_total_runtime_ms.saturating_sub(self.runtime),
+            "max_output_tokens":config.max_total_output_tokens.map(|n|n.saturating_sub(self.tokens)),
+            "max_actions":config.max_total_actions.map(|n|n.saturating_sub(self.actions))})
+    }
     pub(super) fn check(&self, config: &PlanningConfig) -> Result<(), HostError> {
         if self.runtime > config.max_total_runtime_ms
             || config

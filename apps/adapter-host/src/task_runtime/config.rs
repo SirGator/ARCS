@@ -156,6 +156,13 @@ impl RuntimeConfig {
             if !ids.insert(&route.id) {
                 return Err(invalid("duplicate route ID"));
             }
+            if self.retry_failed_jobs()
+                && route.plan.as_ref().is_some_and(|p| p.replanning.is_some())
+            {
+                return Err(invalid(
+                    "replanning requires parallel task failure isolation",
+                ));
+            }
             validate_route_contract(host, route, &mut manifests)?;
             if let Some(plan) = &route.plan {
                 plan.validate(host, route, &mut manifests)?;

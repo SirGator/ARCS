@@ -23,7 +23,7 @@ for line in sys.stdin:
   inv=m['invocation']; key=inv['invocation_id']; raw=json.dumps(inv,sort_keys=True)
   with db: db.execute('INSERT INTO attempts VALUES(?)',(key,))
   if c.get('mode')=='fail':
-   reply={'type':'error','code':'unavailable','message':'injected component failure','retryable':True}
+   reply={'type':'error','code':'unavailable','message':c.get('failure_message','injected component failure'),'retryable':True}
   else:
    old=db.execute('SELECT input,response FROM results WHERE id=?',(key,)).fetchone()
    if old:

@@ -1,5 +1,6 @@
 //! Atomare Aufnahme begrenzter Teilpläne und reservierte Queuekapazität.
 mod cancellation;
+mod revisions;
 use super::{Journal, active, db};
 use crate::HostError;
 use crate::task_runtime::planning::{AcceptedPlan, PlanReceipt, PlanState, PlanStepReport};
@@ -14,13 +15,15 @@ pub(super) fn initialize(connection: &Connection) -> Result<(), HostError> {
         CREATE TABLE IF NOT EXISTS runtime_plan_steps(sequence INTEGER PRIMARY KEY REFERENCES runtime_jobs(sequence),parent_sequence INTEGER NOT NULL REFERENCES runtime_plans(sequence),node_id TEXT NOT NULL,template_id TEXT NOT NULL,UNIQUE(parent_sequence,node_id));
         CREATE INDEX IF NOT EXISTS runtime_plan_children ON runtime_plan_steps(parent_sequence,sequence);
         CREATE TABLE IF NOT EXISTS runtime_plan_cancellations(sequence INTEGER PRIMARY KEY REFERENCES runtime_jobs(sequence),reason TEXT NOT NULL,cancelled_at INTEGER NOT NULL CHECK(cancelled_at>=0));
-        COMMIT;").map_err(db)
+        COMMIT;").map_err(db)?;
+    revisions::initialize(connection)
 }
 
 pub(in crate::task_runtime) fn capacity_query(include_failed: bool) -> String {
     format!(
-        "SELECT COALESCE(SUM(COALESCE(r.units,1)),0) FROM runtime_jobs j LEFT JOIN runtime_job_reservations r ON r.sequence=j.sequence WHERE {}",
-        active(include_failed)
+        "SELECT COALESCE(SUM(COALESCE(r.units,1)),0) FROM runtime_jobs j LEFT JOIN runtime_job_reservations r ON r.sequence=j.sequence WHERE {} AND NOT EXISTS(SELECT 1 FROM runtime_plan_steps s JOIN runtime_jobs p ON p.sequence=s.parent_sequence JOIN runtime_job_reservations held ON held.sequence=p.sequence WHERE s.sequence=j.sequence AND held.units>1 AND {})",
+        active(include_failed).replace("state", "j.state"),
+        active(include_failed).replace("state", "p.state")
     )
 }
 
@@ -109,7 +112,7 @@ impl Journal {
                 "plan admission lacks its reserved capacity or original task identity",
             ));
         }
-        transaction.execute("INSERT INTO runtime_plans(sequence,state,proposal_version,plan_version,completion_json) VALUES(?1,'accepted',?2,?3,?4)",params![completion.sequence as i64,plan.proposal_version_id.0,version.0,serde_json::to_string(completion).map_err(|e|invalid(e.to_string()))?]).map_err(db)?;
+        Self::record_plan_generation(&transaction, plan, version, completion)?;
         for step in &plan.steps {
             transaction.execute("INSERT INTO runtime_jobs(route_id,input_version,source_sequence,state) VALUES(?1,?2,?3,'pending')",params![step.route.id,plan.input_version_id.0,source]).map_err(db)?;
             let sequence = transaction.last_insert_rowid();
@@ -127,11 +130,23 @@ impl Journal {
                     params![
                         sequence,
                         completion.sequence as i64,
-                        step.id,
+                        if let Some(revision) = &plan.revision {
+                            format!("revision:{}:{}", revision.index, step.id)
+                        } else {
+                            step.id.clone()
+                        },
                         step.template_id
                     ],
                 )
                 .map_err(db)?;
+            if let Some(revision) = &plan.revision {
+                transaction
+                    .execute(
+                        "INSERT INTO runtime_plan_step_generations VALUES(?1,?2,?3,?4)",
+                        params![sequence, revision.index, version.0, step.id],
+                    )
+                    .map_err(db)?;
+            }
             if let Some(activation) = &step.route.activation {
                 Self::schedule(
                     &transaction,
@@ -144,12 +159,14 @@ impl Journal {
         }
         let routes: Vec<_> = plan.steps.iter().map(|s| &s.route).collect();
         Self::bind_dependencies(&transaction, &routes, &plan.input_version_id)?;
-        transaction
-            .execute(
-                "UPDATE runtime_job_reservations SET units=1 WHERE sequence=?1",
-                [completion.sequence as i64],
-            )
-            .map_err(db)?;
+        if plan.revision.is_none() {
+            transaction
+                .execute(
+                    "UPDATE runtime_job_reservations SET units=1 WHERE sequence=?1",
+                    [completion.sequence as i64],
+                )
+                .map_err(db)?;
+        }
         transaction.commit().map_err(db)
     }
     pub(in crate::task_runtime) fn reject_plan(
@@ -158,7 +175,8 @@ impl Journal {
         reason: &str,
     ) -> Result<(), HostError> {
         let transaction = self.connection.transaction().map_err(db)?;
-        transaction.execute("INSERT INTO runtime_plans(sequence,state,proposal_version,completion_json,error) VALUES(?1,'rejected',?2,?3,?4)",params![completion.sequence as i64,completion.candidate_version_ids.first().map(|v|&v.0),serde_json::to_string(completion).map_err(|e|invalid(e.to_string()))?,reason]).map_err(db)?;
+        transaction.execute("INSERT INTO runtime_plans(sequence,state,proposal_version,completion_json,error) VALUES(?1,'rejected',?2,?3,?4) ON CONFLICT(sequence) DO UPDATE SET state='rejected',proposal_version=excluded.proposal_version,completion_json=excluded.completion_json,error=excluded.error",params![completion.sequence as i64,completion.candidate_version_ids.first().map(|v|&v.0),serde_json::to_string(completion).map_err(|e|invalid(e.to_string()))?,reason]).map_err(db)?;
+        transaction.execute("UPDATE runtime_plan_replanning SET state='rejected' WHERE parent_sequence=?1 AND state='planning'",[completion.sequence as i64]).map_err(db)?;
         transaction
             .execute(
                 "UPDATE runtime_jobs SET state='blocked',error=?2 WHERE sequence=?1",
@@ -171,10 +189,14 @@ impl Journal {
         &mut self,
         completion: &CompletedTask,
         blocked: Option<&str>,
+        stop_children: bool,
     ) -> Result<(), HostError> {
         let transaction = self.connection.transaction().map_err(db)?;
         let json = serde_json::to_string(completion).map_err(|e| invalid(e.to_string()))?;
         if let Some(reason) = blocked {
+            if stop_children {
+                Self::cancel_plan_children_in(&transaction, completion.sequence, reason)?;
+            }
             transaction
                 .execute(
                     "UPDATE runtime_plans SET state='blocked',error=?2 WHERE sequence=?1",
@@ -202,15 +224,16 @@ impl Journal {
         &self,
         sequence: u64,
     ) -> Result<Option<(u64, VersionId, String, VersionId)>, HostError> {
-        self.connection.query_row("SELECT s.parent_sequence,p.plan_version,s.node_id,j.input_version FROM runtime_plan_steps s JOIN runtime_plans p ON p.sequence=s.parent_sequence JOIN runtime_jobs j ON j.sequence=s.sequence WHERE s.sequence=?1",[sequence as i64],|row|Ok((row.get::<_,i64>(0)? as u64,VersionId(row.get(1)?),row.get(2)?,VersionId(row.get(3)?)))).optional().map_err(db)
+        self.connection.query_row("SELECT s.parent_sequence,COALESCE(g.plan_version,p.plan_version),COALESCE(g.node_id,s.node_id),j.input_version FROM runtime_plan_steps s JOIN runtime_plans p ON p.sequence=s.parent_sequence LEFT JOIN runtime_plan_step_generations g ON g.sequence=s.sequence JOIN runtime_jobs j ON j.sequence=s.sequence WHERE s.sequence=?1",[sequence as i64],|row|Ok((row.get::<_,i64>(0)? as u64,VersionId(row.get(1)?),row.get(2)?,VersionId(row.get(3)?)))).optional().map_err(db)
     }
     pub(in crate::task_runtime) fn plan_step_states(
         &self,
         parent: u64,
+        version: &VersionId,
     ) -> Result<Vec<crate::task_runtime::dependencies::ParentTask>, HostError> {
-        let mut query=self.connection.prepare("SELECT j.sequence,j.route_id,j.input_version,j.state,j.result_json,j.goal_json FROM runtime_plan_steps s JOIN runtime_jobs j ON j.sequence=s.sequence WHERE s.parent_sequence=?1 ORDER BY j.sequence").map_err(db)?;
+        let mut query=self.connection.prepare("SELECT j.sequence,j.route_id,j.input_version,j.state,j.result_json,j.goal_json FROM runtime_plan_steps s JOIN runtime_jobs j ON j.sequence=s.sequence LEFT JOIN runtime_plan_step_generations g ON g.sequence=s.sequence JOIN runtime_plans p ON p.sequence=s.parent_sequence WHERE s.parent_sequence=?1 AND COALESCE(g.plan_version,p.plan_version)=?2 ORDER BY j.sequence").map_err(db)?;
         let rows = query
-            .query_map([parent as i64], |row| {
+            .query_map(params![parent as i64, version.0], |row| {
                 Ok(crate::task_runtime::dependencies::ParentTask {
                     sequence: row.get::<_, i64>(0)? as u64,
                     route_id: row.get(1)?,
@@ -267,7 +290,7 @@ impl Journal {
         } else {
             "j.sequence"
         };
-        let mut query=self.connection.prepare(&format!("SELECT j.sequence,j.route_id,j.input_version,p.proposal_version,p.plan_version,CASE WHEN c.sequence IS NOT NULL THEN 'cancelled' ELSE p.state END,COALESCE(c.reason,p.error),c.cancelled_at FROM runtime_jobs j LEFT JOIN runtime_plans p ON p.sequence=j.sequence LEFT JOIN runtime_plan_cancellations c ON c.sequence=j.sequence WHERE j.sequence>?1 AND (p.sequence IS NOT NULL OR c.sequence IS NOT NULL) ORDER BY {order} LIMIT ?2")).map_err(db)?;
+        let mut query=self.connection.prepare(&format!("SELECT j.sequence,j.route_id,j.input_version,p.proposal_version,p.plan_version,CASE WHEN c.sequence IS NOT NULL THEN 'cancelled' WHEN EXISTS(SELECT 1 FROM runtime_plan_replanning intent WHERE intent.parent_sequence=j.sequence AND intent.state='planning') THEN 'replanning' ELSE p.state END,COALESCE(c.reason,p.error),c.cancelled_at FROM runtime_jobs j LEFT JOIN runtime_plans p ON p.sequence=j.sequence LEFT JOIN runtime_plan_cancellations c ON c.sequence=j.sequence WHERE j.sequence>?1 AND (p.sequence IS NOT NULL OR c.sequence IS NOT NULL) ORDER BY {order} LIMIT ?2")).map_err(db)?;
         let rows = query
             .query_map(
                 params![sequence.min(i64::MAX as u64) as i64, limit as i64],
@@ -289,7 +312,7 @@ impl Journal {
         for row in rows {
             let (sequence, route_id, input, proposal, version, state, detail, cancelled_at) =
                 row.map_err(db)?;
-            let mut children=self.connection.prepare("SELECT j.sequence,s.node_id,s.template_id,j.route_id,j.state FROM runtime_plan_steps s JOIN runtime_jobs j ON j.sequence=s.sequence WHERE s.parent_sequence=?1 ORDER BY j.sequence").map_err(db)?;
+            let mut children=self.connection.prepare("SELECT j.sequence,COALESCE(g.node_id,s.node_id),s.template_id,j.route_id,j.state,COALESCE(g.revision,0) FROM runtime_plan_steps s JOIN runtime_jobs j ON j.sequence=s.sequence LEFT JOIN runtime_plan_step_generations g ON g.sequence=s.sequence WHERE s.parent_sequence=?1 ORDER BY j.sequence").map_err(db)?;
             let steps = children
                 .query_map([sequence], |row| {
                     Ok(PlanStepReport {
@@ -298,6 +321,7 @@ impl Journal {
                         template_id: row.get(2)?,
                         route_id: row.get(3)?,
                         state: row.get(4)?,
+                        revision: row.get(5)?,
                     })
                 })
                 .map_err(db)?
@@ -311,6 +335,7 @@ impl Journal {
                 plan_version_id: version.map(VersionId),
                 state: match state.as_str() {
                     "accepted" => PlanState::Running,
+                    "replanning" => PlanState::Replanning,
                     "ready" => PlanState::ReadyForReview,
                     "rejected" => PlanState::Rejected,
                     "blocked" => PlanState::Blocked,
@@ -320,6 +345,7 @@ impl Journal {
                 detail,
                 cancelled_at_unix_ms: cancelled_at.map(|n| n as u64),
                 steps,
+                revisions: self.plan_revisions(sequence as u64)?,
             });
         }
         Ok(result)

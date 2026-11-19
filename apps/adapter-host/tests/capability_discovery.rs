@@ -133,9 +133,6 @@ fn a_planner_selects_by_description_and_replays_the_same_catalog_after_a_lost_re
     let f = plan_support::fixture("normal", "normal");
     describe(&f, "a", "Find nearest listed number", json!(["nearest"]));
     describe(&f, "b", "Create a report", json!(["reporting"]));
-    let path = f.directory.join("planner.py");
-    let source = std::fs::read_to_string(&path).unwrap();
-    std::fs::write(path,source.replace("   payload=c['proposal'];status=","   payload=c['proposal']\n   if c.get('select_tag'):\n    pool=inv['constraints']['task_planning']['templates']\n    selected=next(t for t in pool if c['select_tag'] in t.get('reasoner_description_claim',{}).get('description',{}).get('tags',[]))\n    payload={'steps':[{'id':'selected','template':selected['id']}]}\n   status=")).unwrap();
     let mut model = f.read("planner.json");
     model["select_tag"] = json!("nearest");
     model["gate"] = json!(true);

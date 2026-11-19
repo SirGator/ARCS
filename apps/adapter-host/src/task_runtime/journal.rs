@@ -201,16 +201,28 @@ impl Journal {
         Ok(())
     }
     pub fn fail(&self, sequence: u64, error: &HostError) -> Result<(), HostError> {
-        self.connection
+        let transaction = self.connection.unchecked_transaction().map_err(db)?;
+        let detail = error.to_string().chars().take(2000).collect::<String>();
+        transaction
             .execute(
                 "UPDATE runtime_jobs SET state='failed',error=?2 WHERE sequence=?1",
-                params![
-                    sequence.min(i64::MAX as u64) as i64,
-                    error.to_string().chars().take(2000).collect::<String>()
-                ],
+                params![sequence.min(i64::MAX as u64) as i64, detail],
             )
             .map_err(db)?;
-        Ok(())
+        let changed=transaction.execute("UPDATE runtime_plan_replanning SET state='rejected' WHERE parent_sequence=?1 AND state='planning'",[sequence.min(i64::MAX as u64) as i64]).map_err(db)?;
+        let held:bool=transaction.query_row("SELECT EXISTS(SELECT 1 FROM runtime_plans p JOIN runtime_job_reservations r ON r.sequence=p.sequence WHERE p.sequence=?1 AND r.units>1)",[sequence.min(i64::MAX as u64) as i64],|r|r.get(0)).map_err(db)?;
+        if changed > 0 || held {
+            if held {
+                Self::cancel_plan_children_in(&transaction, sequence, &detail)?;
+            }
+            transaction
+                .execute(
+                    "UPDATE runtime_plans SET state='blocked',error=?2 WHERE sequence=?1",
+                    params![sequence as i64, detail],
+                )
+                .map_err(db)?;
+        }
+        transaction.commit().map_err(db)
     }
     pub fn complete(&self, result: &CompletedTask) -> Result<(), HostError> {
         self.connection.execute("UPDATE runtime_jobs SET state='ready_for_review',error=NULL,result_json=?2 WHERE sequence=?1",params![result.sequence.min(i64::MAX as u64) as i64,serde_json::to_string(result).map_err(|e| invalid(e.to_string()))?]).map_err(db)?;

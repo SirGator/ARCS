@@ -469,12 +469,11 @@ fn a_dynamic_goal_snapshot_keeps_its_resources_and_plan_cancellation_closes_its_
     root["plan"] = json!({"max_steps":1,"max_total_actions":1,"max_total_runtime_ms":30000,"templates":[{"route":goal,"export_fields":["goal_status","effect"]}]});
     config["routes"] = json!([root]);
     f.write("runtime.json", config);
-    let script =
-        include_str!("support/planner_peer.py").replace("planner.sqlite", "root-workflow.sqlite");
+    let script = include_str!("support/planner_peer.py");
     std::fs::write(f.directory.join("workflow.py"), script).unwrap();
     f.write(
         "workflow.json",
-        json!({"proposal":{"steps":[{"id":"device","template":"fan-cycle"}]}}),
+        json!({"journal_name":"root-workflow","proposal":{"steps":[{"id":"device","template":"fan-cycle"}]}}),
     );
     let mut grant = f.read("planner-grant.json");
     grant["adapter_id"] = json!("planner");

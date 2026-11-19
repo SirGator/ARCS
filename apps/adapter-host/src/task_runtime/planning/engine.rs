@@ -3,7 +3,6 @@ use crate::task_runtime::{CompletedTask, TaskRuntime, config::invalid};
 use crate::{Host, HostError};
 use arcs::core::Artifact;
 use arcs::reasoning::{ContextSelection, ReasoningRequestV2, ReasoningStatus};
-use arcs::runtime::{InvocationKind, deterministic_invocation_id};
 
 impl TaskRuntime {
     pub(in crate::task_runtime) fn route_for_job(
@@ -15,14 +14,13 @@ impl TaskRuntime {
         let route = self.raw_route_for_job(host, sequence, id)?;
         self.apply_saved_reasoner(host, sequence, route)
     }
-
     pub(in crate::task_runtime) fn raw_route_for_job(
         &self,
         host: &Host,
         sequence: u64,
         id: &str,
     ) -> Result<ReasoningRoute, HostError> {
-        if let Some(route) = self.config.routes.iter().find(|route| route.id == id) {
+        if let Some(route) = self.config.routes.iter().find(|r| r.id == id) {
             return Ok(route.clone());
         }
         let (parent, version, node, input) = self
@@ -30,70 +28,16 @@ impl TaskRuntime {
             .dynamic_origin(sequence)?
             .ok_or_else(|| invalid("unknown saved route"))?;
         let plan = self.load_plan(host, &version)?;
-        if plan.parent_sequence != parent
-            || plan.runtime_id != self.config.runtime_id
-            || plan.input_version_id != input
-        {
+        if plan.parent_sequence != parent || plan.input_version_id != input {
             return Err(invalid("plan instance identity changed"));
         }
-        let owner = self
-            .config
-            .routes
-            .iter()
-            .find(|route| route.id == plan.parent_route_id)
-            .ok_or_else(|| invalid("plan owner route is missing"))?;
-        let owner = self.apply_saved_reasoner(host, parent, owner.clone())?;
-        let config = owner
-            .plan
-            .as_ref()
-            .ok_or_else(|| invalid("plan owner no longer authorizes planning"))?;
-        let candidate = host
-            .store()
-            .get(&plan.proposal_version_id)
-            .map_err(HostError::Store)?
-            .ok_or_else(|| invalid("plan proposal artifact is missing"))?;
-        let producer = if owner.reasoning_recovery.is_some() {
-            let saved = self
-                .journal
-                .saved_plan(parent)?
-                .ok_or_else(|| invalid("missing planner completion for recovery"))?;
-            if saved.completion.sequence != parent
-                || saved.completion.route_id != owner.id
-                || saved.completion.input_version_id != plan.input_version_id
-                || !saved
-                    .completion
-                    .candidate_version_ids
-                    .contains(&plan.proposal_version_id)
-            {
-                return Err(invalid("planner recovery completion changed"));
-            }
-            self.completed_reasoner(host, &owner, &saved.completion)?
-                .capability
-                .adapter_id
-                .0
-        } else {
-            owner.reasoner.adapter_id.0.clone()
-        };
-        if candidate.schema_id.0 != PLAN_CANDIDATE || candidate.created_by.id != producer {
-            return Err(invalid("plan proposal origin changed"));
-        }
-        let proposal: PlanProposal =
-            serde_json::from_value(candidate.payload).map_err(|e| invalid(e.to_string()))?;
-        let expected = config.compile(parent, &proposal, &self.config.routes)?;
-        if serde_json::to_value(&expected).map_err(|e| invalid(e.to_string()))?
-            != serde_json::to_value(&plan.steps).map_err(|e| invalid(e.to_string()))?
-        {
-            return Err(invalid(
-                "plan snapshot exceeds its authorized template definitions",
-            ));
-        }
+        self.validate_frozen_plan(host, &version, &plan)?;
         plan.steps
             .into_iter()
-            .find(|step| step.id == node && step.route.id == id)
-            .map(|step| step.route)
+            .find(|s| s.id == node && s.route.id == id)
+            .map(|s| s.route)
             .ok_or_else(|| invalid("saved plan step is missing"))
     }
-
     pub(in crate::task_runtime) fn advance_plan(
         &mut self,
         host: &mut Host,
@@ -102,21 +46,24 @@ impl TaskRuntime {
         input: &Artifact,
         now: u64,
     ) -> Result<(), HostError> {
-        if let Some(saved) = self.journal.saved_plan(sequence)? {
+        let config = route
+            .plan
+            .as_ref()
+            .ok_or_else(|| invalid("planning route is missing configuration"))?;
+        let pending = self.journal.pending_replan(sequence)?;
+        if pending.is_none()
+            && let Some(saved) = self.journal.saved_plan(sequence)?
+        {
             if saved.state != "accepted" {
                 return Ok(());
             }
-            let plan = self.load_plan(
-                host,
-                saved
-                    .plan_version
-                    .as_ref()
-                    .ok_or_else(|| invalid("accepted plan has no artifact"))?,
-            )?;
-            if plan.parent_sequence != sequence || plan.input_version_id != input.version_id {
-                return Err(invalid("accepted plan input identity changed"));
-            }
-            let states = self.journal.plan_step_states(sequence)?;
+            let version = saved
+                .plan_version
+                .as_ref()
+                .ok_or_else(|| invalid("accepted plan has no artifact"))?;
+            let plan = self.load_plan(host, version)?;
+            self.validate_frozen_plan(host, version, &plan)?;
+            let states = self.journal.plan_step_states(sequence, version)?;
             if states.len() != plan.steps.len() {
                 return Err(invalid("accepted plan has incomplete operational steps"));
             }
@@ -132,16 +79,39 @@ impl TaskRuntime {
                     crate::task_runtime::dependencies::ParentResult::Ready(_) => {}
                 }
             }
-            if blocked.is_some() || !waiting {
-                self.journal
-                    .finish_plan(&saved.completion, blocked.as_deref())?;
+            if blocked.is_some()
+                && config.replanning.as_ref().is_some_and(|p| {
+                    plan.revision
+                        .as_ref()
+                        .is_some_and(|r| r.index < p.max_revisions)
+                })
+            {
+                if self
+                    .revision_budget(host, sequence, config, route, &[])?
+                    .is_none()
+                {
+                    self.journal.finish_plan(
+                        &saved.completion,
+                        Some("plan aggregate budget exhausted before replanning"),
+                        true,
+                    )?;
+                    self.reap_abandoned_task_work(host)?;
+                    return Ok(());
+                }
+                let context = self.make_replanning_context(host, route, &plan, version)?;
+                self.journal.begin_replan(&context)?;
+                self.reap_abandoned_task_work(host)?;
+                self.cleanup_control_sessions(host)?;
+            } else if blocked.is_some() || !waiting {
+                self.journal.finish_plan(
+                    &saved.completion,
+                    blocked.as_deref(),
+                    config.replanning.is_some(),
+                )?;
+                self.reap_abandoned_task_work(host)?;
             }
             return Ok(());
         }
-        let config = route
-            .plan
-            .as_ref()
-            .ok_or_else(|| invalid("planning route is missing configuration"))?;
         self.journal.start(sequence)?;
         let mut constraints = route.constraints.clone();
         if let Some(object) = constraints.as_object_mut() {
@@ -149,23 +119,52 @@ impl TaskRuntime {
         } else {
             constraints = serde_json::json!({"operator_constraints":constraints,"task_planning":config.catalog(host)?});
         }
+        let (revision, context, meta) = if let Some(pending) = pending {
+            let artifact = self.publish_replanning_context(host, &pending.context)?;
+            if pending
+                .version
+                .as_ref()
+                .is_some_and(|v| v != &artifact.version_id)
+            {
+                return Err(invalid("replanning artifact identity changed"));
+            }
+            self.journal.bind_replan_context(
+                sequence,
+                pending.context.revision,
+                &artifact.version_id,
+            )?;
+            constraints["task_replanning"] = serde_json::json!({"revision":pending.context.revision,"previous_plan_version_id":pending.context.previous_plan_version_id,"context_version_id":artifact.version_id,"remaining_budget":self.revision_budget(host,sequence,config,route,&[])?});
+            let inputs =
+                self.replanning_inputs(host, input, route, &pending.context, &artifact.version_id)?;
+            (
+                pending.context.revision,
+                inputs,
+                Some(PlanRevision {
+                    index: pending.context.revision,
+                    previous_plan_version_id: Some(pending.context.previous_plan_version_id),
+                    context_version_id: Some(artifact.version_id),
+                }),
+            )
+        } else {
+            (
+                0,
+                vec![ContextSelection {
+                    version_id: input.version_id.clone(),
+                    payload_fields: route.payload_fields.clone(),
+                }],
+                config.replanning.as_ref().map(|_| PlanRevision {
+                    index: 0,
+                    previous_plan_version_id: None,
+                    context_version_id: None,
+                }),
+            )
+        };
         let request = ReasoningRequestV2 {
-            request_id: deterministic_invocation_id(
-                InvocationKind::Reasoning,
-                &[
-                    "task-runtime",
-                    &self.config.runtime_id,
-                    &route.id,
-                    &input.version_id.0,
-                ],
-            ),
+            request_id: self.task_request_id(route, &input.version_id, revision),
             capability: route.reasoner.clone(),
             method: route.method,
             objective: route.objective.clone(),
-            context: vec![ContextSelection {
-                version_id: input.version_id.clone(),
-                payload_fields: route.payload_fields.clone(),
-            }],
+            context,
             target_schema_id: route.target_schema_id.clone(),
             allowed_capabilities: vec![],
             constraints,
@@ -197,11 +196,21 @@ impl TaskRuntime {
         let proposal = &result.candidates[0];
         let steps = serde_json::from_value::<PlanProposal>(proposal.payload.clone())
             .map_err(|e| invalid(e.to_string()))
-            .and_then(|proposal| config.compile(sequence, &proposal, &self.config.routes));
+            .and_then(|p| config.compile_revision(sequence, &p, &self.config.routes, revision));
         let steps = match steps {
             Ok(steps) => steps,
             Err(error) => return self.journal.reject_plan(&completion, &error.to_string()),
         };
+        if config.replanning.is_some()
+            && self
+                .revision_budget(host, sequence, config, route, &steps)?
+                .is_none()
+        {
+            return self.journal.reject_plan(
+                &completion,
+                "plan cumulative reasoning or action budget exceeded",
+            );
+        }
         let plan = AcceptedPlan {
             runtime_id: self.config.runtime_id.clone(),
             parent_sequence: sequence,
@@ -209,8 +218,8 @@ impl TaskRuntime {
             input_version_id: input.version_id.clone(),
             proposal_version_id: proposal.version_id.clone(),
             steps,
+            revision: meta,
         };
-        // Reject oversized snapshots before Core publication or child admission.
         if serde_json::to_vec(&plan)
             .map_err(|e| invalid(e.to_string()))?
             .len()
@@ -224,7 +233,6 @@ impl TaskRuntime {
         self.journal
             .admit_plan(&plan, &artifact.version_id, &completion, now)
     }
-
     pub fn plans_after(&self, sequence: u64, limit: usize) -> Result<Vec<PlanReceipt>, HostError> {
         self.journal.plans_after(sequence, limit)
     }

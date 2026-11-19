@@ -331,15 +331,18 @@ fn invalid_recovery_configuration_and_unbudgeted_plans_are_rejected_before_dispa
 
 fn recovering_planner() -> Fixture {
     let f = plan_support::fixture("normal", "normal");
-    let script = std::fs::read_to_string(f.directory.join("planner.py")).unwrap();
-    let alternative = script
-        .replace("'planner'", "'backup-planner'")
-        .replace("planner.sqlite", "backup-planner.sqlite")
-        .replace("planner.started", "backup-planner.started")
-        .replace("planner.release", "backup-planner.release");
-    std::fs::write(f.directory.join("backup-planner.py"), alternative).unwrap();
-    std::fs::write(f.directory.join("planner.py"),script.replace("  old=db.execute", "  reply={'type':'error','code':'unavailable','message':'planner unavailable','retryable':True}\n  print(json.dumps({'protocol_version':1,'request_id':p['request_id'],'message':reply}),flush=True)\n  continue\n  old=db.execute")).unwrap();
-    f.write("backup-planner.json", f.read("planner.json"));
+    std::fs::write(
+        f.directory.join("backup-planner.py"),
+        include_str!("support/planner_peer.py"),
+    )
+    .unwrap();
+    let mut backup = f.read("planner.json");
+    backup["adapter_id"] = json!("backup-planner");
+    f.write("backup-planner.json", backup);
+    let mut primary = f.read("planner.json");
+    primary["unavailable"] = json!(true);
+    primary["unavailable_message"] = json!("planner unavailable");
+    f.write("planner.json", primary);
     let mut grant = f.read("planner-grant.json");
     grant["adapter_id"] = json!("backup-planner");
     f.write("backup-planner-grant.json", grant);

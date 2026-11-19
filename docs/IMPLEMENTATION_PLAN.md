@@ -332,6 +332,21 @@
 > Reconnect von Mehrrolleninstallationen, allgemeine Neuplanung und vollständige
 > Parallelitätsabnahme bleiben offen.
 
+> Vierundzwanzigster Slice gemäß v3 §5.2 HET-06, §5.3, §7.2 PAR-09/PAR-10/
+> PAR-11, §8.2 LNG-02/LNG-05/LNG-06/LNG-07 und v2 PLN-04/PLN-05 teilweise:
+> Eine optionale Policy erlaubt nach blockierten Schritten höchstens sieben
+> zusätzliche Planungen bei derselben Originalaufgabe. Versionierte
+> `arcs.plan.v2`-Artefakte und begrenzte Rückblicke erhalten Vorgänger, Ergebnisse
+> und genaue Produzenten. Offene alte Zweige werden dauerhaft gestoppt, bevor
+> neue Vorschläge entstehen. Budgets gelten kumulativ einschließlich Planungen;
+> Queuegarantien und ursprüngliche Fristen bleiben bestehen. Ersatz-Goals
+> verlangen exklusive Ressourcen, frische Quellen und eigene Freigaben.
+> Prozess-Tests prüfen Grenzen, Datenschutz, Fallback, verlorene Checkpoints,
+> Pause, Fristen und bestätigte Simulatorwirkungen. Ein natives Rules-Beispiel
+> zeigt die Planfolge. Freie Werkzeugkomposition, beliebige Ereignistrigger,
+> allgemeine Strategiequalität, verteiltes Fencing und die vollständigen
+> Phasenabnahmen bleiben offen.
+
 **Leitbild:** ARCS ist ein universeller Agent. Es soll sich einfach bedienen lassen, beliebige kompatible Systeme verbinden, eigenständig Probleme lösen und langfristige Aufgaben über Monate verfolgen.
 
 ## 1. Verbindliche Architekturregeln

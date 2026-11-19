@@ -13,7 +13,7 @@ impl Journal {
         if !(1..=1000).contains(&limit) {
             return Err(invalid("planner page size must be 1..1000"));
         }
-        let mut query=self.connection.prepare("SELECT j.sequence,j.route_id,j.input_version,j.state FROM runtime_job_reservations r JOIN runtime_jobs j ON j.sequence=r.sequence WHERE r.units>1 AND j.sequence>?1 AND j.state IN ('pending','running','failed') ORDER BY j.sequence LIMIT ?2").map_err(db)?;
+        let mut query=self.connection.prepare("SELECT j.sequence,j.route_id,j.input_version,j.state FROM runtime_job_reservations r JOIN runtime_jobs j ON j.sequence=r.sequence WHERE r.units>1 AND j.sequence>?1 AND j.state IN ('pending','running','failed') AND (NOT EXISTS(SELECT 1 FROM runtime_plans p WHERE p.sequence=j.sequence) OR EXISTS(SELECT 1 FROM runtime_plan_replanning intent WHERE intent.parent_sequence=j.sequence AND intent.state='planning')) ORDER BY j.sequence LIMIT ?2").map_err(db)?;
         let rows = query
             .query_map(
                 params![sequence.min(i64::MAX as u64) as i64, limit as i64],
@@ -85,19 +85,39 @@ impl Journal {
                     params![sequence as i64, reason, now as i64],
                 )
                 .map_err(db)?;
-            transaction.execute("UPDATE runtime_jobs SET state='cancelled',error=?2 WHERE sequence=?1 OR (sequence IN (SELECT sequence FROM runtime_plan_steps WHERE parent_sequence=?1) AND state IN ('pending','running','failed','awaiting_approval'))",params![sequence as i64,reason]).map_err(db)?;
-            transaction.execute("UPDATE runtime_job_joins SET state='blocked',error=?2 WHERE state='waiting' AND sequence IN (SELECT sequence FROM runtime_plan_steps WHERE parent_sequence=?1)",params![sequence as i64,reason]).map_err(db)?;
-            let checkpoints = {
-                let mut query=transaction.prepare("SELECT sequence FROM runtime_jobs WHERE state='cancelled' AND goal_json IS NOT NULL AND sequence IN (SELECT sequence FROM runtime_plan_steps WHERE parent_sequence=?1)").map_err(db)?;
-                let rows = query
-                    .query_map([sequence as i64], |row| row.get::<_, i64>(0))
-                    .map_err(db)?;
-                rows.map(|row| row.map_err(db))
-                    .collect::<Result<Vec<_>, _>>()?
-            };
-            for child in checkpoints {
-                Self::cancel_goal_checkpoint(transaction, child as u64, reason)?;
-            }
+            transaction
+                .execute(
+                    "UPDATE runtime_jobs SET state='cancelled',error=?2 WHERE sequence=?1",
+                    params![sequence as i64, reason],
+                )
+                .map_err(db)?;
+            Self::cancel_plan_children_in(transaction, sequence, reason)?;
+        }
+        Ok(())
+    }
+
+    pub(in crate::task_runtime::journal) fn cancel_plan_children_in(
+        transaction: &Transaction<'_>,
+        parent: u64,
+        reason: &str,
+    ) -> Result<(), HostError> {
+        let children = {
+            let mut query = transaction.prepare("SELECT j.sequence FROM runtime_plan_steps s JOIN runtime_jobs j ON j.sequence=s.sequence WHERE s.parent_sequence=?1 AND j.state IN ('pending','running','failed','awaiting_approval')").map_err(db)?;
+            query
+                .query_map([parent as i64], |row| row.get::<_, i64>(0))
+                .map_err(db)?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(db)?
+        };
+        for child in children {
+            transaction
+                .execute(
+                    "UPDATE runtime_jobs SET state='cancelled',error=?2 WHERE sequence=?1",
+                    params![child, reason],
+                )
+                .map_err(db)?;
+            transaction.execute("UPDATE runtime_job_joins SET state='blocked',error=?2 WHERE sequence=?1 AND state='waiting'",params![child,reason]).map_err(db)?;
+            Self::cancel_goal_checkpoint(transaction, child as u64, reason)?;
         }
         Ok(())
     }

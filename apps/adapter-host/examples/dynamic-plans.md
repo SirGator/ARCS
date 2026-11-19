@@ -307,3 +307,6 @@ und konfigurierte Wartephasen über einen simulierten Monat.
 Die Abbruchtests prüfen zusätzlich späte Antworten, unveränderte fertige
 Ergebnisse, idempotente CLI-Kommandos, additive Migration, volle Workerplätze,
 ursprüngliche Deadlines, fremde Core-Stores und atomaren Rollback.
+
+Die spätere [versionierte Neuplanung](plan-replanning.md) ergänzt optional
+Ersatzvorschläge nach blockierten Schritten unter kumulativen Budgets.
