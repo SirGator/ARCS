@@ -379,6 +379,13 @@
 > Panel bindet die Entscheidung an die angezeigte Candidate-Version. Der Host
 > prüft Revision, Verification und Freigabe weiterhin im vorhandenen Pfad.
 
+> Neunundzwanzigster Schritt gemäß v3 §7.2 PAR-01/PAR-07/PAR-11 und §8.2
+> LNG-05. Die Desktop-Aufgabenwarteschlange liest offene und abgeschlossene
+> Aufträge aus dem vorhandenen Journal. Seiten verwenden Sequenzcursor und
+> eine feste Obergrenze für den jeweiligen Durchgang. Eigenständige Aufgaben
+> und Teilschritte lassen sich mit ihrer aktuellen Kontrollrevision pausieren
+> und fortsetzen. Die Ansicht zeigt Fristen, Wartezustände und vererbte Pausen.
+
 **Leitbild:** ARCS ist ein universeller Agent. Es soll sich einfach bedienen lassen, beliebige kompatible Systeme verbinden, eigenständig Probleme lösen und langfristige Aufgaben über Monate verfolgen.
 
 ## 1. Verbindliche Architekturregeln

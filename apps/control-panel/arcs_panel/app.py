@@ -15,6 +15,7 @@ from gi.repository import Gdk, GdkPixbuf, Gio, GLib, Gtk, Pango
 
 from .controller import Configuration, PROJECT_ROOT, SessionController, read_configuration
 from .control_page import ControlPage
+from .queue_page import QueuePage
 from .input_page import InputPage
 from .models_page import ModelsPage
 
@@ -81,6 +82,7 @@ class ControlWindow(Gtk.ApplicationWindow):
         self._source_id = None
         self._control_protocol = False
         self._review_preview = False
+        self._queue_size = None
         self.presets = [
             ("Aufgaben per Text · Beispiel", Configuration(self.root / "apps/adapter-host/config/text-tasks/host.json", self.root / "apps/adapter-host/config/text-tasks/runtime.json")),
             ("Mehrere Adapter", Configuration(self.root / "apps/adapter-host/config/multiple-adapters/host.json")),
@@ -131,7 +133,7 @@ class ControlWindow(Gtk.ApplicationWindow):
         nav.pack_start(kicker, False, False, 0)
         self.stack = Gtk.Stack(transition_type=Gtk.StackTransitionType.NONE)
         self.nav_buttons = {}
-        for key, title, icon in [("overview", "Übersicht", "view-grid-symbolic"), ("input", "Eingabe", "mail-message-new-symbolic"), ("control", "Steuerung", "system-run-symbolic"), ("models", "Modelle", "preferences-system-symbolic"), ("adapters", "Adapter", "network-workgroup-symbolic"), ("logs", "Protokolle", "utilities-terminal-symbolic")]:
+        for key, title, icon in [("overview", "Übersicht", "view-grid-symbolic"), ("input", "Eingabe", "mail-message-new-symbolic"), ("tasks", "Aufgaben", "view-list-symbolic"), ("control", "Steuerung", "system-run-symbolic"), ("models", "Modelle", "preferences-system-symbolic"), ("adapters", "Adapter", "network-workgroup-symbolic"), ("logs", "Protokolle", "utilities-terminal-symbolic")]:
             item = button(title, icon, "nav", lambda _, name=key: self.show_page(name))
             self.nav_buttons[key] = item
             nav.pack_start(item, False, False, 0)
@@ -205,6 +207,8 @@ class ControlWindow(Gtk.ApplicationWindow):
         self.stack.add_named(self.input_page, "input")
         self.control_page = ControlPage(self.controller.submit_control)
         self.stack.add_named(self.control_page, "control")
+        self.queue_page = QueuePage(self.controller.submit_control)
+        self.stack.add_named(self.queue_page, "tasks")
         self.models_page = ModelsPage(self.root, self._use_models, self._model_connections)
         self.stack.add_named(self.models_page, "models")
         self._build_adapters()
@@ -332,6 +336,8 @@ class ControlWindow(Gtk.ApplicationWindow):
         for child in self.stack.get_children():
             child.set_visible(child == selected)
         self.stack.set_visible_child_name(name)
+        if name == "tasks" and self.snapshot.get("runtime") is not None:
+            self.queue_page.load_if_needed()
         for key, item in self.nav_buttons.items():
             context = item.get_style_context()
             (context.add_class if key == name else context.remove_class)("active")
@@ -367,7 +373,9 @@ class ControlWindow(Gtk.ApplicationWindow):
         self.recent = []
         self.input_page.reset()
         self.control_page.reset()
+        self.queue_page.reset()
         self._control_protocol = False
+        self._queue_size = None
         try:
             preview = read_configuration(configuration)
             self.catalog = preview["adapters"]
@@ -429,7 +437,9 @@ class ControlWindow(Gtk.ApplicationWindow):
             self._last_goals = {}
             self.input_page.reset()
             self.control_page.reset()
+            self.queue_page.reset()
             self._control_protocol = False
+            self._queue_size = None
             self.snapshot = {}
             self.metrics["artifacts"][0].set_text("—")
             self.metrics["review"][0].set_text("—")
@@ -465,6 +475,7 @@ class ControlWindow(Gtk.ApplicationWindow):
         self.state = state
         self.input_page.set_running(state == "running")
         self.control_page.set_connected(state == "running" and self._control_protocol, self._review_preview)
+        self.queue_page.set_connected(self._queue_size if state == "running" and self._control_protocol else None)
         text, sub = {
             "idle": ("Bereit", "Wartet auf den Start"), "building": ("Build", "Programme werden gebaut"),
             "starting": ("Startet", "Adapter werden verbunden"), "running": ("Läuft", "Verarbeitung ist aktiv"),
@@ -565,6 +576,8 @@ class ControlWindow(Gtk.ApplicationWindow):
                 control = event.get("control") or {}
                 self._control_protocol = control.get("protocol_version") == 1 and control.get("transport") == "stdin_jsonl"
                 self._review_preview = control.get("goal_review_preview") is True
+                queue_size = (control.get("task_queue") or {}).get("max_page_size")
+                self._queue_size = queue_size if type(queue_size) is int and queue_size > 0 else None
                 self.metrics["adapters"][0].set_text(str(len(self.catalog)))
                 self.metrics["adapters"][1].set_text("angeschlossen")
                 if self.state != "stopping":
@@ -576,6 +589,8 @@ class ControlWindow(Gtk.ApplicationWindow):
                 runtime = event.get("runtime")
                 self.input_page.goal_progress(runtime.get("goals", []) if runtime else [])
                 self.control_page.snapshot(runtime or {})
+                if runtime and self.stack.get_visible_child_name() == "tasks":
+                    self.queue_page.load_if_needed()
                 self.metrics["review"][0].set_text(str(runtime["ready_for_review"] + runtime.get("awaiting_approval", 0)) if runtime else "—")
                 self.metrics["review"][1].set_text(f"{runtime['pending_jobs']} offen · {runtime['failed_jobs']} fehlgeschlagen" if runtime else "Keine Aufgaben-Runtime")
                 if runtime and runtime.get("goals"):
@@ -609,6 +624,7 @@ class ControlWindow(Gtk.ApplicationWindow):
                 self.input_page.connect_targets(event["targets"], event["has_runtime"])
             elif kind == "control_result":
                 self.control_page.result(event)
+                self.queue_page.result(event)
             elif kind in ["input_queued", "input_error"]:
                 self.input_page.result(event)
                 if kind == "input_queued":

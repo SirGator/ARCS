@@ -4,6 +4,7 @@ use arcs::core::{Actor, ActorType, VersionId};
 use serde::{Deserialize, Serialize};
 
 use crate::task_runtime::goal::GoalReview;
+use crate::task_runtime::queue::{TaskQueuePage, TaskQueueQuery};
 use crate::task_runtime::scheduler::{SeriesControlCommand, SeriesControlReceipt};
 use crate::task_runtime::suspension::{TaskControlCommand, TaskControlReceipt};
 use crate::{Host, HostError, task_runtime::TaskRuntime};
@@ -49,6 +50,7 @@ pub enum GoalCommand {
     deny_unknown_fields
 )]
 pub enum OperatorCommand {
+    Queue(TaskQueueQuery),
     Task(TaskControlCommand),
     Series(SeriesControlCommand),
     Plan(PlanCommand),
@@ -58,6 +60,7 @@ pub enum OperatorCommand {
 #[derive(Serialize)]
 #[serde(untagged)]
 pub enum CommandReceipt {
+    Queue(TaskQueuePage),
     Task(TaskControlReceipt),
     Series(SeriesControlReceipt),
     GoalReview(GoalReview),
@@ -70,6 +73,9 @@ impl OperatorCommand {
         host: &mut Host,
     ) -> Result<Option<CommandReceipt>, HostError> {
         match self {
+            Self::Queue(query) => runtime
+                .task_queue(query)
+                .map(|page| Some(CommandReceipt::Queue(page))),
             Self::Task(command) => runtime
                 .control_task(host, command)
                 .map(|receipt| Some(CommandReceipt::Task(receipt))),

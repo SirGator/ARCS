@@ -284,11 +284,66 @@ class DesktopTests(unittest.TestCase):
         page.reason.set_text('Untersuchung pausieren')
         page.pause_button.emit('clicked')
         pump_until(lambda: window.snapshot['runtime']['paused_jobs'] > 1)
+        window.show_page('tasks')
+        queue = window.queue_page
+        pump_until(lambda: bool(queue.page and len(queue.tasks) > 1))
+        inherited = [job for job in queue.tasks.values() if job['parent_plan_sequence'] == 1]
+        self.assertTrue(inherited)
+        self.assertTrue(all(job['paused'] and not job['locally_paused'] for job in inherited))
+        window.show_page('control')
         page.reason.set_text('Untersuchung abbrechen')
         page.cancel_button.emit('clicked')
         pump_until(lambda: page.records['plan:1'][1]['state'] == 'cancelled')
         self.assertTrue(all(step['state'] == 'cancelled' for step in page.records['plan:1'][1]['steps']))
         self.assertFalse(page.cancel_button.get_visible())
+
+    def test_queue_pages_and_controls_a_scheduled_reasoning_task(self):
+        runtime = json.loads((PROJECT_ROOT / 'apps/adapter-host/config/roles/runtime.json').read_text())
+        runtime.update(runtime_id='desktop-task-queue', journal='state/task-queue.sqlite', interval_ms=20, max_pending_jobs=30)
+        template = runtime['routes'][0]
+        template['source']['adapter_id'] = 'multi.input.left'
+        template['reasoner']['adapter_id'] = 'multi.reasoner.solver'
+        template['activation'] = {'kind': 'at_time', 'unix_ms': 4102444800000}
+        runtime['routes'] = [{**template, 'id': f'waiting-{index}'} for index in range(26)]
+        path = self.directory / 'task-queue.json'
+        path.write_text(json.dumps(runtime))
+        window = self.window
+        window.select_configuration(Configuration(self.host, path))
+        window.show_page('tasks')
+        window.start_button.emit('clicked')
+        page = window.queue_page
+        pump_until(lambda: bool(page.page and len(page.tasks) == 25))
+        self.assertEqual(page.page['through_sequence'], 26)
+        self.assertEqual(page.page_number.get_text(), 'Seite 1')
+        self.assertEqual(page.rows[0][2], 'Wartet auf Termin')
+        self.assertTrue(page.next_button.get_sensitive())
+        page.next_button.emit('clicked')
+        pump_until(lambda: set(page.tasks) == {26})
+        self.assertEqual(page.page_number.get_text(), 'Seite 2')
+        self.assertFalse(page.next_button.get_sensitive())
+        page.tree.get_selection().select_path(0)
+        page.reason.set_text('Testaufgabe pausieren')
+        page.pause_button.emit('clicked')
+        pump_until(lambda: page.tasks[26]['locally_paused'] and page.pending is None)
+        self.assertEqual(page.pause_button.get_label(), 'Fortsetzen')
+        self.assertEqual(page.rows[0][2], 'Pausiert')
+        self.assertIn('Frühestens', page.detail.get_text())
+        render_window(window, PROJECT_ROOT / 'var/control-panel/screenshots/task-queue.png')
+        page.previous_button.emit('clicked')
+        pump_until(lambda: len(page.tasks) == 25 and page.pending is None)
+        self.assertEqual(page.page_number.get_text(), 'Seite 1')
+        page.next_button.emit('clicked')
+        pump_until(lambda: set(page.tasks) == {26} and page.pending is None)
+        self.assertEqual(page.tasks[26]['control_revision'], 1)
+        page.tree.get_selection().select_path(0)
+        page.reason.set_text('Testaufgabe fortsetzen')
+        page.pause_button.emit('clicked')
+        pump_until(lambda: page.tasks[26]['control_revision'] == 2 and page.pending is None)
+        self.assertFalse(page.tasks[26]['paused'])
+        page.scope.set_active_id('all')
+        pump_until(lambda: page.page and page.page['scope'] == 'all' and page.pending is None)
+        self.assertEqual(page.page_number.get_text(), 'Seite 1')
+        self.assertEqual(window.snapshot['runtime']['ready_for_review'], 0)
 
     def test_text_input_and_json_modes_send_through_the_real_adapter_and_report_invalid_payloads(self):
         host=real_configuration(PROJECT_ROOT,self.directory,'text-input')

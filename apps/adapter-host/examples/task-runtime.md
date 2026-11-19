@@ -133,6 +133,7 @@ CLI-Befehls.
 | `series` | `--series-command` | Prüfserie pausieren, fortsetzen oder abbrechen |
 | `plan` | `--plan-command` | Plan abbrechen |
 | `goal` | `--goal-command` | Aktionsvorschlag ansehen, freigeben oder ablehnen, Goal abbrechen oder Ressourcen anhand von Belegen klären |
+| `queue` | Monitor und Host-API | Offene Aufgaben oder den Verlauf seitenweise lesen |
 
 Die Antwort `control_result` erscheint im selben JSON-Lines-Strom wie die
 Snapshots. `request_id` korreliert sie mit der Eingabe. `ok: true` bestätigt
@@ -151,6 +152,31 @@ Vorschlag. Sein Beleg enthält `payload`, `capability` und
 `verification_version_id`. Im Einzelkommando steht die Vorschau unter
 `goal_review`. Die Vorschau ist auf 65.536 Byte begrenzt und enthält die
 vollständigen Parameter des angezeigten Vorschlags.
+
+### Aufgabenwarteschlange lesen
+
+`ready.control.task_queue.max_page_size` nennt die maximale Größe einer Seite.
+Der Monitor liefert jede Seite über `control_result`. Ein erster Abruf ist
+zum Beispiel diese einzelne Zeile.
+
+```json
+{"request_id":"tasks-1","control":{"kind":"queue","command":{"scope":"open","limit":25}}}
+```
+
+Der `receipt` enthält die angeforderten `tasks`, die Obergrenze
+`through_sequence` und gegebenenfalls den Cursor `next_after_sequence`.
+Für die folgende Seite werden diese Obergrenze und der Cursor als
+`through_sequence` und `after_sequence` übergeben. `after_sequence` ist
+exklusiv. Ohne Obergrenze beginnt ein neuer Durchgang bis zur aktuell höchsten
+Aufgabensequenz. Ein vorhandener Auftrag kann zwischen Abfragen seinen
+Zustand ändern. Im Filter `open` entfällt er nach seinem Abschluss. Mit
+`scope: "all"` stehen auch abgeschlossene Aufträge im Verlauf.
+
+Die Seite enthält ausschließlich Betriebsdaten und Versionsreferenzen.
+`locally_paused` bezeichnet die eigene Pause, `paused` berücksichtigt auch
+Plan oder Serie und `control_revision` gehört in `expected_revision` bei
+einer Pause oder Fortsetzung. Die Abfrage läuft in `TaskRuntime::task_queue`
+und verwendet maximal 100 Aufträge je Antwort.
 
 Der Monitor nimmt vollständige Zeilen bis 65.536 Byte an. Die interne Queue
 fasst 16 Zeilen und der Host verarbeitet bis zu acht davon vor einer Runde.

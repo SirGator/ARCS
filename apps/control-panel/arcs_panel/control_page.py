@@ -3,44 +3,22 @@ from __future__ import annotations
 
 from datetime import datetime
 import json
-import os
-import pwd
-from uuid import uuid4
 
 from gi.repository import Gtk
+
+from .control_widgets import STATE_NAMES, local_operator, reason_text, revision_command, text_label
 
 
 GOAL_ENDED = {"completed", "failed", "blocked", "rejected", "budget_exhausted", "cancelled"}
 PLAN_OPEN = {"pending", "running", "replanning", "failed"}
-STATE_NAMES = {
-    "active": "Aktiv", "paused": "Pausiert", "cancelled": "Abgebrochen", "exhausted": "Beendet",
-    "acquiring": "Erfasst Daten", "checking": "Prüft Ausgangslage", "planning": "Plant",
-    "verifying": "Prüft Vorschlag", "awaiting_approval": "Wartet auf Freigabe",
-    "executing": "Führt aus", "observing": "Beobachtet Wirkung", "assessing": "Bewertet Wirkung",
-    "waiting_time": "Wartet auf Termin", "waiting_event": "Wartet auf Ereignis", "completed": "Abgeschlossen",
-    "failed": "Fehlgeschlagen", "blocked": "Blockiert", "rejected": "Abgelehnt", "budget_exhausted": "Budget erschöpft",
-    "running": "Läuft", "pending": "Wartet", "replanning": "Plant neu", "ready_for_review": "Zur Prüfung bereit",
-}
 KIND_NAMES = {"goal": "Ziel", "series": "Prüfserie", "plan": "Plan"}
-
-
-def text_label(text="", css=None):
-    label = Gtk.Label(label=text, xalign=0, wrap=True)
-    if css:
-        label.get_style_context().add_class(css)
-    return label
-
-
-def reason_text(entry):
-    reason = entry.get_text().strip()
-    return reason if 0 < len(reason.encode("utf-8")) <= 2000 else None
 
 
 class ControlPage(Gtk.Box):
     def __init__(self, submit):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         self.submit = submit
-        self.operator = pwd.getpwuid(os.getuid()).pw_name
+        self.operator = local_operator()
         self.records = {}
         self.task_controls = {}
         self.options = []
@@ -169,10 +147,6 @@ class ControlPage(Gtk.Box):
             self.status.set_text("Warte auf Rückmeldung von ARCS …")
         self._refresh()
 
-    def _revision_command(self, sequence, revision, reason, change):
-        return {"sequence": sequence, "expected_revision": revision, "command_id": uuid4().hex,
-                "operator": {"actor_type": "human", "id": self.operator}, "reason": reason, "change": change}
-
     def _pause(self, *_):
         kind, row = self._selected()
         reason = reason_text(self.reason)
@@ -181,11 +155,11 @@ class ControlPage(Gtk.Box):
         sequence = row["sequence"]
         if kind == "series":
             change = "resume" if row["state"] == "paused" else "pause"
-            self._send("series", self._revision_command(sequence, row["control_revision"], reason, change))
+            self._send("series", revision_command(self.operator, sequence, row["control_revision"], reason, change))
         else:
             controls = self.task_controls.get(sequence, {})
             change = "resume" if controls.get("paused") else "pause"
-            self._send("task", self._revision_command(sequence, controls.get("revision", 0), reason, {"command": change}))
+            self._send("task", revision_command(self.operator, sequence, controls.get("revision", 0), reason, {"command": change}))
 
     def _cancel(self, *_):
         kind, row = self._selected()
@@ -193,7 +167,7 @@ class ControlPage(Gtk.Box):
         if not self.cancel_button.get_sensitive() or not reason:
             return
         sequence = row["sequence"]
-        command = (self._revision_command(sequence, row["control_revision"], reason, "cancel") if kind == "series"
+        command = (revision_command(self.operator, sequence, row["control_revision"], reason, "cancel") if kind == "series"
                    else {"command": "cancel", "sequence": sequence, "reason": reason})
         self._send(kind, command)
 

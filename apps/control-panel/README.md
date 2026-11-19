@@ -89,6 +89,14 @@ des Checkouts lassen sie sich mit demselben Befehl aktualisieren.
   Sprachverständnis benötigt eine entsprechend leistungsfähige Implementierung.
 - **Protokolle:** Prozessmeldungen, Build-Ausgabe und Fehler; als Datei exportierbar.
   Bei Goal-Routen außerdem die tatsächlichen Zielzustände und Schrittzahlen.
+- **Aufgaben:** Blättert durch offene Aufgaben oder den gesamten Verlauf der
+  laufenden Runtime. Die Ansicht zeigt Route, Priorität und Wartegrund. Wähle
+  eine Aufgabe aus, um Frist, Eingabe sowie gegebenenfalls den zugehörigen Plan
+  oder die Prüfserie zu sehen. Mit Begründung lässt sich eine eigenständige
+  Aufgabe oder ein Teilschritt pausieren und fortsetzen. Eine vererbte Pause
+  wird beim zugehörigen Plan oder bei der Prüfserie aufgehoben.
+  **Aktualisieren** lädt die erste Seite neu und nimmt inzwischen angelegte
+  Aufträge in den nächsten Durchgang auf.
 - **Steuerung:** Zeigt die vom laufenden Host gemeldeten Goals, Pläne und
   Prüfserien. Wähle einen Eintrag aus und gib für Pause, Fortsetzung oder
   Abbruch eine Begründung ein. Bei einem Goal mit offener Freigabe öffnet
@@ -202,8 +210,9 @@ damit die Eingabeseite den Fortschritt dem passenden Auftrag zuordnen kann.
 Mit unterstützter Runtime überträgt das Panel Steuerungsbefehle im Hintergrund
 über die Pipe des eigenen Host-Prozesses. Es verarbeitet eine ausstehende
 Anfrage zur Zeit und ordnet die Rückmeldung anhand der Request-ID zu. Die
-Aktionsvorschau wird gezielt abgefragt. In den regulären Snapshots stehen
-weiterhin nur Zusammenfassungen und die Referenz auf den Vorschlag.
+Aktionsvorschau und die Aufgabenseiten werden gezielt abgefragt. In den
+regulären Snapshots stehen Zusammenfassungen und die Referenz auf den
+Vorschlag.
 `--ticks` begrenzt einen Testlauf. Eine vorhandene Stop-Datei wird vor dem
 Host-Start abgewiesen. Der Standard-CLI-Lauf ohne `--monitor` bleibt erhalten.
 

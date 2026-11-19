@@ -4,6 +4,7 @@ mod dependencies;
 pub(super) mod dispatch;
 mod planning;
 mod queries;
+mod queue;
 mod reasoning;
 mod recurrence;
 mod scheduling;

@@ -6,6 +6,7 @@ pub mod dependencies;
 pub mod goal;
 mod journal;
 pub mod planning;
+pub mod queue;
 pub mod reasoner_selection;
 mod reasoning;
 pub mod recovery;

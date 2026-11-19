@@ -7,6 +7,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use super::emit;
+use crate::task_runtime::queue::MAX_TASK_QUEUE_PAGE;
 use crate::{Host, operator_command::OperatorCommand, task_runtime::TaskRuntime};
 
 const MAX_LINE_BYTES: usize = 65_536;
@@ -56,7 +57,7 @@ impl MonitorControl {
     }
 
     pub(super) fn description(&self) -> Value {
-        json!({"transport":"stdin_jsonl","protocol_version":1,"max_line_bytes":MAX_LINE_BYTES,"commands_per_tick":COMMANDS_PER_TICK,"goal_review_preview":true})
+        json!({"transport":"stdin_jsonl","protocol_version":1,"max_line_bytes":MAX_LINE_BYTES,"commands_per_tick":COMMANDS_PER_TICK,"goal_review_preview":true,"task_queue":{"max_page_size":MAX_TASK_QUEUE_PAGE}})
     }
 
     pub(super) fn apply_pending(
