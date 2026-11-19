@@ -1,3 +1,4 @@
+mod controller_close;
 mod input;
 mod reason;
 mod reconnect;
@@ -8,6 +9,7 @@ pub use reconnect::AdapterReconnectReport;
 pub use request::RequestWorkerReport;
 pub use resources::ResourcePoolReport;
 
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
@@ -108,6 +110,7 @@ pub struct Host {
     reasoning_jobs: HashMap<String, reason::PendingReasoning>,
     request_jobs: HashMap<String, request::PendingRequest>,
     retiring_request_jobs: Vec<request::RetiringRequest>,
+    controller_workers: RefCell<controller_close::ControllerWorkers>,
     unavailable_adapters: HashSet<AdapterId>,
     resource_pools: crate::resource_policy::ResourceQuantities,
     reconnect_installations: std::collections::BTreeMap<AdapterId, VersionId>,
@@ -461,6 +464,7 @@ impl Host {
             reasoning_jobs: HashMap::new(),
             request_jobs: HashMap::new(),
             retiring_request_jobs: Vec::new(),
+            controller_workers: RefCell::default(),
             unavailable_adapters: HashSet::new(),
             resource_pools: config.resource_pools,
             reconnect_installations,
@@ -765,6 +769,14 @@ impl Host {
         &self,
         capability: &CapabilityRef,
     ) -> Result<&dyn ActAdapter, ReservationError> {
+        self.reservation_controller_endpoint(capability)
+            .map(|endpoint| endpoint.as_ref() as &dyn ActAdapter)
+    }
+
+    fn reservation_controller_endpoint(
+        &self,
+        capability: &CapabilityRef,
+    ) -> Result<&Arc<StdioAdapter>, ReservationError> {
         let failure = |source| ReservationError::ControllerAcknowledgement {
             capability: capability.clone(),
             source,
@@ -789,7 +801,7 @@ impl Host {
                     "controller is not installed".into(),
                 ))
             })?;
-        Ok(adapter.endpoint.as_ref())
+        Ok(&adapter.endpoint)
     }
 
     /// Begrenzte Runde mit fairem Budget je Adapter. Ein erreichter Grenzwert
@@ -866,6 +878,7 @@ impl Host {
         let reconnect_error = self.cancel_reconnections().err();
         let mut cancelled = self.cancel_reasoning_jobs();
         cancelled.extend(self.cancel_request_jobs());
+        cancelled.extend(self.cancel_controller_closures());
         let mut first_error = reconnect_error;
         for adapter in &mut self.adapters {
             if cancelled.contains(&adapter.config.grant.adapter_id)
@@ -959,5 +972,6 @@ impl Drop for Host {
         let _ = self.cancel_reconnections();
         self.cancel_reasoning_jobs();
         self.cancel_request_jobs();
+        self.cancel_controller_closures();
     }
 }

@@ -64,6 +64,7 @@ impl MonitorControl {
             "commands_per_tick":COMMANDS_PER_TICK,
             "goal_review_preview":true,
             "resource_release_review":true,
+            "resource_release_queue":true,
             "task_queue":{"max_page_size":MAX_TASK_QUEUE_PAGE,"cancel":true}
         })
     }
@@ -138,7 +139,7 @@ fn respond(frame: Frame, host: &mut Host, runtime: &mut TaskRuntime) -> Value {
     if !valid_request_id(&request.request_id) {
         return failure(None, "invalid_request", "invalid monitor request ID");
     }
-    match request.control.apply(runtime, host) {
+    match request.control.apply_live(runtime, host) {
         Ok(receipt) => {
             json!({"event":"control_result","request_id":request.request_id,"ok":true,"receipt":receipt})
         }

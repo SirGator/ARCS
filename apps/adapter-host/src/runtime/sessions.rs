@@ -16,6 +16,7 @@ impl Host {
                     .map(|j| j.report.capability.adapter_id.clone()),
             )
             .chain(self.reconnect_jobs.keys().cloned())
+            .chain(self.controller_worker_adapters())
             .collect()
     }
 

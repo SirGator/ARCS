@@ -415,6 +415,13 @@
 > eingetragenen Controller. Der Simulator speichert die Sperre dauerhaft.
 > Ablehnung und unterbrochene Freigabe bleiben sichtbar und halten den Besitz.
 
+> Vierunddreißigster Schritt gemäß v3 §7.2 PAR-01/PAR-02/PAR-04/PAR-08/PAR-10/PAR-11:
+> Controllerdialoge im laufenden Host verwenden begrenzte Worker und
+> gemeinsame Adapterzulassung. Der Core übernimmt Bestätigungen in eigenen
+> kurzen Schreibschritten und prüft beim Freigabe-Commit erneut alle
+> Reservierungsrevisionen. Betreiberentscheidungen bleiben im Journal
+> erhalten und werden nach einem Host-Neustart weiterverarbeitet.
+
 **Leitbild:** ARCS ist ein universeller Agent. Es soll sich einfach bedienen lassen, beliebige kompatible Systeme verbinden, eigenständig Probleme lösen und langfristige Aufgaben über Monate verfolgen.
 
 ## 1. Verbindliche Architekturregeln

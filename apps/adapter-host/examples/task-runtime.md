@@ -156,6 +156,14 @@ vollständigen Parameter des angezeigten Vorschlags.
 `ready.control.resource_release_review` kündigt die Belegvorschau
 für eine Geräteübergabe an. [Ressourcen klären](exclusive-goals.md#freigabe-und-unklarer-aktionsausgang)
 
+Mit `ready.control.resource_release_queue: true` kann
+`release_resources` einen Beleg mit `sequence` und
+`release_pending: true` liefern. Die Betreiberentscheidung ist dann
+gespeichert und die Ressource bleibt bis zum Freigabe-Commit reserviert.
+Der Status steht in `resource_reservations`. `controller_closures` listet
+laufende Controllerdialoge und `runtime.control_release_waits` nennt die
+ausstehenden Freigaben.
+
 ### Aufgabenwarteschlange lesen
 
 `ready.control.task_queue.max_page_size` nennt die maximale Größe einer Seite.

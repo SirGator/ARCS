@@ -45,6 +45,89 @@ pub struct ReservationRelease<'a> {
     pub reason: &'a str,
     pub evidence: &'a [VersionId],
 }
+
+/// An exact controller request issued by a validated release preparation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ControllerClosure {
+    capability: CapabilityRef,
+    fence: ActFence,
+}
+
+pub struct ControllerAcknowledgement(ControllerClosure);
+
+impl ControllerClosure {
+    pub fn capability(&self) -> &CapabilityRef {
+        &self.capability
+    }
+
+    pub fn confirm(
+        self,
+        endpoint: &dyn ActAdapter,
+    ) -> Result<ControllerAcknowledgement, AdapterCallError> {
+        let manifest = endpoint.manifest();
+        if manifest.adapter_id != self.capability.adapter_id
+            || !manifest
+                .capability(&self.capability.capability_id)
+                .and_then(|cap| cap.contract.act())
+                .is_some_and(|act| act.fenced_resource == Some(self.fence.resource.as_str()))
+        {
+            return Err(AdapterCallError::Rejected(
+                "controller fence contract changed".into(),
+            ));
+        }
+        endpoint.close_fence(&self.capability, &self.fence)?;
+        Ok(ControllerAcknowledgement(self))
+    }
+}
+
+pub struct PreparedReservationRelease<'a> {
+    service: ReservationService<'a>,
+    artifacts: Vec<Artifact>,
+    guards: Vec<(crate::core::SubjectId, Option<VersionId>)>,
+    controllers: Vec<ControllerClosure>,
+}
+
+impl PreparedReservationRelease<'_> {
+    pub fn controllers(&self) -> &[ControllerClosure] {
+        &self.controllers
+    }
+
+    pub fn commit_with_controllers<'endpoint>(
+        self,
+        mut endpoint: impl FnMut(&CapabilityRef) -> Result<&'endpoint dyn ActAdapter, ReservationError>,
+    ) -> Result<(), ReservationError> {
+        for closure in self.controllers() {
+            let capability = closure.capability();
+            let acknowledgement =
+                closure
+                    .clone()
+                    .confirm(endpoint(capability)?)
+                    .map_err(|source| ReservationError::ControllerAcknowledgement {
+                        capability: capability.clone(),
+                        source,
+                    })?;
+            self.service
+                .record_controller_acknowledgement(acknowledgement)?;
+        }
+        self.commit()
+    }
+
+    /// Recheck the reservation head and all outstanding controllers atomically.
+    pub fn commit(self) -> Result<(), ReservationError> {
+        if self.artifacts.is_empty() {
+            return Ok(());
+        }
+        self.service
+            .commit(&self.artifacts, &self.guards)
+            .map_err(|error| match error {
+                StoreError::VersionConflict { .. } | StoreError::IdempotencyConflict => {
+                    ReservationError::Conflict
+                }
+                StoreError::OpenActFences => ReservationError::ControllersPending,
+                error => error.into(),
+            })
+    }
+}
 #[derive(Debug)]
 pub enum ReservationError {
     Store(StoreError),
@@ -69,6 +152,7 @@ fn invalid(message: impl Into<String>) -> ReservationError {
     ReservationError::Invalid(message.into())
 }
 
+#[derive(Clone, Copy)]
 pub struct ReservationService<'a> {
     store: &'a SqliteArtifactStore,
     schemas: &'a SchemaRegistry,
@@ -263,8 +347,35 @@ impl<'a> ReservationService<'a> {
         &self,
         request: ReservationRelease<'_>,
         configured: &[(String, CapabilityRef)],
-        mut endpoint: impl FnMut(&CapabilityRef) -> Result<&'endpoint dyn ActAdapter, ReservationError>,
+        endpoint: impl FnMut(&CapabilityRef) -> Result<&'endpoint dyn ActAdapter, ReservationError>,
     ) -> Result<(), ReservationError> {
+        self.prepare_release(request, configured)?
+            .commit_with_controllers(endpoint)
+    }
+
+    /// Record an actual controller reply on the Core thread after adapter I/O.
+    pub fn record_controller_acknowledgement(
+        &self,
+        acknowledgement: ControllerAcknowledgement,
+    ) -> Result<(), ReservationError> {
+        let ControllerAcknowledgement(closure) = acknowledgement;
+        if self.store.authority_id()? != closure.fence.authority {
+            return Err(invalid(
+                "controller acknowledgement belongs to another Core",
+            ));
+        }
+        self.store.confirm_act_controller_closed(
+            &closure.fence.reservation_version_id,
+            &closure.capability,
+        )?;
+        Ok(())
+    }
+
+    pub fn prepare_release(
+        &self,
+        request: ReservationRelease<'_>,
+        configured: &[(String, CapabilityRef)],
+    ) -> Result<PreparedReservationRelease<'a>, ReservationError> {
         let ReservationRelease {
             owner,
             expected,
@@ -340,11 +451,7 @@ impl<'a> ReservationService<'a> {
             guards.push((records::subject(&record.resource), Some(version.clone())));
             held.push(record);
         }
-        if artifacts.is_empty() {
-            return Ok(());
-        }
-        // Finish validation of the entire batch before any controller call.
-        let mut closures = Vec::new();
+        let mut controllers = Vec::new();
         for reservation in held {
             let legacy = !configured.is_empty()
                 && self
@@ -371,41 +478,18 @@ impl<'a> ReservationService<'a> {
                     pending.remove(controller);
                 }
             }
-            closures.push((fence, pending));
-        }
-        for (fence, pending) in closures {
             for controller in pending {
-                let endpoint = endpoint(&controller)?;
-                let manifest = endpoint.manifest();
-                let matches = manifest.adapter_id == controller.adapter_id
-                    && manifest
-                        .capability(&controller.capability_id)
-                        .and_then(|cap| cap.contract.act())
-                        .is_some_and(|act| act.fenced_resource == Some(fence.resource.as_str()));
-                if !matches {
-                    return Err(ReservationError::ControllerAcknowledgement {
-                        capability: controller,
-                        source: AdapterCallError::Rejected(
-                            "controller fence contract changed".into(),
-                        ),
-                    });
-                }
-                endpoint
-                    .close_fence(&controller, &fence)
-                    .map_err(|source| ReservationError::ControllerAcknowledgement {
-                        capability: controller.clone(),
-                        source,
-                    })?;
-                self.store
-                    .confirm_act_controller_closed(&fence.reservation_version_id, &controller)?;
+                controllers.push(ControllerClosure {
+                    capability: controller,
+                    fence: fence.clone(),
+                });
             }
         }
-        self.commit(&artifacts, &guards).map_err(|e| match e {
-            StoreError::VersionConflict { .. } | StoreError::IdempotencyConflict => {
-                ReservationError::Conflict
-            }
-            StoreError::OpenActFences => ReservationError::ControllersPending,
-            e => e.into(),
+        Ok(PreparedReservationRelease {
+            service: *self,
+            artifacts,
+            guards,
+            controllers,
         })
     }
 

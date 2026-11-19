@@ -49,6 +49,7 @@ impl Monitor {
         };
         let ready = monitor.until(|event| event["event"] == "ready");
         assert_eq!(ready["control"]["transport"], "stdin_jsonl");
+        assert_eq!(ready["control"]["resource_release_queue"], true);
         monitor
     }
 
@@ -427,16 +428,22 @@ fn live_goal_review_requires_the_current_candidate_and_executes_once() {
 }
 
 #[test]
-fn reconciliation_preview_requires_the_complete_current_reservation_set() {
+fn a_live_controller_release_keeps_independent_work_running_and_resumes_after_restart() {
     use arcs::approval::ApprovalDecision;
     use arcs::core::{Actor, ActorType};
     use arcs_host::task_runtime::goal::GoalState;
 
     let f = goals::Fixture::new();
     f.manual();
+    let background = add_independent_route(&f);
+    gate_fan_closure(&f);
+    let mut fan = f.read("fan-profile.json");
+    fan["fenced_resource"] = json!("device.fan-01");
+    f.write("fan-profile.json", fan);
     let mut config = f.read("runtime.json");
     config["interval_ms"] = json!(10);
     config["routes"][0]["goal"]["exclusive_resources"] = json!(["device.fan-01", "workcell.fan"]);
+    config["routes"][0]["goal"]["actions"][0]["fenced_resource"] = json!("device.fan-01");
     f.write("runtime.json", config);
     let mut host = f.host();
     let mut runtime = f.runtime(&host);
@@ -524,7 +531,61 @@ fn reconciliation_preview_requires_the_complete_current_reservation_set() {
     let release = json!({"command":"release_resources","sequence":goal.sequence,
         "reservation_versions":versions,"evidence_versions":refs,"operator_id":"simulator.test",
         "reason":"simulated state was checked"});
-    assert_eq!(monitor.command("release", "goal", release)["ok"], true);
+    let accepted = monitor.command("release", "goal", release.clone());
+    assert_eq!(accepted["ok"], true, "{accepted}");
+    assert_eq!(accepted["receipt"]["release_pending"], true);
+    monitor.until(|event| {
+        f.directory.join("close.entered").exists()
+            && event["controller_closures"]
+                .as_array()
+                .is_some_and(|rows| rows.len() == 1)
+    });
+    assert_eq!(
+        monitor.command("retry-pending", "goal", release.clone())["receipt"]["release_pending"],
+        true
+    );
+    let mut changed = release;
+    changed["reason"] = json!("another decision");
+    assert_eq!(
+        monitor.command("changed-pending", "goal", changed)["ok"],
+        false
+    );
+
+    background.write(
+        "late.json",
+        json!({"id":"background","subject":"background","reference":"task:background",
+        "payload":{"values":[2,4],"target":3}}),
+    );
+    let queued = Command::new(support::adapter_binary("arcs-json-input"))
+        .arg("--enqueue")
+        .arg(background.directory.join("input-profile.json"))
+        .arg(background.directory.join("input.sqlite"))
+        .arg(background.directory.join("late.json"))
+        .output()
+        .unwrap();
+    assert!(
+        queued.status.success(),
+        "{}",
+        String::from_utf8_lossy(&queued.stderr)
+    );
+    let running = monitor.until(|event| event["runtime"]["ready_for_review"] == 1);
+    assert_eq!(running["resource_reservations"][0]["state"], "held");
+    assert_eq!(
+        running["resource_release_reviews"][0]["release_requested"],
+        true
+    );
+    assert_eq!(running["controller_closures"].as_array().unwrap().len(), 1);
+    monitor.stop();
+
+    // The operator decision survives shutdown while the old transport is blocked.
+    std::fs::remove_file(f.directory.join("monitor.stop")).unwrap();
+    std::fs::remove_file(f.directory.join("close.entered")).unwrap();
+    let mut monitor = Monitor::start(&f.directory);
+    monitor.until(|event| {
+        f.directory.join("close.entered").exists()
+            && event["resource_release_reviews"][0]["release_requested"] == true
+    });
+    std::fs::write(f.directory.join("close.release"), "continue").unwrap();
     let snapshot = monitor.until(|event| event["resource_reservations"][0]["state"] == "released");
     assert!(
         snapshot["resource_release_reviews"]
@@ -537,8 +598,91 @@ fn reconciliation_preview_requires_the_complete_current_reservation_set() {
         json!([&evidence])
     );
     assert_eq!(
+        snapshot["resource_reservations"][0]["decision_by"]["id"],
+        "simulator.test"
+    );
+    let actuations: i64 = f
+        .db("fan")
+        .query_row("SELECT actuation_count FROM fan_state", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(actuations, 1);
+    assert_eq!(
         monitor.command("old-preview", "goal", inspect(&versions, json!([evidence])))["ok"],
         false
     );
     monitor.stop();
+}
+
+fn gate_fan_closure(f: &goals::Fixture) {
+    std::fs::write(
+        f.directory.join("gated-fan.py"),
+        r#"
+import json, pathlib, subprocess, sys, time
+root = pathlib.Path(__file__).parent
+peer = subprocess.Popen(sys.argv[1:], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+try:
+    for line in sys.stdin.buffer:
+        if json.loads(line)["message"]["type"] == "close_fence":
+            (root / "close.entered").write_text("entered")
+            while not (root / "close.release").exists():
+                time.sleep(.005)
+        peer.stdin.write(line)
+        peer.stdin.flush()
+        reply = peer.stdout.readline()
+        if not reply:
+            break
+        sys.stdout.buffer.write(reply)
+        sys.stdout.buffer.flush()
+finally:
+    peer.stdin.close()
+    peer.wait()
+"#,
+    )
+    .unwrap();
+    let mut host = f.read("host.json");
+    host["adapters"][1] = json!({"program":"/usr/bin/python3", "grant_file":"fan-grant.json", "timeout_ms":15000,
+        "args":[{"path":"gated-fan.py"},{"path":support::adapter_binary("arcs-simulated-fan")},
+                {"path":"fan-profile.json"},{"path":"fan.sqlite"}]});
+    f.write("host.json", host);
+}
+
+fn add_independent_route(f: &goals::Fixture) -> parallel::Fixture {
+    let background = parallel::Fixture::new();
+    background.peer("background", "normal", false);
+    background.route("background", "background");
+    let mut input = background.read("input-profile.json");
+    input["events"] = json!([]);
+    background.write("input-profile.json", input);
+    let background_host = background.read("host.json");
+    let mut host = f.read("host.json");
+    host["schemas"].as_array_mut().unwrap().extend(
+        background_host["schemas"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .cloned(),
+    );
+    for mut adapter in background_host["adapters"].as_array().unwrap().clone() {
+        for field in ["profile", "grant_file"] {
+            if let Some(relative) = adapter[field].as_str() {
+                adapter[field] = json!(background.directory.join(relative));
+            }
+        }
+        for arg in adapter["args"].as_array_mut().unwrap() {
+            if let Some(relative) = arg["path"].as_str() {
+                arg["path"] = json!(background.directory.join(relative));
+            }
+        }
+        host["adapters"].as_array_mut().unwrap().push(adapter);
+    }
+    f.write("host.json", host);
+    let mut runtime = f.read("runtime.json");
+    runtime["routes"]
+        .as_array_mut()
+        .unwrap()
+        .push(background.read("runtime.json")["routes"][0].clone());
+    f.write("runtime.json", runtime);
+    background
 }

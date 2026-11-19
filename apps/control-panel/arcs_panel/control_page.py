@@ -136,6 +136,8 @@ class ControlPage(Gtk.Box):
                 detail += f" · Runde {row['round']}"
             if kind == "resource":
                 detail += " · Reserviert: " + ", ".join(item["resource"] for item in row["reservations"])
+                if row.get("release_requested"):
+                    detail += " · Übergabe angefordert"
         if not self.connected:
             detail = "Steuerung verfügbar, sobald eine unterstützte ARCS-Runtime läuft."
         self.detail.set_text(detail)
@@ -153,7 +155,7 @@ class ControlPage(Gtk.Box):
         self.inspect_button.set_visible(may_review)
         self.inspect_button.set_sensitive(ready and may_review and not effective_pause)
         self.resource_button.set_visible(kind == "resource")
-        self.resource_button.set_sensitive(ready and kind == "resource")
+        self.resource_button.set_sensitive(ready and kind == "resource" and not row.get("release_requested"))
 
     def _send(self, kind, payload, review_key=None):
         if not self.connected or self.pending or self.waiting_for_snapshot:
@@ -217,7 +219,8 @@ class ControlPage(Gtk.Box):
         elif expected is None:
             self.waiting_for_snapshot = True
             self.reason.set_text("")
-            self.status.set_text("Befehl bestätigt.")
+            receipt = event.get("receipt") or {}
+            self.status.set_text("Übergabe angefordert." if receipt.get("release_pending") else "Befehl bestätigt.")
         else:
             receipt = event.get("receipt") or {}
             received = (receipt.get("sequence"), receipt.get("candidate_version_id"), receipt.get("verification_version_id"), receipt.get("capability"))

@@ -1,5 +1,6 @@
 //! Session pointers are operational; ownership lives in Core artifacts.
 use super::{Journal, db};
+use crate::task_runtime::ControlReleaseIntent;
 use crate::{HostError, task_runtime::config::invalid};
 use arcs::{core::VersionId, runtime::reservations::ReservationOwner};
 use rusqlite::{Connection, OptionalExtension, params};
@@ -7,14 +8,18 @@ use rusqlite::{Connection, OptionalExtension, params};
 pub(super) fn initialize(connection: &Connection) -> Result<(), HostError> {
     connection.execute_batch("CREATE TABLE IF NOT EXISTS runtime_control_sessions(sequence INTEGER NOT NULL REFERENCES runtime_jobs(sequence),session INTEGER NOT NULL,owner_json TEXT NOT NULL,resources_json TEXT NOT NULL,closed INTEGER NOT NULL DEFAULT 0 CHECK(closed IN (0,1)),PRIMARY KEY(sequence,session));
         CREATE UNIQUE INDEX IF NOT EXISTS runtime_control_open ON runtime_control_sessions(sequence) WHERE closed=0;").map_err(db)?;
-    let has_column: bool = connection.query_row(
-        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('runtime_control_sessions') WHERE name='closure_error')",
-        [], |row| row.get(0),
-    ).map_err(db)?;
-    if !has_column {
-        connection
-            .execute_batch("ALTER TABLE runtime_control_sessions ADD COLUMN closure_error TEXT;")
-            .map_err(db)?;
+    for column in ["closure_error", "release_intent_json"] {
+        let has_column: bool = connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM pragma_table_info('runtime_control_sessions') WHERE name=?1)",
+            [column], |row| row.get(0),
+        ).map_err(db)?;
+        if !has_column {
+            connection
+                .execute_batch(&format!(
+                    "ALTER TABLE runtime_control_sessions ADD COLUMN {column} TEXT;"
+                ))
+                .map_err(db)?;
+        }
     }
     Ok(())
 }
@@ -22,18 +27,24 @@ pub(in crate::task_runtime) struct ControlSession {
     pub owner: ReservationOwner,
     pub resources: Vec<String>,
     pub closed: bool,
+    pub release_intent: Option<ControlReleaseIntent>,
 }
 impl Journal {
     pub(in crate::task_runtime) fn control_session(
         &self,
         sequence: u64,
     ) -> Result<Option<ControlSession>, HostError> {
-        let raw:Option<(String,String,bool)>=self.connection.query_row("SELECT owner_json,resources_json,closed FROM runtime_control_sessions WHERE sequence=?1 ORDER BY session DESC LIMIT 1",[sequence as i64],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).optional().map_err(db)?;
-        raw.map(|(owner, resources, closed)| {
+        let raw = self.connection.query_row("SELECT owner_json,resources_json,closed,release_intent_json FROM runtime_control_sessions WHERE sequence=?1 ORDER BY session DESC LIMIT 1",[sequence as i64],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get(2)?,r.get::<_,Option<String>>(3)?))).optional().map_err(db)?;
+        raw.map(|(owner, resources, closed, release_intent)| {
             Ok(ControlSession {
                 owner: serde_json::from_str(&owner).map_err(|e| invalid(e.to_string()))?,
                 resources: serde_json::from_str(&resources).map_err(|e| invalid(e.to_string()))?,
                 closed,
+                release_intent: release_intent
+                    .as_deref()
+                    .map(serde_json::from_str)
+                    .transpose()
+                    .map_err(|e| invalid(e.to_string()))?,
             })
         })
         .transpose()
@@ -55,6 +66,7 @@ impl Journal {
                 owner: old.owner.clone(),
                 resources: old.resources.clone(),
                 closed: false,
+                release_intent: old.release_intent.clone(),
             });
         }
         let session = old
@@ -71,6 +83,7 @@ impl Journal {
             owner,
             resources: resources.to_vec(),
             closed: false,
+            release_intent: None,
         })
     }
     pub(in crate::task_runtime) fn close_control_session(
@@ -98,6 +111,27 @@ impl Journal {
                 params![owner.task_sequence as i64, owner.session, error],
             )
             .map_err(db)?;
+        Ok(())
+    }
+
+    pub(in crate::task_runtime) fn save_control_release_intent(
+        &self,
+        owner: &ReservationOwner,
+        intent: &ControlReleaseIntent,
+    ) -> Result<(), HostError> {
+        let intent = serde_json::to_string(intent).map_err(|error| invalid(error.to_string()))?;
+        let updated = self
+            .connection
+            .execute(
+                "UPDATE runtime_control_sessions SET release_intent_json=?3
+             WHERE sequence=?1 AND session=?2 AND closed=0
+             AND (release_intent_json IS NULL OR release_intent_json=?3)",
+                params![owner.task_sequence as i64, owner.session, intent],
+            )
+            .map_err(db)?;
+        if updated != 1 {
+            return Err(invalid("control release decision changed"));
+        }
         Ok(())
     }
 

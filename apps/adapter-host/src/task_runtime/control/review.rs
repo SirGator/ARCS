@@ -14,6 +14,7 @@ pub(crate) struct ResourceReleaseReview {
     execution: Option<VersionId>,
     outcome: Option<VersionId>,
     reservations: Vec<ResourceRevision>,
+    release_requested: bool,
 }
 
 #[derive(Serialize)]
@@ -91,6 +92,7 @@ impl TaskRuntime {
                         execution: goal.execution,
                         outcome: goal.outcome,
                         reservations,
+                        release_requested: session.release_intent.is_some(),
                     });
                 }
             }

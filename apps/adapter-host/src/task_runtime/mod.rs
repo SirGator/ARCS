@@ -15,6 +15,7 @@ pub mod scheduler;
 pub mod suspension;
 mod worker_lifecycle;
 pub use config::{ReasoningRoute, RuntimeConfig};
+pub(crate) use control::ControlReleaseIntent;
 pub use control::ResourceEvidenceReview;
 pub use journal::dispatch::{DispatchClassReport, DispatchReport};
 
@@ -180,6 +181,7 @@ impl TaskRuntime {
         {
             return Err(invalid("runtime topology changed"));
         }
+        host.collect_controller_closures()?;
         host.poll_reconnections_at(now_unix_ms)?;
         self.live_clock = live_clock;
         let has_deadlines = self.config.routes.iter().any(|route| {

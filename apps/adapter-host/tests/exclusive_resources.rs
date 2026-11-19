@@ -201,7 +201,8 @@ fn a_fenced_goal_passes_its_exact_held_revision_to_the_simulated_controller() {
     let mut host = f.host();
     let mut runtime = f.runtime(&host);
     until(&mut host, &mut runtime, |r| {
-        r.report(0).unwrap().completed_goals == 1
+        let report = r.report(0).unwrap();
+        report.completed_goals == 1 && report.control_release_waits.is_empty()
     });
     assert_eq!(
         runtime.exclusive_resources(&host).unwrap()[0].state,
@@ -253,7 +254,11 @@ fn controller_confirmation_precedes_release_and_survives_a_failed_core_commit() 
         )
         .unwrap();
     until(&mut host, &mut runtime, |r| {
-        r.report(0).unwrap().completed_goals == 1
+        r.report(0)
+            .unwrap()
+            .control_release_waits
+            .iter()
+            .any(|wait| wait.error.contains("controller refuses closure"))
     });
     let report = runtime.report(0).unwrap();
     assert_eq!(report.control_release_waits[0].sequence, first.sequence);
@@ -294,7 +299,20 @@ fn controller_confirmation_precedes_release_and_survives_a_failed_core_commit() 
          WHEN NEW.schema_id='arcs.resource_reservation.v1' AND json_extract(NEW.artifact_json,'$.payload.state')='released'
          BEGIN SELECT RAISE(ABORT,'release commit interrupted'); END;",
     ).unwrap();
-    assert!(runtime.tick(&mut host).is_err());
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        match runtime.tick(&mut host) {
+            Err(error) => {
+                assert!(
+                    error.to_string().contains("release commit interrupted"),
+                    "{error:?}"
+                );
+                break;
+            }
+            Ok(_) => assert!(Instant::now() < deadline),
+        }
+        std::thread::sleep(Duration::from_millis(3));
+    }
     let retired: bool = f
         .db("fan")
         .query_row("SELECT closed FROM act_fence", [], |row| row.get(0))

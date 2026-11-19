@@ -111,6 +111,8 @@ des Checkouts lassen sie sich mit demselben Befehl aktualisieren.
   geprüften Belegversionen aus oder füge ihre IDs ein. **Belege anzeigen**
   lädt die gespeicherten Inhalte. Nach Prüfung des Gerätezustands und der
   Belege bestätigst du die Übergabe mit Begründung.
+  Wartet ARCS auf einen Controller, zeigt das Panel **Übergabe angefordert**.
+  Die gespeicherte Entscheidung wird nach einem Neustart weiterverarbeitet.
 - **Stoppen:** Fordert einen geordneten Stopp zwischen den Host-Runden an.
   Auch das Schließen des Fensters wartet zunächst auf diesen Stopp. Nach acht
   Sekunden erscheint bei Bedarf **Sofort beenden**, das ausschließlich die

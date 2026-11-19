@@ -176,8 +176,17 @@ Migrationsgrenze für die bereits gespeicherten Reservierungen.
 Bei einer abgelehnten oder fehlenden Bestätigung bleibt die Ressource
 reserviert. Automatische Übergaben werden weiter geprüft. Das Laufzeitfeld
 `control_release_waits` enthält Aufgabensequenz, Sitzung und letzte Meldung.
-Controllerdialoge verwenden das vorhandene synchrone stdio-Verfahren und
-die Deadline des jeweiligen Adapters.
+Der laufende Host führt Controllerdialoge mit begrenzten Workern und der
+Deadline des jeweiligen Adapters aus. Pro Host laufen bis zu vier Dialoge.
+Jeder belegt nur die zugehörige Adapter-Session. Der Scheduler verarbeitet
+unabhängige Aufgaben weiter und schreibt eingehende Bestätigungen im Core.
+Die Ressource bleibt bis zum Freigabe-Commit gehalten.
+
+Eine Betreiberübergabe im laufenden Monitor wird vor dem Start des Dialogs
+mit Revisionen, Belegen, Akteur und Begründung im Runtime-Journal gespeichert.
+Bei `release_pending: true` setzt ARCS diese Entscheidung auch nach einem
+Neustart fort. Für eine gestoppte Runtime wartet `--goal-command` auf den
+Abschluss der angeforderten Übergabe.
 [Protokoll](../../../ADAPTER_PROTOCOL.md#reservierungsrevision-an-der-act-grenze)
 
 ## Status und Grenzen

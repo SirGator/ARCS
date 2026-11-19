@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::task_runtime::queue::{TaskQueuePage, TaskQueueQuery};
 use crate::task_runtime::scheduler::{SeriesControlCommand, SeriesControlReceipt};
 use crate::task_runtime::suspension::{TaskControlCommand, TaskControlReceipt};
-use crate::task_runtime::{ResourceEvidenceReview, goal::GoalReview};
+use crate::task_runtime::{ControlReleaseIntent, ResourceEvidenceReview, goal::GoalReview};
 use crate::{Host, HostError, task_runtime::TaskRuntime};
 
 #[derive(Deserialize)]
@@ -70,6 +70,10 @@ pub enum CommandReceipt {
     Series(SeriesControlReceipt),
     GoalReview(GoalReview),
     ResourceEvidenceReview(ResourceEvidenceReview),
+    ResourceRelease {
+        sequence: u64,
+        release_pending: bool,
+    },
 }
 
 impl OperatorCommand {
@@ -77,6 +81,23 @@ impl OperatorCommand {
         self,
         runtime: &mut TaskRuntime,
         host: &mut Host,
+    ) -> Result<Option<CommandReceipt>, HostError> {
+        self.apply_command(runtime, host, false)
+    }
+
+    pub fn apply_live(
+        self,
+        runtime: &mut TaskRuntime,
+        host: &mut Host,
+    ) -> Result<Option<CommandReceipt>, HostError> {
+        self.apply_command(runtime, host, true)
+    }
+
+    fn apply_command(
+        self,
+        runtime: &mut TaskRuntime,
+        host: &mut Host,
+        live: bool,
     ) -> Result<Option<CommandReceipt>, HostError> {
         match self {
             Self::Queue(query) => runtime
@@ -91,7 +112,7 @@ impl OperatorCommand {
             Self::Plan(PlanCommand::Cancel { sequence, reason }) => {
                 runtime.cancel_plan(host, sequence, reason).map(|()| None)
             }
-            Self::Goal(command) => command.apply(runtime, host),
+            Self::Goal(command) => command.apply(runtime, host, live),
         }
     }
 }
@@ -101,6 +122,7 @@ impl GoalCommand {
         self,
         runtime: &mut TaskRuntime,
         host: &Host,
+        live: bool,
     ) -> Result<Option<CommandReceipt>, HostError> {
         match self {
             Self::Inspect {
@@ -131,14 +153,32 @@ impl GoalCommand {
                 evidence_versions,
                 operator_id,
                 reason,
-            } => runtime.reconcile_goal_resources(
-                host,
-                sequence,
-                &reservation_versions,
-                &evidence_versions,
-                human(operator_id),
-                reason,
-            ),
+            } => {
+                if live {
+                    let intent = ControlReleaseIntent {
+                        expected: reservation_versions,
+                        evidence: evidence_versions,
+                        actor: human(operator_id),
+                        reason,
+                    };
+                    return runtime
+                        .queue_goal_reconciliation(host, sequence, intent)
+                        .map(|release_pending| {
+                            Some(CommandReceipt::ResourceRelease {
+                                sequence,
+                                release_pending,
+                            })
+                        });
+                }
+                runtime.reconcile_goal_resources(
+                    host,
+                    sequence,
+                    &reservation_versions,
+                    &evidence_versions,
+                    human(operator_id),
+                    reason,
+                )
+            }
             Self::Review {
                 sequence,
                 candidate_version_id,
