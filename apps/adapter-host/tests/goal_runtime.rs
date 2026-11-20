@@ -198,6 +198,12 @@ fn every_phase_resumes_after_restart_and_manual_approval_is_separate_for_each_ro
         host.poll_round().unwrap();
         runtime.tick(&mut host).unwrap();
         let mut current = task(&runtime);
+        if !host.request_workers().is_empty()
+            && matches!(current.state, GoalState::Acquiring | GoalState::Observing)
+        {
+            let source_phase = current.state;
+            current = until(&mut host, &mut runtime, |state| state != source_phase);
+        }
         if !host.execution_workers().is_empty() {
             // Let the external reply reach its next checkpoint before this
             // restart. The monitor tests restart with the reply still in flight.
@@ -725,8 +731,14 @@ fn a_scheduled_goal_still_requires_verification_and_manual_approval_after_waking
 
     let mut host = fixture.host();
     let mut runtime = fixture.runtime(&host);
-    for _ in 0..10 {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
         runtime.tick_at(&mut host, 1_807_776_000_000).unwrap();
+        if task(&runtime).state == GoalState::AwaitingApproval {
+            break;
+        }
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(3));
     }
     assert_eq!(task(&runtime).state, GoalState::AwaitingApproval);
     assert!(task(&runtime).verification.is_some());

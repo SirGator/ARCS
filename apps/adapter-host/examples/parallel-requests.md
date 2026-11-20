@@ -13,12 +13,12 @@ Die Runtime-Option lautet:
 }
 ```
 
-Das ist ein Ausschnitt einer normalen Runtime-Konfiguration.
-`max_concurrent_requests` akzeptiert 1–32. Der Standard 1 erhält die bisherigen
-synchronen Abfragen. Ab 2 verwendet die Goal-Quellenbeschaffung begrenzte
-externe Worker. Die [Inferenzkonfiguration](../config/live-llm/runtime.json)
-aktiviert beide Arten der Parallelität. Das Arbeitsbudget verändert keine
-Auftragsidentität und kann bei gleicher Runtime-Definition angepasst werden.
+`max_concurrent_requests` begrenzt die gleichzeitig laufenden
+Quellenabfragen auf 1–32. Mit dem Standardwert 1 wartet die betroffene
+Aufgabe auf einen einzelnen Worker, während der Scheduler andere Aufgaben
+bearbeitet. Höhere Werte erlauben mehrere gleichzeitige Quellenabfragen.
+Das Limit kann bei gleicher Runtime-Definition angepasst werden.
+[Inferenzkonfiguration](../config/live-llm/runtime.json)
 
 Jeder neue Aufruf zählt die ausstehenden Request-Worker desselben Hosts,
 einschließlich derjenigen anderer Runtimes und aufgegebener, noch laufender
@@ -57,11 +57,13 @@ diese Installation nicht zusätzlich. Unabhängige Installationen bleiben
 ansprechbar. Ein Protokoll-/Transportfehler beendet nur die betroffene Session;
 ein fehlerhafter Quelleninhalt scheitert an der Core-Validierung.
 
-Im parallelen Runtime-Modus wird ein fehlgeschlagener Task nicht automatisch
-wiederholt. Eine pausierte Aufgabe kann einen bereits laufenden Quellenabruf
-validieren und dessen Ressourcen freigeben; sie plant oder handelt dadurch
-nicht weiter. Beim Fortsetzen gelten die bisherigen frischen Runden und
-Freigaben. Eine verlorene oder ungültige Antwort wird nicht als Erfolg ausgegeben.
+Ein gespeicherter Quellenfehler beendet die betroffene Aufgabe mit
+`failed`. Das gilt auch mit einem Request-Platz. Liegt der Fehler beim
+Neustart bereits im Core, übernimmt die Runtime ihn in den Aufgabenstand.
+Eine pausierte Aufgabe kann einen bereits laufenden Quellenabruf
+validieren und dessen Ressourcen freigeben. Planung und Ausführung warten
+bis zur Freigabe der Pause. Beim Fortsetzen gelten die frischen Runden und
+Freigaben.
 
 Nach dauerhaftem Abbruch, Ablauf oder einem Wechsel zu einer neuen Runde
 werden zugehörige alte Antworten verworfen. Ein fehlgeschlagener
@@ -76,7 +78,9 @@ Ein Hoststopp bricht lokale Dialoge ab. Bei Wiederaufnahme verwendet eine
 unfertige Quellenabfrage dieselbe Invocation-ID und dieselbe persistierte
 Eingabe. Der externe Adapter muss dauerhaft deduplizieren, damit eine bereits
 gespeicherte Antwort stabil bleibt. Eine schon im Core erfolgreiche Antwort
-braucht weder einen Worker noch einen weiteren Backend-Aufruf.
+ist sofort abrufbar. Wenn der Core das Abfrageergebnis wegen eines
+Speicherfehlers nicht veröffentlichen kann, bleibt der Dispatch für diese
+Wiederaufnahme offen.
 
 ## Prüfen und Grenzen
 

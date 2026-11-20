@@ -27,7 +27,9 @@ for line in sys.stdin:
    reply={'type':'request_result','response':{'invocation_id':key,'external_reference':'fixture:'+key,'payload':payload}}
    with db: db.execute('INSERT INTO results VALUES(?,?,?)',(key,raw,json.dumps(reply)))
   (root/(name+'.started')).write_text(key)
-  while c['mode']=='gate' and not (root/(name+'.release')).exists(): time.sleep(.005)
+  while c['mode'] in ('gate','failed_gate') and not (root/(name+'.release')).exists(): time.sleep(.005)
+  if c['mode']=='failed_gate':
+   reply={'type':'error','code':'offline','message':'simulated source failure','retryable':True}
  elif kind=='shutdown': reply={'type':'bye'}
  else: raise RuntimeError(kind)
  print(json.dumps({'protocol_version':1,'request_id':p['request_id'],'message':reply}),flush=True)
@@ -46,6 +48,13 @@ pub fn fixture() -> Fixture {
     f.write("runtime.json", config);
     std::fs::write(f.directory.join("request-peer.py"), PEER).unwrap();
     f
+}
+pub fn use_default_limits(f: &Fixture) {
+    let mut config = f.read("runtime.json");
+    let options = config.as_object_mut().unwrap();
+    options.remove("max_concurrent_reasoning");
+    options.remove("max_concurrent_requests");
+    f.write("runtime.json", config);
 }
 pub fn peer(f: &Fixture, id: &str, mode: &str) {
     f.write(&format!("{id}.json"), json!({"id":id,"mode":mode}));

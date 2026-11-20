@@ -1,7 +1,9 @@
 //! Nonblocking Request transport. Only the Host prepares or commits Core state.
 use super::*;
 use arcs::adapters::AdapterCallError;
-use arcs::request::{PreparedRequest, RequestAdapter, RequestPreparation, RequestResponse};
+use arcs::request::{
+    PreparedRequest, RequestAdapter, RequestError, RequestPreparation, RequestResponse,
+};
 use arcs::runtime::{InvocationService, InvocationStatus};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::thread::{self, JoinHandle};
@@ -91,16 +93,29 @@ impl Host {
         if self.request_jobs.contains_key(&key) {
             return self.collect_request(&key);
         }
-        let cached = InvocationService::new(&self.store, &self.schemas, &SystemClock)
+        let finalized = InvocationService::new(&self.store, &self.schemas, &SystemClock)
             .lookup(&key)
             .map_err(|source| request_error(input, source.into()))?
-            .is_some_and(|state| state.status == InvocationStatus::Succeeded);
-        if !cached {
+            .is_some_and(|state| {
+                matches!(
+                    state.status,
+                    InvocationStatus::Succeeded | InvocationStatus::Failed
+                )
+            });
+        if !finalized {
             if self.request_jobs.len() + self.retiring_request_jobs.len() >= limit {
                 return Ok(None);
             }
             match self.ensure_adapter_available(&capability.adapter_id) {
                 Err(HostError::AdapterBusy(_)) => return Ok(None),
+                Err(HostError::Adapter { source, .. }) => {
+                    return Err(request_error(
+                        input,
+                        RequestError::AdapterCall(AdapterCallError::Unavailable(format!(
+                            "{source:?}"
+                        ))),
+                    ));
+                }
                 other => other?,
             }
         }
@@ -306,7 +321,7 @@ impl Host {
     }
 }
 
-fn request_error(input: &VersionId, source: arcs::request::RequestError) -> HostError {
+fn request_error(input: &VersionId, source: RequestError) -> HostError {
     HostError::Request {
         request: input.0.clone(),
         source,

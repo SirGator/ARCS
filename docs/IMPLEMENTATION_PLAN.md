@@ -444,6 +444,13 @@
 > Runtime begrenzt laufende Dialoge, prüft die Zulassung verspäteter
 > Inputs erneut und zeigt Adapterfehler einzeln im Monitor an.
 
+> Achtunddreißigster Schritt gemäß v3 §7.2 PAR-01/PAR-02/PAR-08/PAR-10/PAR-11:
+> Alle Goal-Quellenabfragen laufen über denselben begrenzten Request-Pool.
+> Ein einzelner Request-Platz lässt den Scheduler für unabhängige Aufgaben
+> verfügbar. Ein bereits gespeicherter Quellenfehler wird beim Wiederanlauf
+> in den Aufgabenstand übernommen. Fehlschläge beim Commit einer validierten
+> Antwort lassen den Dispatch mit derselben Invocation-ID wiederaufnehmbar.
+
 **Leitbild:** ARCS ist ein universeller Agent. Es soll sich einfach bedienen lassen, beliebige kompatible Systeme verbinden, eigenständig Probleme lösen und langfristige Aufgaben über Monate verfolgen.
 
 ## 1. Verbindliche Architekturregeln

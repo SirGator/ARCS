@@ -14,6 +14,10 @@ pub enum RequestError {
     Serialization(serde_json::Error),
     AdapterCall(AdapterCallError),
     Invocation(InvocationError),
+    RecordedFailure {
+        invocation_id: String,
+        detail: String,
+    },
     CapabilityIsNotRequest(CapabilityRef),
     ModelMustNotServeRequests(AdapterId),
     MissingInputArtifact(VersionId),

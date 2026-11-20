@@ -2,6 +2,8 @@
 mod goals;
 #[path = "support/parallel.rs"]
 mod parallel;
+#[path = "support/requests.rs"]
+mod requests;
 mod support;
 
 use std::io::{BufRead, BufReader, Write};
@@ -351,6 +353,57 @@ fn live_series_and_task_control_survive_bad_frames_eof_and_restart() {
     assert_eq!(report.ready_for_review, 1);
     assert_eq!(f.count("a", "attempts"), 1);
     host.shutdown().unwrap();
+}
+
+#[test]
+fn the_default_request_slot_does_not_block_the_monitor_or_independent_tasks() {
+    let f = requests::fixture();
+    requests::peer(&f, "source", "failed_gate");
+    requests::routes(&f, &["source"]);
+    requests::use_default_limits(&f);
+    let background = add_independent_route(&f);
+    let mut config = f.read("runtime.json");
+    config["interval_ms"] = json!(15);
+    f.write("runtime.json", config);
+
+    let mut monitor = Monitor::start(&f.directory);
+    let waiting = monitor.until(|event| {
+        requests::started(&f, "source")
+            && event["request_workers"][0]["capability"]["adapter_id"] == "source"
+    });
+    assert_eq!(waiting["request_workers"].as_array().unwrap().len(), 1);
+    assert_eq!(waiting["runtime"]["goals"][0]["state"], "acquiring");
+    assert_eq!(waiting["runtime"]["goals"][0]["wait_ticks"], 0);
+    assert_eq!(
+        monitor.command(
+            "list-while-source-pending",
+            "queue",
+            json!({"limit":4,"scope":"all"})
+        )["ok"],
+        true
+    );
+
+    enqueue_independent_work(&background, "while-source-pending");
+    let progressing = monitor.until(|event| event["runtime"]["ready_for_review"] == 1);
+    assert_eq!(
+        progressing["request_workers"][0],
+        waiting["request_workers"][0]
+    );
+    requests::release(&f, "source");
+    let failed = monitor.until(|event| event["runtime"]["failed_jobs"] == 1);
+    assert_eq!(failed["runtime"]["goals"][0]["state"], "failed");
+    assert!(
+        failed["runtime"]["goals"][0]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("simulated source failure")
+    );
+    assert_eq!(failed["runtime"]["pending_jobs"], 0);
+
+    enqueue_independent_work(&background, "after-source-failure");
+    monitor.until(|event| event["runtime"]["ready_for_review"] == 2);
+    assert_eq!(requests::count(&f, "source", "attempts"), 1);
+    monitor.stop();
 }
 
 #[test]

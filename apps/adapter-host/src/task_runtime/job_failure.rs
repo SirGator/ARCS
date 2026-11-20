@@ -30,8 +30,11 @@ impl TaskRuntime {
         if is_core_failure(&error) {
             return Err(error);
         }
-        let retry =
-            self.config.retry_failed_jobs() && !matches!(error, HostError::Execution { .. });
+        let retry = self.config.retry_failed_jobs()
+            && !matches!(
+                error,
+                HostError::Execution { .. } | HostError::Request { .. }
+            );
         self.journal.fail(sequence, &error, retry)?;
         if retry {
             return Err(error);

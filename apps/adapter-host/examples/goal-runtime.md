@@ -249,8 +249,9 @@ Dispatch kann er mit derselben Invocation-ID wiederaufnehmen. Einen
 gespeicherten Fehler übernimmt die Runtime in den Aufgabenstatus, auch wenn
 dessen Journal-Commit zuvor scheiterte. Eine abgelehnte Veröffentlichung des
 Ausführungsbelegs lässt die Invocation für die Wiederaufnahme offen.
-Beim synchronen Reasoning und bei synchronen Requests gilt der bisherige
-Recovery-Vertrag für fehlgeschlagene Aufgaben.
+Quellenabfragen warten im Request-Pool. Ein verbuchter Quellenfehler
+beendet die betroffene Aufgabe und ist im Core nachvollziehbar.
+[Quellenabfragen](parallel-requests.md)
 
 `RuntimeReport` ergänzt `completed_goals`, `blocked_goals`, `awaiting_approval`
 und eine Liste von höchstens 50 Zielen, aktive zuerst, danach neuere Abschlüsse.

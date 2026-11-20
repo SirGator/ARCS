@@ -98,32 +98,33 @@ impl TaskRuntime {
         match task.state {
             GoalState::Acquiring | GoalState::Observing => {
                 let after = task.state == GoalState::Observing;
-                let acquisition = self.acquire(host, route, config, &mut task, after)?;
-                if let super::acquisition::Acquisition::Complete(versions) = acquisition {
-                    task.wait_ticks = 0;
-                    task.source_cursors.clear();
-                    task.source_versions.clear();
-                    if after {
-                        task.after = versions;
-                        task.state = GoalState::Assessing;
-                    } else {
-                        task.before = versions;
-                        task.state = if config.initial_assessment {
-                            GoalState::Checking
+                match self.acquire(host, route, config, &mut task, after)? {
+                    super::acquisition::Acquisition::Complete(versions) => {
+                        task.wait_ticks = 0;
+                        task.source_cursors.clear();
+                        task.source_versions.clear();
+                        if after {
+                            task.after = versions;
+                            task.state = GoalState::Assessing;
                         } else {
-                            GoalState::Planning
-                        };
+                            task.before = versions;
+                            task.state = if config.initial_assessment {
+                                GoalState::Checking
+                            } else {
+                                GoalState::Planning
+                            };
+                        }
                     }
-                } else if matches!(
-                    acquisition,
-                    super::acquisition::Acquisition::WaitingObservations
-                ) {
-                    task.wait_ticks += 1;
-                    if task.wait_ticks >= config.max_wait_ticks {
-                        task.state = GoalState::Blocked;
-                        task.detail =
-                            "fresh observations did not arrive within the configured wait budget"
-                                .into();
+                    // Acquisition saves its partial evidence and read positions.
+                    super::acquisition::Acquisition::PendingRequests => return Ok(()),
+                    super::acquisition::Acquisition::WaitingObservations => {
+                        task.wait_ticks += 1;
+                        if task.wait_ticks >= config.max_wait_ticks {
+                            task.state = GoalState::Blocked;
+                            task.detail =
+                                "fresh observations did not arrive within the configured wait budget"
+                                    .into();
+                        }
                     }
                 }
             }

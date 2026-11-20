@@ -41,7 +41,7 @@ pub struct RuntimeConfig {
     /// 1 erhält den synchronen Betrieb; 2..32 aktivieren begrenzte Worker.
     #[serde(default = "concurrency")]
     pub max_concurrent_reasoning: usize,
-    /// 1 preserves synchronous queries; 2..32 enable bounded Request workers.
+    /// Host-wide admission limit for nonblocking goal-source queries.
     #[serde(default = "concurrency")]
     pub max_concurrent_requests: usize,
     #[serde(default = "capacity")]
@@ -108,7 +108,7 @@ pub(super) fn identifier(value: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(&byte))
 }
 impl RuntimeConfig {
-    /// Preserve legacy retry behavior only for fully synchronous configurations.
+    /// Legacy retry behavior for remaining synchronous job steps.
     pub(super) fn retry_failed_jobs(&self) -> bool {
         self.max_concurrent_reasoning == 1 && self.max_concurrent_requests == 1
     }

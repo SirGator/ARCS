@@ -67,7 +67,7 @@ impl<'a> RequestService<'a> {
         request_version: &VersionId,
         response_schema: &SchemaId,
     ) -> Result<Artifact, RequestError> {
-        match self.prepare(endpoint, capability, request_version, response_schema)? {
+        match self.prepare_inner(endpoint, capability, request_version, response_schema, true)? {
             RequestPreparation::Complete(result) => Ok(*result),
             RequestPreparation::Dispatch(prepared) => {
                 let response = endpoint.fetch(prepared.invocation());
@@ -76,13 +76,31 @@ impl<'a> RequestService<'a> {
         }
     }
 
-    /// Persist the exact dispatch before external I/O. Replays need no worker.
+    /// Persist the exact dispatch before external I/O. Successful replays need
+    /// no worker, and a recorded failure is returned for task reconciliation.
     pub fn prepare(
-        &mut self,
+        &self,
         endpoint: &dyn RequestAdapter,
         capability: &CapabilityRef,
         request_version: &VersionId,
         response_schema: &SchemaId,
+    ) -> Result<RequestPreparation, RequestError> {
+        self.prepare_inner(
+            endpoint,
+            capability,
+            request_version,
+            response_schema,
+            false,
+        )
+    }
+
+    fn prepare_inner(
+        &self,
+        endpoint: &dyn RequestAdapter,
+        capability: &CapabilityRef,
+        request_version: &VersionId,
+        response_schema: &SchemaId,
+        retry_failed: bool,
     ) -> Result<RequestPreparation, RequestError> {
         if endpoint.manifest().adapter_id != capability.adapter_id {
             return Err(RequestError::Authorization(
@@ -152,6 +170,14 @@ impl<'a> RequestService<'a> {
                     .ok_or(crate::runtime::InvocationError::MissingResult)
                     .map(|artifact| RequestPreparation::Complete(Box::new(artifact)))
                     .map_err(RequestError::from);
+            }
+            if prepared.status == InvocationStatus::Failed && !retry_failed {
+                return Err(RequestError::RecordedFailure {
+                    invocation_id,
+                    detail: prepared
+                        .error
+                        .unwrap_or_else(|| "Request invocation failed".into()),
+                });
             }
             let recovered = invocations.recover(&prepared)?;
             invocations.dispatch(&recovered)?
@@ -275,24 +301,33 @@ impl<'a> RequestService<'a> {
                     transform: Some(format!("request:{}", capability.adapter_id.0)),
                 }),
             })?;
-            InvocationService::new(self.store, self.schemas, self.clock).succeed_with_current(
-                &dispatched,
-                &artifact,
-                &[
-                    (request.version_id.clone(), relation_kinds::fulfills()),
-                    (request.version_id.clone(), relation_kinds::caused_by()),
-                ],
-            )?;
             Ok(artifact)
         })();
-        if let Err(error) = &outcome {
-            let _ = InvocationService::new(self.store, self.schemas, self.clock).fail(
-                &dispatched,
-                format!("{error:?}"),
-                is_retryable(error),
-            );
-        }
-        outcome
+        let invocations = InvocationService::new(self.store, self.schemas, self.clock);
+        let artifact = match outcome {
+            Ok(artifact) => artifact,
+            Err(
+                error @ (RequestError::Store(_)
+                | RequestError::Invocation(_)
+                | RequestError::StaleDispatch),
+            ) => {
+                return Err(error);
+            }
+            Err(error) => {
+                invocations.fail(&dispatched, format!("{error:?}"), is_retryable(&error))?;
+                return Err(error);
+            }
+        };
+        // A failed publication leaves this dispatch open for exact replay.
+        invocations.succeed_with_current(
+            &dispatched,
+            &artifact,
+            &[
+                (request.version_id.clone(), relation_kinds::fulfills()),
+                (request.version_id, relation_kinds::caused_by()),
+            ],
+        )?;
+        Ok(artifact)
     }
 }
 

@@ -468,6 +468,74 @@ fn invalid_request_concurrency_is_rejected_without_creating_runtime_work() {
 }
 
 #[test]
+fn a_recorded_source_failure_repairs_a_lost_task_checkpoint_without_resending() {
+    let f = fixture();
+    peer(&f, "source", "failed_gate");
+    routes(&f, &["source"]);
+    use_default_limits(&f);
+    let mut host = f.host();
+    let mut runtime = f.runtime(&host);
+    until(&mut host, &mut runtime, |_, _| started(&f, "source"));
+    let request = host.request_workers().remove(0);
+    let journal = f.db("runtime");
+    journal
+        .execute_batch(
+            "CREATE TRIGGER reject_query_failure BEFORE UPDATE OF state ON runtime_jobs
+        WHEN NEW.state='failed' BEGIN SELECT RAISE(ABORT,'injected task failure checkpoint'); END;",
+        )
+        .unwrap();
+    release(&f, "source");
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    let error = loop {
+        match runtime.tick_at(&mut host, 1_800_000_000_000) {
+            Err(error) => break error,
+            Ok(_) => {
+                assert!(std::time::Instant::now() < deadline);
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+        }
+    };
+    assert!(
+        error
+            .to_string()
+            .contains("injected task failure checkpoint"),
+        "{error}"
+    );
+    let saved = arcs::runtime::InvocationService::new(
+        host.store(),
+        host.schemas(),
+        &arcs::core::SystemClock,
+    )
+    .lookup(&request.invocation_id)
+    .unwrap()
+    .unwrap();
+    assert_eq!(saved.status, arcs::runtime::InvocationStatus::Failed);
+    assert!(saved.retryable);
+    let task = runtime.goals_after(0, 1).unwrap().remove(0);
+    assert_eq!(task.state, GoalState::Acquiring);
+    journal
+        .execute_batch("DROP TRIGGER reject_query_failure")
+        .unwrap();
+    host.shutdown().unwrap();
+    drop((runtime, host));
+
+    let mut host = f.host();
+    let mut runtime = f.runtime(&host);
+    until(&mut host, &mut runtime, |_, rt| {
+        rt.report(0).unwrap().failed_jobs == 1
+    });
+    let task = runtime.goals_after(0, 1).unwrap().remove(0);
+    assert_eq!(task.state, GoalState::Failed);
+    assert!(task.detail.contains("RecordedFailure"));
+    assert!(task.detail.contains("simulated source failure"));
+    assert!(task.before.is_empty());
+    assert_eq!(runtime.report(0).unwrap().pending_jobs, 0);
+    assert_eq!(count(&f, "source", "attempts"), 1);
+    host.shutdown().unwrap();
+}
+
+#[test]
 fn a_core_result_commit_failure_is_propagated_and_does_not_publish_partial_source_data() {
     use arcs_host::HostError;
     use std::time::{Duration, Instant};
@@ -501,6 +569,17 @@ fn a_core_result_commit_failure_is_propagated_and_does_not_publish_partial_sourc
         ),
         "unexpected error: {error:?}"
     );
+    let invocation_id = std::fs::read_to_string(f.directory.join("source.started")).unwrap();
+    let saved = arcs::runtime::InvocationService::new(
+        host.store(),
+        host.schemas(),
+        &arcs::core::SystemClock,
+    )
+    .lookup(&invocation_id)
+    .unwrap()
+    .unwrap();
+    assert_eq!(saved.status, arcs::runtime::InvocationStatus::Dispatched);
+    assert!(saved.result_version.is_none());
     let results:i64=f.db("core").query_row("SELECT COUNT(*) FROM artifact_versions WHERE schema_id='arcs.state.fan.v1' AND json_extract(artifact_json,'$.created_by.id')='source'",[],|r|r.get(0)).unwrap();
     assert_eq!(results, 0);
     let task = runtime.goals_after(0, 1).unwrap().remove(0);
@@ -511,5 +590,30 @@ fn a_core_result_commit_failure_is_propagated_and_does_not_publish_partial_sourc
     f.db("core")
         .execute_batch("DROP TRIGGER reject_source")
         .unwrap();
+    host.shutdown().unwrap();
+    drop((runtime, host));
+
+    let mut host = f.host();
+    let mut runtime = f.runtime(&host);
+    until(&mut host, &mut runtime, |_, rt| {
+        rt.report(0).unwrap().awaiting_approval == 1
+    });
+    let saved = arcs::runtime::InvocationService::new(
+        host.store(),
+        host.schemas(),
+        &arcs::core::SystemClock,
+    )
+    .lookup(&invocation_id)
+    .unwrap()
+    .unwrap();
+    assert_eq!(saved.status, arcs::runtime::InvocationStatus::Succeeded);
+    let task = runtime.goals_after(0, 1).unwrap().remove(0);
+    assert_eq!(saved.result_version.as_ref(), task.before.first());
+    assert_eq!(count(&f, "source", "attempts"), 2);
+    assert_eq!(count(&f, "source", "results"), 1);
+    assert_eq!(
+        std::fs::read_to_string(f.directory.join("source.started")).unwrap(),
+        invocation_id
+    );
     host.shutdown().unwrap();
 }

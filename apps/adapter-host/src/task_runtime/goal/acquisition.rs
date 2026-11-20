@@ -64,26 +64,19 @@ impl TaskRuntime {
                     request: route.id.clone(),
                     source,
                 })?;
-                if self.config.max_concurrent_requests == 1 {
-                    host.request_version(&source.capability, &query.version_id, &source.schema_id)?
-                } else {
-                    self.journal.bind_source_request(
-                        task.sequence,
-                        task.round,
-                        &query.version_id,
-                    )?;
-                    let Some(artifact) = host.poll_request_version(
-                        &source.capability,
-                        &query.version_id,
-                        &source.schema_id,
-                        self.config.max_concurrent_requests,
-                    )?
-                    else {
-                        pending = true;
-                        continue;
-                    };
-                    artifact
-                }
+                self.journal
+                    .bind_source_request(task.sequence, task.round, &query.version_id)?;
+                let Some(artifact) = host.poll_request_version(
+                    &source.capability,
+                    &query.version_id,
+                    &source.schema_id,
+                    self.config.max_concurrent_requests,
+                )?
+                else {
+                    pending = true;
+                    continue;
+                };
+                artifact
             } else {
                 // Bounded pages avoid an unbounded history load. Retain the first
                 // matching immutable snapshot, so retries select the same evidence.

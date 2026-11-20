@@ -389,6 +389,37 @@ fn prepare_split(
     }
 }
 #[test]
+fn worker_preparation_reports_a_recorded_failure_and_direct_retry_keeps_its_id() {
+    use crate::adapters::AdapterCallError;
+
+    let (schemas, store, registry, endpoint) = split_fixture();
+    let mut ids = TestIds;
+    let mut service = RequestService::new(&registry, &schemas, &store, &mut ids, &FixedClock);
+    let prepared = prepare_split(&mut service, &endpoint);
+    let invocation_id = prepared.invocation().invocation_id.clone();
+    let capability = prepared.invocation().capability.clone();
+    let input = prepared.invocation().request_version_id.clone();
+    let schema = prepared.invocation().response_schema_id.clone();
+    assert!(matches!(
+        service.finish(prepared, Err(AdapterCallError::Timeout)),
+        Err(RequestError::AdapterCall(AdapterCallError::Timeout))
+    ));
+
+    let recorded = service.prepare(&endpoint, &capability, &input, &schema);
+    assert!(matches!(
+        recorded,
+        Err(RequestError::RecordedFailure { invocation_id: saved, .. }) if saved == invocation_id
+    ));
+    assert!(endpoint.calls.lock().unwrap().is_empty());
+    service
+        .execute(&endpoint, &capability, &input, &schema)
+        .unwrap();
+    let calls = endpoint.calls.lock().unwrap();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].invocation_id, invocation_id);
+}
+
+#[test]
 fn preparation_does_not_call_the_endpoint_and_finish_retains_correlated_replay() {
     let (schemas, store, registry, endpoint) = split_fixture();
     let mut ids = TestIds;
