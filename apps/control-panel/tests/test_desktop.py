@@ -1,5 +1,6 @@
 import json
 import sqlite3
+import subprocess
 from pathlib import Path
 import sys
 import tempfile
@@ -376,11 +377,26 @@ class DesktopTests(unittest.TestCase):
         runtime['routes'] = [{**template, 'id': f'waiting-{index}'} for index in range(26)]
         path = self.directory / 'task-queue.json'
         path.write_text(json.dumps(runtime))
+        profile_path = self.directory / 'input-left.json'
+        profile = json.loads(profile_path.read_text())
+        event_path = self.directory / 'late-queue-input.json'
+        event_path.write_text(json.dumps(profile['events'][0]))
+        profile['events'] = []
+        profile_path.write_text(json.dumps(profile))
+
         window = self.window
         window.select_configuration(Configuration(self.host, path))
         window.show_page('tasks')
         window.start_button.emit('clicked')
         page = window.queue_page
+        pump_until(lambda: page.page is not None and page.page['through_sequence'] == 0)
+        self.assertFalse(page.tasks)
+        result = subprocess.run(
+            [PROJECT_ROOT / 'target/debug/arcs-json-input', '--enqueue', profile_path,
+             self.directory / 'state/input-left.sqlite', event_path],
+            capture_output=True, text=True, timeout=15,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
         pump_until(lambda: bool(page.page and len(page.tasks) == 25))
         self.assertEqual(page.page['through_sequence'], 26)
         self.assertEqual(page.page_number.get_text(), 'Seite 1')

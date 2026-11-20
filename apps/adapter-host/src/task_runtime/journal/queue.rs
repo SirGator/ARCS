@@ -1,5 +1,5 @@
 use arcs::core::VersionId;
-use rusqlite::{Row, Transaction, params};
+use rusqlite::{Connection, Row, Transaction, params};
 
 use super::{Journal, db, runnable, suspension::PAUSED};
 use crate::HostError;
@@ -9,21 +9,27 @@ use crate::task_runtime::{
 };
 
 impl Journal {
+    pub(in crate::task_runtime) fn latest_task_sequence(
+        connection: &Connection,
+    ) -> Result<u64, HostError> {
+        connection
+            .query_row(
+                "SELECT COALESCE(MAX(sequence),0) FROM runtime_jobs",
+                [],
+                |row| row.get::<_, i64>(0).map(|sequence| sequence as u64),
+            )
+            .map_err(db)
+    }
+
     pub(in crate::task_runtime) fn task_queue(
         &self,
         query: TaskQueueQuery,
         include_failed: bool,
     ) -> Result<TaskQueuePage, HostError> {
         let tx = self.connection.unchecked_transaction().map_err(db)?;
-        let last: i64 = tx
-            .query_row(
-                "SELECT COALESCE(MAX(sequence),0) FROM runtime_jobs",
-                [],
-                |row| row.get(0),
-            )
-            .map_err(db)?;
-        let through = query.through_sequence.unwrap_or(last as u64);
-        if through > last as u64 || query.after_sequence > through {
+        let last = Self::latest_task_sequence(&tx)?;
+        let through = query.through_sequence.unwrap_or(last);
+        if through > last || query.after_sequence > through {
             return Err(invalid("task queue sequence range is outside this journal"));
         }
         let mut ids = page_ids(&tx, &query, through, include_failed)?;

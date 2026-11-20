@@ -20,6 +20,11 @@ weiteren Auftrag an. Weitere Tests unterbrechen getrennt den Fehler-Commit
 im Aufgabenjournal und den Ergebnis-Commit im Core und prüfen den jeweiligen
 Wiederanlauf.
 
+Das Kontrollpanel aktualisiert eine leere erste Warteschlangenseite,
+sobald der Host später hinzugekommene Aufgaben meldet. Beim Blättern bleibt
+die gewählte Seitengrenze erhalten. Der GTK-Test öffnet die leere
+Warteschlange vor dem ersten Input und prüft anschließend beide Seiten.
+
 Workspace-Build und Formatprüfung waren erfolgreich. Die Prüfprotokolle
 liegen unter `var/verification-request-default/`.
 

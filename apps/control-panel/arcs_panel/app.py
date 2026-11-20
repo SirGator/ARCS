@@ -338,8 +338,9 @@ class ControlWindow(Gtk.ApplicationWindow):
         for child in self.stack.get_children():
             child.set_visible(child == selected)
         self.stack.set_visible_child_name(name)
-        if name == "tasks" and self.snapshot.get("runtime") is not None:
-            self.queue_page.load_if_needed()
+        runtime = self.snapshot.get("runtime")
+        if name == "tasks" and runtime is not None:
+            self.queue_page.load_if_needed(runtime.get("latest_task_sequence", 0))
         for key, item in self.nav_buttons.items():
             context = item.get_style_context()
             (context.add_class if key == name else context.remove_class)("active")
@@ -600,7 +601,7 @@ class ControlWindow(Gtk.ApplicationWindow):
                 self.recent = (self.recent + event.get("recent_artifacts", []))[-20:]
                 self.control_page.snapshot(runtime or {}, event.get("resource_release_reviews", []), self.recent)
                 if runtime and self.stack.get_visible_child_name() == "tasks":
-                    self.queue_page.load_if_needed()
+                    self.queue_page.load_if_needed(runtime.get("latest_task_sequence", 0))
                 self.metrics["review"][0].set_text(str(runtime["ready_for_review"] + runtime.get("awaiting_approval", 0)) if runtime else "—")
                 self.metrics["review"][1].set_text(f"{runtime['pending_jobs']} offen · {runtime['failed_jobs']} fehlgeschlagen" if runtime else "Keine Aufgaben-Runtime")
                 if runtime and runtime.get("goals"):

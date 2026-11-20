@@ -122,8 +122,12 @@ class QueuePage(Gtk.Box):
         self.status.set_text("")
         self._refresh()
 
-    def load_if_needed(self):
-        if self.page_size and not self.initial_requested:
+    def load_if_needed(self, latest_task_sequence):
+        if not self.page_size or self.pending:
+            return
+        empty_first_page = self.page and self.cursors == (0,) and not self.tasks
+        newer_tasks = empty_first_page and latest_task_sequence > self.page["through_sequence"]
+        if not self.initial_requested or newer_tasks:
             self._reload()
 
     def _reload(self, *_):
