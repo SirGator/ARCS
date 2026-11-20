@@ -15,6 +15,7 @@ pub enum ReasoningError {
     Store(StoreError),
     Serialization(serde_json::Error),
     AdapterCall(AdapterCallError),
+    RecordedFailure(String),
     Invocation(InvocationError),
     NotReasoningAdapter(AdapterId),
     ReasoningProducerMustBeModel(AdapterId),

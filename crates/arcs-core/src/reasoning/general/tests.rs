@@ -40,9 +40,47 @@ fn stale_worker_cannot_commit_after_dispatch_was_recovered() {
     let old_response = f.peer.propose_v2(old.invocation()).unwrap();
     let current = f.dispatch();
     assert!(
-        matches!(f.service().finish(old,Ok(old_response.clone())),Err(ReasoningError::InvalidReasoningRequest(message)) if message.contains("stale"))
+        matches!(f.service().finish(old,Ok(old_response.clone())),Err(ReasoningError::Invocation(crate::runtime::InvocationError::InvalidState(message))) if message.contains("stale"))
     );
     f.service().finish(current, Ok(old_response)).unwrap();
+}
+
+#[test]
+fn worker_adopts_a_recorded_failure_and_explicit_retry_keeps_the_invocation_id() {
+    let mut f = Fixture::new();
+    let original = f.dispatch();
+    let id = original.invocation().invocation_id.clone();
+    assert!(matches!(
+        f.service().finish(
+            original,
+            Err(ReasoningError::AdapterCall(AdapterCallError::Timeout))
+        ),
+        Err(ReasoningError::AdapterCall(AdapterCallError::Timeout))
+    ));
+    let mut service = GeneralReasoningService {
+        registry: &f.registry,
+        schemas: &f.schemas,
+        store: &f.store,
+        ids: &mut f.ids,
+        clock: &SystemClock,
+    };
+    assert!(matches!(
+        service.prepare_for_worker(&f.peer, Fixture::request(), &[]),
+        Err(ReasoningError::RecordedFailure(_))
+    ));
+    let mut changed = Fixture::request();
+    changed.objective = "changed request".into();
+    assert!(matches!(
+        service.prepare_for_worker(&f.peer, changed, &[]),
+        Err(ReasoningError::Invocation(
+            crate::runtime::InvocationError::IdentityConflict(_)
+        ))
+    ));
+    let retry = f.dispatch();
+    assert_eq!(retry.invocation().invocation_id, id);
+    let response = f.peer.propose_v2(retry.invocation()).unwrap();
+    f.service().finish(retry, Ok(response)).unwrap();
+    assert_eq!(f.peer.calls.load(Ordering::Relaxed), 1);
 }
 
 #[test]

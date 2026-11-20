@@ -155,6 +155,27 @@ impl GeneralReasoningService<'_> {
         request: ReasoningRequestV2,
         selections: &[arcs_adapter_protocol::InputDataSelection],
     ) -> Result<ReasoningPreparation, ReasoningError> {
+        self.prepare_dispatch(endpoint, request, selections, true)
+    }
+
+    /// Runtime tasks adopt a recorded failure after restart. An explicit
+    /// synchronous call can still retry a failure marked retryable by the Core.
+    pub fn prepare_for_worker(
+        &mut self,
+        endpoint: &dyn GeneralReasoningAdapter,
+        request: ReasoningRequestV2,
+        selections: &[arcs_adapter_protocol::InputDataSelection],
+    ) -> Result<ReasoningPreparation, ReasoningError> {
+        self.prepare_dispatch(endpoint, request, selections, false)
+    }
+
+    fn prepare_dispatch(
+        &mut self,
+        endpoint: &dyn GeneralReasoningAdapter,
+        request: ReasoningRequestV2,
+        selections: &[arcs_adapter_protocol::InputDataSelection],
+        retry_failed: bool,
+    ) -> Result<ReasoningPreparation, ReasoningError> {
         for schema in [
             "arcs.reasoning_request.v2",
             "arcs.reasoning_result.v2",
@@ -337,6 +358,15 @@ impl GeneralReasoningService<'_> {
                 &audit,
             )?
         };
+        if prepared.status == InvocationStatus::Failed && !retry_failed {
+            return Err(ReasoningError::RecordedFailure(prepared.error.ok_or_else(
+                || {
+                    crate::runtime::InvocationError::InvalidState(
+                        "failed reasoning has no error".into(),
+                    )
+                },
+            )?));
+        }
         let cached = prepared.status == InvocationStatus::Succeeded;
         let state = if cached {
             prepared
@@ -404,7 +434,10 @@ impl GeneralReasoningService<'_> {
             prepared_at.map(|start| start.elapsed().as_millis().min(u64::MAX as u128) as u64);
         let invocations = InvocationService::new(self.store, self.schemas, self.clock);
         if invocations.lookup(&invocation.invocation_id)?.as_ref() != Some(&prepared) {
-            return Err(invalid("stale reasoning completion"));
+            return Err(crate::runtime::InvocationError::InvalidState(
+                "stale reasoning completion".into(),
+            )
+            .into());
         }
         let result = if prepared.status == InvocationStatus::Succeeded {
             self.store
@@ -432,34 +465,17 @@ impl GeneralReasoningService<'_> {
                 }
                 let response = response.ok_or_else(|| invalid("missing reasoning response"))??;
                 self.validate(&invocation, &response)?;
-                let result = self.artifact(
-                    "arcs.reasoning_result.v2",
-                    serde_json::json!({"response":response}),
-                    &invocation.invocation_id,
-                    vec![prepared.input_version.clone()],
-                    None,
-                );
-                let attempt = super::attempts::create(
-                    &invocation,
-                    &prepared,
-                    super::attempts::response_outcome(&response, &result.version_id),
-                    latency,
-                    self.schemas,
-                    self.ids,
-                    self.clock,
-                )?;
-                let attempt_relations = super::attempts::relations(&attempt, &invocation)?;
-                InvocationService::new(self.store, self.schemas, self.clock).succeed_with_attempt(
-                    &prepared,
-                    &result,
-                    &[(prepared.input_version.clone(), relation_kinds::result_of())],
-                    &attempt,
-                    &attempt_relations,
-                )?;
-                Ok(result)
+                Ok(response)
             })();
-            match outcome {
-                Ok(result) => result,
+            let response = match outcome {
+                Ok(response) => response,
+                Err(
+                    error @ (ReasoningError::Store(_)
+                    | ReasoningError::Invocation(_)
+                    | ReasoningError::InputData(
+                        crate::adapters::input_data::InputDataError::Store(_),
+                    )),
+                ) => return Err(error),
                 Err(error) => {
                     let retryable = matches!(
                         error,
@@ -496,7 +512,32 @@ impl GeneralReasoningService<'_> {
                         )?;
                     return Err(error);
                 }
-            }
+            };
+            let result = self.artifact(
+                "arcs.reasoning_result.v2",
+                serde_json::json!({"response":response}),
+                &invocation.invocation_id,
+                vec![prepared.input_version.clone()],
+                None,
+            );
+            let attempt = super::attempts::create(
+                &invocation,
+                &prepared,
+                super::attempts::response_outcome(&response, &result.version_id),
+                latency,
+                self.schemas,
+                self.ids,
+                self.clock,
+            )?;
+            let attempt_relations = super::attempts::relations(&attempt, &invocation)?;
+            InvocationService::new(self.store, self.schemas, self.clock).succeed_with_attempt(
+                &prepared,
+                &result,
+                &[(prepared.input_version.clone(), relation_kinds::result_of())],
+                &attempt,
+                &attempt_relations,
+            )?;
+            result
         };
         validate_artifact(&result, self.schemas)
             .map_err(|_| invalid_response("invalid cached result artifact"))?;
