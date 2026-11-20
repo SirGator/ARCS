@@ -187,6 +187,7 @@ impl Journal {
         completion: &CompletedTask,
         blocked: Option<&str>,
         stop_children: bool,
+        outputs: &[crate::task_runtime::plan_output::PlanOutputSeed],
     ) -> Result<(), HostError> {
         let transaction = self.connection.transaction().map_err(db)?;
         let json = serde_json::to_string(completion).map_err(|e| invalid(e.to_string()))?;
@@ -214,6 +215,7 @@ impl Journal {
                 )
                 .map_err(db)?;
             transaction.execute("UPDATE runtime_jobs SET state='ready_for_review',error=NULL,result_json=?2 WHERE sequence=?1",params![completion.sequence as i64,json]).map_err(db)?;
+            Self::stage_plan_outputs(&transaction, completion.sequence, outputs)?;
         }
         transaction.commit().map_err(db)
     }

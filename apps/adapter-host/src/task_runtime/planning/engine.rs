@@ -1,5 +1,9 @@
 use super::*;
-use crate::task_runtime::{CompletedTask, TaskRuntime, config::invalid};
+use crate::task_runtime::{
+    CompletedTask, TaskRuntime,
+    config::invalid,
+    plan_output::{PlanOutputSeed, PlanOutputSource},
+};
 use crate::{Host, HostError};
 use arcs::core::Artifact;
 use arcs::reasoning::{ContextSelection, ReasoningRequestV2, ReasoningStatus};
@@ -57,6 +61,11 @@ impl TaskRuntime {
             }
             let mut waiting = false;
             let mut blocked = None;
+            let mut outputs = Vec::new();
+            let has_outputs = config
+                .templates
+                .iter()
+                .any(|template| template.output.is_some());
             for task in states {
                 match self.resolve_parent(host, task)? {
                     crate::task_runtime::dependencies::ParentResult::Waiting => waiting = true,
@@ -64,7 +73,37 @@ impl TaskRuntime {
                         blocked = Some(reason);
                         break;
                     }
-                    crate::task_runtime::dependencies::ParentResult::Ready(_) => {}
+                    crate::task_runtime::dependencies::ParentResult::Ready(binding) => {
+                        if has_outputs {
+                            let step = plan
+                                .steps
+                                .iter()
+                                .find(|step| step.route.id == binding.route_id)
+                                .ok_or_else(|| invalid("completed step is missing in its plan"))?;
+                            let template = config
+                                .templates
+                                .iter()
+                                .find(|template| template.route.id == step.template_id)
+                                .ok_or_else(|| {
+                                    invalid("completed step has no configured template")
+                                })?;
+                            if let Some(output) = &template.output {
+                                outputs.push(PlanOutputSeed {
+                                    spec: PlanOutputSource {
+                                        plan_version_id: version.clone(),
+                                        task_sequence: binding.sequence,
+                                        result_version_id: binding
+                                            .context
+                                            .get(output.result_index)
+                                            .map(|item| item.version_id.clone()),
+                                        destination: output.destination.clone(),
+                                        receipt_schema_id: output.receipt_schema_id.clone(),
+                                    },
+                                    export_fields: template.export_fields.clone(),
+                                });
+                            }
+                        }
+                    }
                 }
             }
             if blocked.is_some()
@@ -82,6 +121,7 @@ impl TaskRuntime {
                         &saved.completion,
                         Some("plan aggregate budget exhausted before replanning"),
                         true,
+                        &[],
                     )?;
                     self.reap_abandoned_task_work(host)?;
                     return Ok(());
@@ -91,10 +131,14 @@ impl TaskRuntime {
                 self.reap_abandoned_task_work(host)?;
                 self.cleanup_control_sessions(host)?;
             } else if blocked.is_some() || !waiting {
+                if blocked.is_none() && !self.journal.has_plan_output_capacity(&outputs)? {
+                    return Ok(());
+                }
                 self.journal.finish_plan(
                     &saved.completion,
                     blocked.as_deref(),
                     config.replanning.is_some(),
+                    &outputs,
                 )?;
                 self.reap_abandoned_task_work(host)?;
             }

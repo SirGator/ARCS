@@ -7,7 +7,10 @@ mod publication;
 mod replanning;
 
 use super::{ReasoningRoute, dependencies::TaskDependency};
-use arcs::core::VersionId;
+use arcs::{
+    adapters::CapabilityRef,
+    core::{SchemaId, VersionId},
+};
 use serde::{Deserialize, Serialize};
 
 pub const PLAN_CANDIDATE: &str = "arcs.plan_candidate.v1";
@@ -73,6 +76,21 @@ pub struct PlanningConfig {
 pub struct StepTemplate {
     pub route: ReasoningRoute,
     pub export_fields: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output: Option<PlanOutputPolicy>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlanOutputPolicy {
+    pub destination: CapabilityRef,
+    pub receipt_schema_id: SchemaId,
+    #[serde(default, skip_serializing_if = "is_first_result")]
+    pub result_index: usize,
+}
+
+fn is_first_result(index: &usize) -> bool {
+    *index == 0
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

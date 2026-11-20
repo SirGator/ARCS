@@ -28,7 +28,10 @@ class TaskOutputDialog(Gtk.Dialog):
             (0, "Ergebnisversion", self.result_choice),
             (1, "Zieladapter", self.destination_choice),
         ):
-            selectors.attach(text_label(title), 0, row, 1, 1)
+            label = text_label(title)
+            if row == 0:
+                self.result_label = label
+            selectors.attach(label, 0, row, 1, 1)
             selectors.attach(widget, 1, row, 1, 1)
             widget.connect("changed", self._selection_changed)
         content.pack_start(selectors, False, False, 0)
@@ -74,9 +77,29 @@ class TaskOutputDialog(Gtk.Dialog):
         self.preview = self.review = self.delivery = None
         self.report.get_buffer().set_text("")
         self.reason.set_text("")
+        draft = self._selected_plan_output()
+        if draft:
+            self.destination_choice.set_active(self.result_choice.get_active())
+            state = draft["state"]
+            message = {"preparing": "ARCS bereitet den Bericht vor.",
+                       "failed": draft.get("error"), "ready": ""}.get(state)
+            self.status.set_text(message or "")
         self._refresh()
 
+    def _plan_outputs(self):
+        return self.options.get("plan_outputs", []) if self.options else []
+
+    def _selected_plan_output(self):
+        index = self.result_choice.get_active()
+        drafts = self._plan_outputs()
+        return drafts[index] if 0 <= index < len(drafts) else None
+
     def _load_preview(self, _):
+        draft = self._selected_plan_output()
+        if draft:
+            if draft["state"] == "ready":
+                self._send("task_output", "preview_plan_output", {"sequence": draft["sequence"]})
+            return
         version = self.result_choice.get_active_id()
         index = self.destination_choice.get_active()
         if not self.options or version is None or index < 0:
@@ -107,19 +130,8 @@ class TaskOutputDialog(Gtk.Dialog):
             self.delivery = receipt
             self._show_status()
         elif command == "options":
-            self.options = receipt
-            for version in receipt["result_versions"]:
-                self.result_choice.append(version, version)
-            for index, target in enumerate(receipt["destinations"]):
-                capability = target["destination"]
-                self.destination_choice.append(
-                    str(index),
-                    f"{capability['adapter_id']} · {capability['capability_id']} · {target['receipt_schema_id']}",
-                )
-            self.result_choice.set_active(0)
-            self.destination_choice.set_active(0)
-            self.status.set_text("" if receipt["destinations"] else "Kein passender Output-Adapter verbunden.")
-        elif command == "preview":
+            self._show_options(receipt)
+        elif command in ("preview", "preview_plan_output"):
             self.preview = receipt
             self.review = receipt.get("review")
             self.delivery = None
@@ -131,8 +143,43 @@ class TaskOutputDialog(Gtk.Dialog):
             self._show_status()
         self._refresh()
 
+    def _show_options(self, receipt):
+        selection = self.result_choice.get_active_id()
+        self.options = receipt
+        drafts = self._plan_outputs()
+        self.result_choice.remove_all()
+        self.destination_choice.remove_all()
+        if drafts:
+            self.set_title(f"Plan {self.sequence} ausgeben")
+            self.result_label.set_text("Berichtsentwurf")
+            destinations = [draft["spec"] for draft in drafts]
+            for draft in drafts:
+                spec = draft["spec"]
+                self.result_choice.append(str(draft["sequence"]),
+                                          f"Schritt {spec['task_sequence']} · {spec['destination']['adapter_id']}")
+        else:
+            destinations = receipt["destinations"]
+            for version in receipt["result_versions"]:
+                self.result_choice.append(version, version)
+        for index, target in enumerate(destinations):
+            capability = target["destination"]
+            self.destination_choice.append(
+                str(index),
+                f"{capability['adapter_id']} · {capability['capability_id']} · {target['receipt_schema_id']}",
+            )
+        self.status.set_text("" if destinations else "Kein passender Output-Adapter verbunden.")
+        if selection is None or not self.result_choice.set_active_id(selection):
+            self.result_choice.set_active(0)
+        if not drafts:
+            self.destination_choice.set_active(0)
+
     def snapshot(self, runtime):
-        if self.review is None or self.pending:
+        if self.pending:
+            return
+        draft = self._selected_plan_output()
+        if draft and draft["state"] == "preparing":
+            self._send("task_output", "options", {"task_sequence": self.sequence})
+        if self.review is None:
             return
         if self.review["state"] == "pending":
             self._send("task_output", "inspect", {"request_version_id": self.review["request_version_id"]})
@@ -165,9 +212,10 @@ class TaskOutputDialog(Gtk.Dialog):
     def _refresh(self):
         idle = self.pending is None
         self.result_choice.set_sensitive(idle and bool(self.options))
-        self.destination_choice.set_sensitive(idle and bool(self.options))
-        self.preview_button.set_sensitive(idle and self.result_choice.get_active() >= 0
-                                          and self.destination_choice.get_active() >= 0)
+        self.destination_choice.set_sensitive(idle and bool(self.options) and not self._plan_outputs())
+        draft = self._selected_plan_output()
+        can_preview = self.result_choice.get_active() >= 0 and self.destination_choice.get_active() >= 0
+        self.preview_button.set_sensitive(idle and can_preview and (draft is None or draft["state"] == "ready"))
         can_decide = idle and self.preview is not None and self.review is None
         self.reason.set_sensitive(can_decide)
         for button in (self.approve_button, self.reject_button):

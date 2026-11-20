@@ -37,6 +37,49 @@ Vertrauensniveau. Bei Plänen sind abgeschlossene Schritte der aktuellen
 Generation auswählbar. Die Runtime prüft die Zuordnung. Der Core prüft den Zielvertrag.
 Die inhaltliche Prüfung übernimmt der Betreiber anhand der Vorschau.
 
+## Berichtsentwürfe aus Arbeitsplänen
+
+Verwende `routes[].plan.templates[].output`, um für eine Schrittvorlage
+ein Ziel und das Quittungsschema festzulegen. Der Host prüft den Zielvertrag
+beim Laden der Runtime-Konfiguration. Dieses Beispiel verwendet den lokalen
+Dateiadapter.
+
+```json
+{
+  "destination": {
+    "adapter_id": "example.file-output",
+    "capability_id": "report.write"
+  },
+  "receipt_schema_id": "arcs.delivery_receipt.file.v1",
+  "result_index": 0
+}
+```
+
+`result_index` ist optional und beginnt bei null. Der Standardwert wählt
+das erste Schrittresultat. Der Bericht enthält die Felder aus
+`export_fields` der Vorlage. Fehlt das ausgewählte Resultat oder ein
+Exportfeld, zeigt der Entwurf einen Fehler an. Die Runtime vermerkt die
+Entwürfe zusammen mit dem Abschluss des erfolgreichen Plans. Bei einer
+Neuplanung stammen sie aus der erfolgreichen Generation.
+
+Wähle im Kontrollpanel den abgeschlossenen Plan unter **Aufgaben → Alle
+Aufgaben** und öffne **Ausgeben …**. Wähle einen Berichtsentwurf und
+prüfe seinen Inhalt. **Zustellung freigeben** erfordert weiterhin eine
+Begründung. Der Zieladapter ist durch die Vorlage festgelegt.
+
+Im Monitor und in der CLI gibst du bei `options` die Sequenz des Plans an.
+Die Liste `plan_outputs` enthält die Sequenz und den Status jedes Entwurfs
+(`preparing`, `ready` oder `failed`). Für einen fertigen Entwurf lädt
+dieser Monitorbefehl die gespeicherte Vorschau.
+
+```json
+{"request_id":"plan-preview","control":{"kind":"task_output","command":{"command":"preview_plan_output","sequence":1}}}
+```
+
+Sende für `review` den vollständigen zurückgegebenen `target` zusammen
+mit den beiden Nachweisversionen. Die Runtime übernimmt die freigegebene
+Ausgabe in dieselbe Zustellwarteschlange wie eine einzeln erstellte Vorschau.
+
 ## Freigaben aus anderen Anwendungen übernehmen
 
 Der laufende Host stellt freigegebene Ausgabeaufträge über den Output-Manager

@@ -7,6 +7,7 @@ pub mod goal;
 mod job_failure;
 mod journal;
 pub mod output;
+pub mod plan_output;
 pub mod planning;
 pub mod queue;
 pub mod reasoner_selection;
@@ -190,6 +191,7 @@ impl TaskRuntime {
         }
         host.collect_controller_closures()?;
         host.poll_reconnections_at(now_unix_ms)?;
+        self.advance_plan_outputs(host)?;
         self.advance_task_output_reviews(host)?;
         self.advance_output_deliveries(host)?;
         self.live_clock = live_clock;

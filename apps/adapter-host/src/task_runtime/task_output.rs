@@ -12,7 +12,7 @@ use serde_json::{Value, json};
 
 use super::{
     TaskRuntime, config::invalid, dependencies::ParentResult, is_core_failure,
-    output::OutputCommand,
+    output::OutputCommand, plan_output::PlanOutputDraft,
 };
 use crate::{Host, HostError};
 
@@ -25,6 +25,8 @@ pub struct TaskOutputTarget {
     pub result_version_id: VersionId,
     pub destination: CapabilityRef,
     pub receipt_schema_id: SchemaId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plan_output_sequence: Option<u64>,
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -43,6 +45,7 @@ pub struct TaskOutputDecision {
 pub enum TaskOutputCommand {
     Options { task_sequence: u64 },
     Preview { target: TaskOutputTarget },
+    PreviewPlanOutput { sequence: u64 },
     Review { review: TaskOutputDecision },
     Inspect { request_version_id: VersionId },
 }
@@ -60,6 +63,8 @@ pub struct TaskOutputOptions {
     pub task_sequence: u64,
     pub result_versions: Vec<VersionId>,
     pub destinations: Vec<TaskOutputDestination>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub plan_outputs: Vec<PlanOutputDraft>,
 }
 
 #[derive(Debug, Serialize)]
@@ -116,6 +121,12 @@ impl TaskRuntime {
                 .preview_task_output(host, target)
                 .map(Box::new)
                 .map(TaskOutputResponse::Preview),
+            TaskOutputCommand::PreviewPlanOutput { sequence } => {
+                let draft = self.journal.plan_output(sequence)?;
+                self.preview_plan_output(host, draft)
+                    .map(Box::new)
+                    .map(TaskOutputResponse::Preview)
+            }
             TaskOutputCommand::Review { review } => self
                 .stage_task_output_review(host, review)
                 .map(TaskOutputResponse::Review),
@@ -132,6 +143,18 @@ impl TaskRuntime {
         host: &Host,
         task_sequence: u64,
     ) -> Result<TaskOutputOptions, HostError> {
+        if !(1..=i64::MAX as u64).contains(&task_sequence) {
+            return Err(invalid("invalid output source sequence"));
+        }
+        let plan_outputs = self.journal.plan_outputs(task_sequence)?;
+        if !plan_outputs.is_empty() {
+            return Ok(TaskOutputOptions {
+                task_sequence,
+                result_versions: vec![],
+                destinations: vec![],
+                plan_outputs,
+            });
+        }
         let result_versions = self.task_output_versions(host, task_sequence)?;
         let mut destinations = Vec::new();
         for destination in host.capabilities(AdapterRole::Output) {
@@ -157,6 +180,7 @@ impl TaskRuntime {
             task_sequence,
             result_versions,
             destinations,
+            plan_outputs,
         };
         if serde_json::to_vec(&options)
             .map_err(output_review_error)?
@@ -175,6 +199,15 @@ impl TaskRuntime {
         host: &mut Host,
         target: TaskOutputTarget,
     ) -> Result<TaskOutputPreview, HostError> {
+        if let Some(sequence) = target.plan_output_sequence {
+            let draft = self.journal.plan_output(sequence)?;
+            if draft.target()? != target {
+                return Err(invalid(
+                    "plan output target differs from the configured draft",
+                ));
+            }
+            return self.preview_plan_output(host, draft);
+        }
         if !self
             .task_output_versions(host, target.task_sequence)?
             .contains(&target.result_version_id)
@@ -189,6 +222,15 @@ impl TaskRuntime {
             target.task_sequence,
             &target.result_version_id,
         )?;
+        self.finish_task_output_preview(host, target, report)
+    }
+
+    pub(super) fn finish_task_output_preview(
+        &mut self,
+        host: &mut Host,
+        target: TaskOutputTarget,
+        report: Artifact,
+    ) -> Result<TaskOutputPreview, HostError> {
         let request = host.prepare_output(
             &target.destination,
             &report.version_id,
@@ -219,7 +261,7 @@ impl TaskRuntime {
         Ok(preview)
     }
 
-    fn task_output_versions(
+    pub(super) fn task_output_versions(
         &self,
         host: &Host,
         sequence: u64,

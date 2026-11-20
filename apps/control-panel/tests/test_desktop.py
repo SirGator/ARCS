@@ -210,6 +210,80 @@ class DesktopTests(unittest.TestCase):
         self.assertEqual(list((self.directory / 'reports-right').glob('*.json')), files)
         dialog.response(Gtk.ResponseType.CLOSE)
 
+    def test_plan_output_previews_only_the_configured_step_exports(self):
+        host = real_configuration(PROJECT_ROOT, self.directory, 'dynamic-plans')
+        source = PROJECT_ROOT / 'apps/adapter-host/config/dynamic-plans'
+        host_config = json.loads(host.read_text())
+        for adapter in host_config['adapters']:
+            for field in ('profile', 'grant_file'):
+                if adapter[field].startswith('../'):
+                    adapter[field] = str((source / adapter[field]).resolve())
+        fixtures = source.parent / 'multiple-adapters'
+        host_config['schemas'].extend(
+            str(PROJECT_ROOT / f'adapters/file-output/schemas/{name}.schema.json')
+            for name in ('report', 'receipt')
+        )
+        for side in ('left', 'right'):
+            profile = f'output-{side}.json'
+            grant = f'output-{side}-grant.json'
+            (self.directory / profile).write_text(json.dumps({
+                'adapter_id': f'multi.output.{side}', 'directory': f'plan-reports-{side}',
+            }))
+            host_config['adapters'].append({
+                'program': str(PROJECT_ROOT / 'target/debug/arcs-file-output'),
+                'profile': profile, 'grant_file': str(fixtures / grant),
+                'args': [{'path': f'state/plan-output-{side}.sqlite'}],
+            })
+        host.write_text(json.dumps(host_config))
+        path = self.directory / 'runtime.json'
+        runtime = json.loads(path.read_text())
+        runtime.update(journal='state/plan-output-runtime.sqlite', interval_ms=20)
+        destinations = {'solver': 'left', 'sum': 'right'}
+        for template in runtime['routes'][0]['plan']['templates']:
+            side = destinations.get(template['route']['id'])
+            if side is None:
+                continue
+            template['output'] = {
+                'destination': {'adapter_id': f'multi.output.{side}', 'capability_id': 'report.write'},
+                'receipt_schema_id': 'arcs.delivery_receipt.file.v1',
+            }
+        path.write_text(json.dumps(runtime))
+
+        self.window.select_configuration(Configuration(host, path))
+        self.window.show_page('tasks')
+        self.window.start_button.emit('clicked')
+        pump_until(lambda: (self.window.snapshot.get('runtime') or {}).get('ready_for_review') == 4)
+        page = self.window.queue_page
+        page.scope.set_active_id('all')
+        pump_until(lambda: page.page and page.page['scope'] == 'all' and 1 in page.tasks)
+        page.tree.get_selection().select_path(0)
+        self.assertTrue(page.output_button.get_sensitive())
+        page.output_button.emit('clicked')
+        dialog = page.output_dialog
+        pump_until(lambda: dialog.options and dialog.preview_button.get_sensitive())
+        self.assertFalse(dialog.destination_choice.get_sensitive())
+        self.assertEqual(len(dialog.options['plan_outputs']), 2)
+        dialog.preview_button.emit('clicked')
+        pump_until(lambda: dialog.preview is not None)
+        self.assertEqual(set(json.loads(dialog.preview['payload']['body'])), {'value'})
+        dialog.reason.set_text('Bericht des Summenschritts prüfen')
+        dialog.result_choice.set_active(1)
+        self.assertIsNone(dialog.preview)
+        self.assertFalse(dialog.approve_button.get_sensitive())
+        self.assertIn('multi.output.right', dialog.destination_choice.get_active_text())
+        dialog.preview_button.emit('clicked')
+        pump_until(lambda: dialog.preview is not None)
+        self.assertEqual(set(json.loads(dialog.preview['payload']['body'])), {'sum', 'count'})
+        self.assertEqual(list((self.directory / 'plan-reports-right').glob('*.json')), [])
+        dialog.reason.set_text('Den Summenbericht im rechten Archiv ablegen')
+        dialog.approve_button.emit('clicked')
+        pump_until(lambda: dialog.delivery and dialog.delivery['state'] == 'delivered')
+        files = list((self.directory / 'plan-reports-right').glob('*.json'))
+        self.assertEqual(len(files), 1)
+        self.assertEqual(json.loads(files[0].read_text())['payload'], dialog.preview['payload'])
+        self.assertEqual(list((self.directory / 'plan-reports-left').glob('*.json')), [])
+        dialog.response(Gtk.ResponseType.CLOSE)
+
     def test_goal_loop_completion_and_progress_are_displayed_from_real_backend(self):
         host=real_configuration(PROJECT_ROOT,self.directory,'goals')
         runtime=json.loads((self.directory/'runtime.json').read_text())

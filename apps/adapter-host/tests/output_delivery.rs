@@ -2,6 +2,8 @@
 mod monitoring;
 #[path = "support/parallel.rs"]
 mod parallel;
+#[path = "support/plans.rs"]
+mod plans;
 mod support;
 
 use std::path::PathBuf;
@@ -24,6 +26,7 @@ use arcs::verification::{
 use arcs_host::task_runtime::{RuntimeConfig, TaskRuntime, output::OutputCommand};
 use arcs_host::{Host, HostError};
 use monitoring::Monitor;
+use parallel as parallel_support;
 use serde_json::{Value, json};
 
 struct Fixture {
@@ -351,6 +354,146 @@ fn a_task_result_requires_exact_review_and_recovers_its_approval_after_queue_rol
     assert_eq!(file["payload"], first["payload"]);
     assert_eq!(f.count("output", "deliveries"), 1);
     monitor.stop();
+}
+
+#[test]
+fn a_successful_plan_revision_prepares_one_exact_report_after_checkpoint_rollback() {
+    let f = plans::fixture("fail", "normal");
+    let mut host_config = file_output_host(&f);
+    host_config["adapters"].as_array_mut().unwrap().push(json!({
+        "program":support::adapter_binary("arcs-file-output"),"profile":"output-profile.json",
+        "args":[{"path":"output.sqlite"}],"grant_file":"output-grant.json"
+    }));
+    f.write("host.json", host_config);
+    let mut config = f.read("runtime.json");
+    config["routes"][0]["budget"]["max_context_items"] = json!(4);
+    config["routes"][0]["plan"]["replanning"] = json!({"max_revisions":1});
+    config["routes"][0]["plan"]["max_total_runtime_ms"] = json!(100000);
+    config["routes"][0]["plan"]["templates"][0]["route"]["budget"]["max_context_items"] = json!(2);
+    config["routes"][0]["plan"]["templates"][1]["output"] = json!({
+        "destination":capability(),"receipt_schema_id":"arcs.delivery_receipt.file.v1"
+    });
+    f.write("runtime.json", config);
+    f.write(
+        "planner.json",
+        json!({
+            "proposal":{"steps":[{"id":"done","template":"b"},{"id":"fails","template":"a",
+                "dependencies":[{"step_id":"done","payload_fields":["value"]}]}]},
+            "revisions":{"1":{"steps":[{"id":"replacement","template":"b"}]}}
+        }),
+    );
+
+    let (mut host, mut runtime) = f.open();
+    let journal = rusqlite::Connection::open(f.directory.join("runtime.sqlite")).unwrap();
+    journal
+        .execute_batch(
+            "CREATE TRIGGER lose_draft BEFORE INSERT ON runtime_plan_outputs
+         BEGIN SELECT RAISE(ABORT, 'simulated draft insertion rollback'); END;",
+        )
+        .unwrap();
+    support::wait_for_interrupted_checkpoint(|| runtime.tick(&mut host));
+    assert_eq!(f.count("runtime", "runtime_plan_outputs"), 0);
+    let plan = runtime.plans_after(0, 1).unwrap().remove(0);
+    assert_eq!(
+        plan.state,
+        arcs_host::task_runtime::planning::PlanState::Running
+    );
+    let superseded = plan.steps.iter().find(|step| step.revision == 0).unwrap();
+    let replacement = plan.steps.iter().find(|step| step.revision == 1).unwrap();
+    assert_eq!(superseded.state, "ready_for_review");
+    assert_eq!(replacement.state, "ready_for_review");
+
+    journal
+        .execute_batch(
+            "DROP TRIGGER lose_draft;
+         CREATE TRIGGER lose_preview BEFORE UPDATE OF state ON runtime_plan_outputs
+         WHEN NEW.state='ready'
+         BEGIN SELECT RAISE(ABORT, 'simulated proof checkpoint rollback'); END;",
+        )
+        .unwrap();
+    support::wait_for_interrupted_checkpoint(|| runtime.tick(&mut host));
+    assert_eq!(f.count("runtime", "runtime_plan_outputs"), 1);
+    let requests = plans::artifacts(&host, "arcs.output_request.v1");
+    assert_eq!(requests.len(), 1);
+    let request = &requests[0].version_id;
+    let verification = host
+        .store()
+        .find_by_stream_key(&format!("verification:{}", request.0))
+        .unwrap()
+        .unwrap()
+        .version_id;
+    assert_eq!(f.count("output", "deliveries"), 0);
+    journal.execute_batch("DROP TRIGGER lose_preview").unwrap();
+    host.shutdown().unwrap();
+    drop((runtime, host, journal));
+
+    let mut monitor = Monitor::start(&f.directory);
+    let deadline = Instant::now() + Duration::from_secs(25);
+    let draft = loop {
+        let response = monitor.command(
+            "plan-output-options",
+            "task_output",
+            json!({"command":"options","task_sequence":1}),
+        );
+        assert_eq!(response["ok"], true, "{response}");
+        let drafts = response["receipt"]["plan_outputs"].as_array().unwrap();
+        assert_eq!(drafts.len(), 1);
+        if drafts[0]["state"] == "ready" {
+            break drafts[0].clone();
+        }
+        assert_eq!(drafts[0]["state"], "preparing", "{response}");
+        assert!(Instant::now() < deadline, "{response}");
+    };
+    assert_eq!(draft["spec"]["task_sequence"], replacement.sequence);
+    assert!(draft["spec"].get("export_fields").is_none());
+    assert_eq!(draft["request_version_id"], json!(request));
+    assert_eq!(draft["verification_version_id"], json!(verification));
+    let response = monitor.command(
+        "plan-output-preview",
+        "task_output",
+        json!({"command":"preview_plan_output","sequence":draft["sequence"]}),
+    );
+    assert_eq!(response["ok"], true, "{response}");
+    let preview = &response["receipt"];
+    assert_eq!(
+        preview["verification_version_id"],
+        draft["verification_version_id"]
+    );
+    let contents: Value =
+        serde_json::from_str(preview["payload"]["body"].as_str().unwrap()).unwrap();
+    assert_eq!(contents.as_object().unwrap().len(), 1, "{contents}");
+    assert!(contents["value"].is_number());
+    assert_eq!(f.count("output", "deliveries"), 0);
+
+    let review = json!({"command":"review","review":{
+        "target":preview["target"],"request_version_id":request,
+        "verification_version_id":preview["verification_version_id"],"operator_id":"local-operator",
+        "decision":"approved","reason":"Reviewed the configured plan report"
+    }});
+    let mut changed = review.clone();
+    changed["review"]["target"]["destination"]["capability_id"] = json!("other.write");
+    assert_eq!(
+        monitor.command("changed-plan-target", "task_output", changed)["ok"],
+        false
+    );
+    assert_eq!(f.count("output", "deliveries"), 0);
+    assert_eq!(
+        monitor.command("approved-plan-output", "task_output", review)["ok"],
+        true
+    );
+    monitor.until(|event| event["runtime"]["output_deliveries"][0]["state"] == "delivered");
+    let files = std::fs::read_dir(f.directory.join("reports"))
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert_eq!(files.len(), 1);
+    let file: Value = serde_json::from_slice(&std::fs::read(files[0].path()).unwrap()).unwrap();
+    assert_eq!(file["payload"], preview["payload"]);
+    assert_eq!(f.count("output", "deliveries"), 1);
+    monitor.stop();
+    let (mut host, _) = f.open();
+    assert_eq!(plans::artifacts(&host, "arcs.output_request.v1").len(), 1);
+    host.shutdown().unwrap();
 }
 
 #[test]

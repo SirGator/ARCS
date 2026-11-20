@@ -90,6 +90,45 @@ impl PlanningConfig {
                 ));
             }
             validate_route_contract(host, route, manifests)?;
+            if let Some(output) = &template.output {
+                let limit = if route.goal.is_some() {
+                    1
+                } else {
+                    route
+                        .permitted_reasoner_choices()
+                        .iter()
+                        .map(|choice| choice.budget.max_candidates)
+                        .max()
+                        .unwrap_or(0)
+                };
+                if output.result_index >= limit {
+                    return Err(invalid(
+                        "plan output result_index exceeds the template result budget",
+                    ));
+                }
+                arcs::output::validate_output_contract(
+                    host.registry(),
+                    host.schemas(),
+                    &output.destination,
+                    &SchemaId(arcs::output::TASK_REPORT_SCHEMA.into()),
+                    &output.receipt_schema_id,
+                )
+                .map_err(|source| HostError::Output {
+                    adapter: output.destination.adapter_id.clone(),
+                    source,
+                })?;
+                let (registered, _) = host
+                    .registry()
+                    .authorized_capability(
+                        &output.destination.adapter_id,
+                        &output.destination.capability_id,
+                    )
+                    .map_err(HostError::Registration)?;
+                manifests.insert(
+                    output.destination.adapter_id.0.clone(),
+                    registered.manifest().clone(),
+                );
+            }
         }
         Ok(())
     }

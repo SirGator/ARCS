@@ -4,6 +4,7 @@ mod deadlines;
 mod dependencies;
 pub(super) mod dispatch;
 mod output;
+mod plan_output;
 mod planning;
 mod queries;
 mod queue;
@@ -186,6 +187,7 @@ impl Journal {
         recurrence::initialize(&connection)?;
         output::initialize(&connection)?;
         task_output::initialize(&connection)?;
+        plan_output::initialize(&connection)?;
         Ok(Self {
             connection,
             path,

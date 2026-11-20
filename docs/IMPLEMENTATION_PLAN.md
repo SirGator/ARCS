@@ -473,6 +473,15 @@
 > die Entscheidung vor der Übergabe und übernimmt bereits gespeicherte
 > Freigaben nach einem Neustart.
 
+> Zweiundvierzigster Schritt gemäß v3 §4 Output, §7.2 PAR-10/PAR-11 und
+> §10.1 SEC-03/SEC-04/SEC-09. Betreiber können für eine Planvorlage einen
+> Zieladapter und eine Ergebnisposition festlegen. Die Runtime speichert
+> die Berichtsvormerkungen beim Abschluss der erfolgreichen Plangeneration
+> und bereitet sie in begrenzten Gruppen vor. Der Core bindet die
+> veröffentlichten Exportfelder an das konkrete Ergebnis und die genaue
+> Planversion. Desktop und CLI verwenden die vorhandene Freigabe und
+> Zustellwarteschlange.
+
 **Leitbild:** ARCS ist ein universeller Agent. Es soll sich einfach bedienen lassen, beliebige kompatible Systeme verbinden, eigenständig Probleme lösen und langfristige Aufgaben über Monate verfolgen.
 
 ## 1. Verbindliche Architekturregeln
