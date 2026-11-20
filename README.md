@@ -58,7 +58,8 @@ dokumentiert Slice 35. Der [Bericht zur Fehlerisolierung bei Aktionen](docs/ZWIS
 dokumentiert Slice 36. Der [Bericht zum nebenläufigen Ereigniseingang](docs/ZWISCHENBERICHT_2026-11-20_INGRESS.md)
 dokumentiert Slice 37. Der [Bericht zu nicht blockierenden Standardabfragen](docs/ZWISCHENBERICHT_2026-11-20_REQUEST_DEFAULT.md)
 dokumentiert Slice 38. Der [Bericht zu nicht blockierendem Standard-Reasoning](docs/ZWISCHENBERICHT_2026-11-20_REASONING_DEFAULT.md)
-dokumentiert Slice 39. Die Berichte vom
+dokumentiert Slice 39. Der [Bericht zur dauerhaften Ausgabewarteschlange](docs/ZWISCHENBERICHT_2026-11-20_OUTPUT_QUEUE.md)
+dokumentiert Slice 40. Die Berichte vom
 [17. November](docs/ZWISCHENBERICHT_2026-11-17.md) und
 [16. November](docs/ZWISCHENBERICHT_2026-11-16.md) dokumentieren frühere
 Umsetzungsstände, Prüfergebnisse und offene Grenzen.
@@ -438,7 +439,7 @@ Observation → Belief Update → Goal → Memory/Skill Retrieval
 | Mehrere Installationen aller sieben Rollen und Anschlusskatalog | `Host::adapter_catalog`, `Host::capabilities` und CLI `--list-adapters`; Prozess- und Neustartnachweis |
 | Gemeinsames Adapter-SDK für Input, Observe, Request, Transform, Reason, Act und Output | Implementiert, einschließlich neutralem Reasoning-V2-Port |
 | Transform mit geprüften Ein-/Ausgaben, Provenienz und persistentem Replay | Implementiert, allgemeiner Zahlen-Normalisierer als Beispiel |
-| Output mit gebundenem Auftrag, Verification, Approval und Beleg | Implementiert, Dateiausgabe mit Journal und Recovery |
+| Output mit gebundenem Auftrag, Verification, Approval und Beleg | Dateiausgabe mit Journal, Wiederanlauf und [Ausgabewarteschlange](apps/adapter-host/examples/output-delivery-queue.md) für den laufenden Host |
 | Mehrstufige Observe → Transform → Output-Pipelines | Allgemeiner Host-Runner mit gebundener Definition, Checkpoints und Cursor; Freigabepolicy in der Anwendung |
 | Externer Raum- und Drohnennachweis | Im getrennten Projekt `../drone-sim`: Bewegung, Kollisionsprüfung und freigegebene Action mit Wirkungsprüfung |
 | Referenzierte Binärdaten und explizite Reasoning-V2-Eingaben | Begrenzter Abruf und Empfang unter getrennten Grants; generischer Transport und externer Pixel-Suchnachweis |

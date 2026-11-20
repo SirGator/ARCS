@@ -65,6 +65,7 @@ impl MonitorControl {
             "goal_review_preview":true,
             "resource_release_review":true,
             "resource_release_queue":true,
+            "output_delivery_queue":true,
             "task_queue":{"max_page_size":MAX_TASK_QUEUE_PAGE,"cancel":true}
         })
     }

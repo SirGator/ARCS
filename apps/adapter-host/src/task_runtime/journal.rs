@@ -3,6 +3,7 @@ pub(super) use control::ControlSession;
 mod deadlines;
 mod dependencies;
 pub(super) mod dispatch;
+mod output;
 mod planning;
 mod queries;
 mod queue;
@@ -182,6 +183,7 @@ impl Journal {
         dispatch::initialize(&connection, config)?;
         deadlines::initialize(&connection)?;
         recurrence::initialize(&connection)?;
+        output::initialize(&connection)?;
         Ok(Self {
             connection,
             path,

@@ -2,6 +2,7 @@ mod controller_close;
 mod execution;
 mod ingress;
 mod input;
+mod output;
 mod reason;
 mod reconnect;
 mod request;
@@ -118,6 +119,7 @@ pub struct Host {
     request_jobs: HashMap<String, request::PendingRequest>,
     retiring_request_jobs: Vec<request::RetiringRequest>,
     act_workers: HashMap<AdapterId, execution::ExecutionWorker>,
+    output_workers: HashMap<String, output::OutputWorker>,
     controller_workers: RefCell<controller_close::ControllerWorkers>,
     ingress: ingress::IngressDialogs,
     unavailable_adapters: HashSet<AdapterId>,
@@ -300,18 +302,12 @@ impl Host {
         input: &VersionId,
         result_schema: &SchemaId,
     ) -> Result<Artifact, HostError> {
-        arcs::output::OutputService::new(
-            &self.registry,
-            &self.schemas,
-            &self.store,
-            &mut self.ids,
-            &SystemClock,
-        )
-        .prepare(capability, input, result_schema)
-        .map_err(|source| HostError::Output {
-            adapter: capability.adapter_id.clone(),
-            source,
-        })
+        self.output_service()
+            .prepare(capability, input, result_schema)
+            .map_err(|source| HostError::Output {
+                adapter: capability.adapter_id.clone(),
+                source,
+            })
     }
 
     pub fn deliver_output(
@@ -321,23 +317,14 @@ impl Host {
         approval: &VersionId,
     ) -> Result<Artifact, HostError> {
         self.ensure_adapter_available(adapter_id)?;
-        let adapter = self
-            .adapters
-            .iter()
-            .find(|adapter| adapter.config.grant.adapter_id == *adapter_id)
-            .ok_or_else(|| invalid(format!("unknown adapter {}", adapter_id.0)))?;
-        arcs::output::OutputService::new(
-            &self.registry,
-            &self.schemas,
-            &self.store,
-            &mut self.ids,
-            &SystemClock,
-        )
-        .deliver(adapter.endpoint.as_ref(), request, approval)
-        .map_err(|source| HostError::Output {
-            adapter: adapter_id.clone(),
-            source,
-        })
+        let endpoint = self.output_endpoint(adapter_id)?;
+        let _session_lock = self.lock_output_session(adapter_id)?;
+        self.output_service()
+            .deliver(endpoint.as_ref(), request, approval)
+            .map_err(|source| HostError::Output {
+                adapter: adapter_id.clone(),
+                source,
+            })
     }
 
     /// Kopiert referenzierte Daten unter den aktuellen Grants. Schreibt keine
@@ -475,6 +462,7 @@ impl Host {
             request_jobs: HashMap::new(),
             retiring_request_jobs: Vec::new(),
             act_workers: HashMap::new(),
+            output_workers: HashMap::new(),
             controller_workers: RefCell::default(),
             ingress: ingress::IngressDialogs::default(),
             unavailable_adapters: HashSet::new(),
@@ -883,6 +871,7 @@ impl Host {
         cancelled.extend(self.cancel_request_jobs());
         cancelled.extend(self.cancel_controller_closures());
         cancelled.extend(self.cancel_execution_workers());
+        cancelled.extend(self.cancel_output_workers());
         cancelled.extend(self.stop_ingress());
         let mut first_error = reconnect_error;
         for adapter in &mut self.adapters {

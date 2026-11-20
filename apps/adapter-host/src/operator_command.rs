@@ -3,6 +3,7 @@ use arcs::approval::ApprovalDecision;
 use arcs::core::{Actor, ActorType, VersionId};
 use serde::{Deserialize, Serialize};
 
+use crate::task_runtime::output::{OutputCommand, OutputDelivery};
 use crate::task_runtime::queue::{TaskQueuePage, TaskQueueQuery};
 use crate::task_runtime::scheduler::{SeriesControlCommand, SeriesControlReceipt};
 use crate::task_runtime::suspension::{TaskControlCommand, TaskControlReceipt};
@@ -60,6 +61,7 @@ pub enum OperatorCommand {
     Series(SeriesControlCommand),
     Plan(PlanCommand),
     Goal(GoalCommand),
+    Output(OutputCommand),
 }
 
 #[derive(Serialize)]
@@ -68,6 +70,7 @@ pub enum CommandReceipt {
     Queue(TaskQueuePage),
     Task(TaskControlReceipt),
     Series(SeriesControlReceipt),
+    Output(OutputDelivery),
     GoalReview(GoalReview),
     ResourceEvidenceReview(ResourceEvidenceReview),
     ResourceRelease {
@@ -113,6 +116,9 @@ impl OperatorCommand {
                 runtime.cancel_plan(host, sequence, reason).map(|()| None)
             }
             Self::Goal(command) => command.apply(runtime, host, live),
+            Self::Output(command) => runtime
+                .control_output(host, command)
+                .map(|receipt| Some(CommandReceipt::Output(receipt))),
         }
     }
 }

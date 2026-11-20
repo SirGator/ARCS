@@ -6,6 +6,7 @@ pub mod dependencies;
 pub mod goal;
 mod job_failure;
 mod journal;
+pub mod output;
 pub mod planning;
 pub mod queue;
 pub mod reasoner_selection;
@@ -87,6 +88,8 @@ pub struct RuntimeReport {
     pub ticks: u64,
     pub pending_jobs: usize,
     pub latest_task_sequence: u64,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub output_deliveries: Vec<output::OutputDelivery>,
     pub ready_for_review: u64,
     pub failed_jobs: u64,
     pub cancelled_jobs: u64,
@@ -186,6 +189,7 @@ impl TaskRuntime {
         }
         host.collect_controller_closures()?;
         host.poll_reconnections_at(now_unix_ms)?;
+        self.advance_output_deliveries(host)?;
         self.live_clock = live_clock;
         let has_deadlines = self.config.routes.iter().any(|route| {
             route.max_lifetime_ms.is_some()
@@ -452,6 +456,7 @@ impl TaskRuntime {
             ticks,
             pending_jobs: self.journal.pending()?,
             latest_task_sequence: Journal::latest_task_sequence(&self.journal.connection)?,
+            output_deliveries: self.journal.recent_output_deliveries()?,
             ready_for_review: count("ready_for_review")?,
             failed_jobs: count("failed")?,
             cancelled_jobs: count("cancelled")?,

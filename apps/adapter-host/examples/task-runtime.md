@@ -203,6 +203,9 @@ ihre Betreiber. Adapter haben ihre eigenen Protokollkanäle. Die CLI ohne
 
 ## Konfiguration und Grenzen
 
+Freigegebene Ausgaben werden über den Monitor oder `--output-command` zur
+Zustellung aufgenommen. [Ausgabewarteschlange](output-delivery-queue.md)
+
 Die Runtime-Konfiguration ist separat von der Anschlusskonfiguration des Hosts.
 `journal` wird relativ zur Runtime-Datei aufgelöst. Relative Hostpfade bleiben
 relativ zur Hostdatei; die CLI-Option `--stop-file` bezieht sich auf das aktuelle

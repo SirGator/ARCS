@@ -6,12 +6,13 @@ use arcs_host::Host;
 use arcs_host::memory::MemoryCommand;
 use arcs_host::monitor::MonitorControl;
 use arcs_host::operator_command::{CommandReceipt, GoalCommand, OperatorCommand, PlanCommand};
+use arcs_host::task_runtime::output::OutputCommand;
 use arcs_host::task_runtime::scheduler::SeriesControlCommand;
 use arcs_host::task_runtime::suspension::TaskControlCommand;
 use arcs_host::task_runtime::{RuntimeConfig, TaskRuntime};
 use serde::Deserialize;
 
-const USAGE: &str = "usage: arcs-host --config <host.json> [--list-adapters | --find-capabilities <query.json> | --reasoning-attempts <query.json> | --memory-command <command.json> | [--monitor --stop-file <path> [--control-stdin]] [--runtime <runtime.json>] [--ticks <count>] [--stop-file <path>] | --runtime <runtime.json> [--goal-command <command.json> | --plan-command <command.json> | --task-command <command.json> | --series-command <command.json>]]";
+const USAGE: &str = "usage: arcs-host --config <host.json> [--list-adapters | --find-capabilities <query.json> | --reasoning-attempts <query.json> | --memory-command <command.json> | [--monitor --stop-file <path> [--control-stdin]] [--runtime <runtime.json>] [--ticks <count>] [--stop-file <path>] | --runtime <runtime.json> [--goal-command <command.json> | --plan-command <command.json> | --task-command <command.json> | --series-command <command.json> | --output-command <command.json>]]";
 
 fn read_control_command<T: serde::de::DeserializeOwned>(
     path: PathBuf,
@@ -73,6 +74,7 @@ fn run() -> Result<(), String> {
     let mut plan_command = None;
     let mut task_command = None;
     let mut series_command = None;
+    let mut output_command = None;
     let mut capability_query = None;
     let mut attempt_query = None;
     let mut memory_command = None;
@@ -112,6 +114,8 @@ fn run() -> Result<(), String> {
             task_command = Some(PathBuf::from(value));
         } else if argument == "--series-command" && series_command.is_none() {
             series_command = Some(PathBuf::from(value));
+        } else if argument == "--output-command" && output_command.is_none() {
+            output_command = Some(PathBuf::from(value));
         } else if argument == "--find-capabilities" && capability_query.is_none() {
             capability_query = Some(PathBuf::from(value));
         } else if argument == "--reasoning-attempts" && attempt_query.is_none() {
@@ -126,10 +130,16 @@ fn run() -> Result<(), String> {
     if control_stdin && (!monitor || runtime.is_none()) {
         return Err(USAGE.into());
     }
-    let runtime_commands = [&goal_command, &plan_command, &task_command, &series_command]
-        .into_iter()
-        .filter(|command| command.is_some())
-        .count();
+    let runtime_commands = [
+        &goal_command,
+        &plan_command,
+        &task_command,
+        &series_command,
+        &output_command,
+    ]
+    .into_iter()
+    .filter(|command| command.is_some())
+    .count();
     if memory_command.is_some()
         && (capability_query.is_some()
             || attempt_query.is_some()
@@ -244,6 +254,9 @@ fn run() -> Result<(), String> {
             Ok(command)
         })
         .transpose()?;
+    let output_command: Option<OutputCommand> = output_command
+        .map(|path| read_control_command(path, "output"))
+        .transpose()?;
     if runtime.is_none() && !monitor && (ticks.is_some() || stop_file.is_some()) {
         return Err(USAGE.into());
     }
@@ -305,7 +318,8 @@ fn run() -> Result<(), String> {
             .map(OperatorCommand::Task)
             .or_else(|| series_command.map(OperatorCommand::Series))
             .or_else(|| plan_command.map(OperatorCommand::Plan))
-            .or_else(|| goal_command.map(OperatorCommand::Goal));
+            .or_else(|| goal_command.map(OperatorCommand::Goal))
+            .or_else(|| output_command.map(OperatorCommand::Output));
         let (report, receipt) = if let Some(command) = command {
             let receipt = command
                 .apply(&mut runtime, &mut host)
@@ -339,6 +353,10 @@ fn run() -> Result<(), String> {
                 Some(CommandReceipt::Series(receipt)) => {
                     value["series_control"] =
                         serde_json::to_value(receipt).expect("series control receipt serialization")
+                }
+                Some(CommandReceipt::Output(delivery)) => {
+                    value["output_delivery"] =
+                        serde_json::to_value(delivery).expect("output delivery serialization");
                 }
                 Some(CommandReceipt::GoalReview(review)) => {
                     value["goal_review"] =

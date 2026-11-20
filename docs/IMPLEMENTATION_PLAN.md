@@ -458,6 +458,13 @@
 > beim Wiederanlauf übernommen. Ein unterbrochener Ergebnis-Commit lässt
 > denselben Dispatch wiederaufnehmbar. Neuplanung nutzt dieselben Regeln.
 
+> Vierzigster Schritt gemäß v3 §7.2 PAR-01/PAR-02/PAR-04/PAR-08/PAR-10/PAR-11
+> und §11 SEC-03. Die Runtime übernimmt bereits geprüfte und freigegebene
+> Ausgaben per Monitor oder CLI in ihr Journal. Begrenzte Worker teilen sich
+> die Adapterzulassung mit den übrigen Managern. Der Core speichert Dispatch
+> und Quittung unter einer stabilen Identität. Nach einem Neustart setzt die
+> Runtime die Zustellung fort oder übernimmt die vorhandene Quittung.
+
 **Leitbild:** ARCS ist ein universeller Agent. Es soll sich einfach bedienen lassen, beliebige kompatible Systeme verbinden, eigenständig Probleme lösen und langfristige Aufgaben über Monate verfolgen.
 
 ## 1. Verbindliche Architekturregeln
