@@ -12,6 +12,10 @@ pub enum ExecutionError {
     Serialization(serde_json::Error),
     AdapterCall(AdapterCallError),
     Invocation(InvocationError),
+    RecordedFailure {
+        invocation_id: String,
+        detail: String,
+    },
     MissingAction(VersionId),
     NotActionArtifact,
     UntrustedActionArtifact,

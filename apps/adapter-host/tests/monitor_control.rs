@@ -60,10 +60,10 @@ impl Monitor {
                 .checked_duration_since(Instant::now())
                 .expect("monitor event deadline elapsed");
             let event = self.events.recv_timeout(budget).unwrap();
-            assert_ne!(event["event"], "error", "{event}");
             if condition(&event) {
                 return event;
             }
+            assert_ne!(event["event"], "error", "{event}");
         }
     }
 
@@ -551,7 +551,7 @@ fn a_live_controller_release_keeps_independent_work_running_and_resumes_after_re
         false
     );
 
-    enqueue_independent_work(&background);
+    enqueue_independent_work(&background, "background");
     let running = monitor.until(|event| event["runtime"]["ready_for_review"] == 1);
     assert_eq!(running["resource_reservations"][0]["state"], "held");
     assert_eq!(
@@ -603,8 +603,8 @@ fn a_live_controller_release_keeps_independent_work_running_and_resumes_after_re
 fn an_act_reply_can_be_delayed_across_restart_while_independent_work_completes() {
     let f = goals::Fixture::new();
     let background = add_independent_route(&f);
-    let (monitor, action) = dispatch_with_held_reply(&f);
-    enqueue_independent_work(&background);
+    let (monitor, action) = dispatch_with_held_reply(&f, "execute_fenced");
+    enqueue_independent_work(&background, "background");
     let running = monitor.until(|event| event["runtime"]["ready_for_review"] == 1);
     assert_eq!(running["execution_workers"][0], action);
     assert_eq!(running["runtime"]["goals"][0]["state"], "executing");
@@ -655,7 +655,7 @@ fn an_act_reply_can_be_delayed_across_restart_while_independent_work_completes()
 #[test]
 fn a_cancelled_goal_keeps_its_reservation_and_audits_the_delayed_act_reply() {
     let f = goals::Fixture::new();
-    let (mut monitor, action) = dispatch_with_held_reply(&f);
+    let (mut monitor, action) = dispatch_with_held_reply(&f, "execute_fenced");
     let cancelled = monitor.command(
         "cancel-during-act",
         "goal",
@@ -690,9 +690,116 @@ fn a_cancelled_goal_keeps_its_reservation_and_audits_the_delayed_act_reply() {
     monitor.stop();
 }
 
-fn dispatch_with_held_reply(f: &goals::Fixture) -> (Monitor, Value) {
+#[test]
+fn a_failed_act_retires_only_its_goal_in_the_default_scheduler() {
+    let f = goals::Fixture::new();
+    let background = add_independent_route(&f);
+    let (mut monitor, action) = dispatch_with_held_reply(&f, "fail_execute_fenced");
+    std::fs::write(f.directory.join("act.release"), "continue").unwrap();
+    let failed = monitor.until(|event| event["runtime"]["failed_jobs"] == 1);
+    assert_failed_act(&f, &action, &failed);
+    let queue = monitor.command("failed-goal", "queue", json!({"limit":4,"scope":"all"}));
+    assert_eq!(queue["receipt"]["tasks"][0]["state"], "failed");
+    assert_eq!(queue["receipt"]["tasks"][0]["can_control"], false);
+
+    enqueue_independent_work(&background, "after-failure");
+    let continued = monitor.until(|event| event["runtime"]["ready_for_review"] == 1);
+    assert_eq!(continued["runtime"]["failed_jobs"], 1);
+    assert_eq!(continued["runtime"]["capacity_used"], 0);
+    monitor.stop();
+
+    std::fs::remove_file(f.directory.join("monitor.stop")).unwrap();
+    std::fs::remove_file(f.directory.join("act.entered")).unwrap();
+    let monitor = Monitor::start(&f.directory);
+    enqueue_independent_work(&background, "after-restart");
+    let restarted = monitor.until(|event| event["runtime"]["ready_for_review"] == 2);
+    assert_failed_act(&f, &action, &restarted);
+    assert!(!f.directory.join("act.entered").exists());
+    monitor.stop();
+}
+
+#[test]
+fn a_lost_task_failure_checkpoint_recovers_from_the_core_without_resending_act() {
+    let f = goals::Fixture::new();
+    let (mut monitor, action) = dispatch_with_held_reply(&f, "fail_execute_fenced");
+    let journal = f.db("runtime");
+    journal
+        .execute_batch(
+            "CREATE TRIGGER failed_goal_checkpoint BEFORE UPDATE OF state ON runtime_jobs
+        WHEN NEW.state='failed' BEGIN SELECT RAISE(ABORT,'failed goal checkpoint'); END;",
+        )
+        .unwrap();
+    std::fs::write(f.directory.join("act.release"), "continue").unwrap();
+    let error = monitor.until(|event| event["event"] == "error");
+    assert!(
+        error["message"]
+            .as_str()
+            .unwrap()
+            .contains("failed goal checkpoint"),
+        "{error}"
+    );
+    assert!(!monitor.child.wait().unwrap().success());
+    let states: (String, String) = journal
+        .query_row(
+            "SELECT state,json_extract(goal_json,'$.state') FROM runtime_jobs WHERE sequence=?1",
+            [action["sequence"].as_i64().unwrap()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(states, ("running".into(), "executing".into()));
+    journal
+        .execute_batch("DROP TRIGGER failed_goal_checkpoint")
+        .unwrap();
+    std::fs::remove_file(f.directory.join("act.entered")).unwrap();
+
+    let monitor = Monitor::start(&f.directory);
+    let reconciled = monitor.until(|event| event["runtime"]["failed_jobs"] == 1);
+    assert_failed_act(&f, &action, &reconciled);
+    assert!(
+        reconciled["runtime"]["goals"][0]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("RecordedFailure")
+    );
+    assert!(!f.directory.join("act.entered").exists());
+    monitor.stop();
+}
+
+fn assert_failed_act(f: &goals::Fixture, action: &Value, snapshot: &Value) {
+    let runtime = &snapshot["runtime"];
+    assert_eq!(runtime["goals"][0]["state"], "failed");
+    assert!(
+        runtime["goals"][0]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("simulated reply lost")
+    );
+    assert!(runtime["goals"][0]["execution"].is_null());
+    assert_eq!(runtime["capacity_used"], 0);
+    assert_eq!(runtime["pending_jobs"], 0);
+    assert_eq!(snapshot["resource_reservations"][0]["state"], "held");
+    assert_eq!(snapshot["resource_release_reviews"][0]["state"], "failed");
+    let id = action["invocation_id"].as_str().unwrap();
+    let core = arcs::store::SqliteArtifactStore::open(f.directory.join("core.sqlite")).unwrap();
+    let schemas = arcs::core::SchemaRegistry::new();
+    let state = arcs::runtime::InvocationService::new(&core, &schemas, &arcs::core::SystemClock)
+        .lookup(id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(state.status, arcs::runtime::InvocationStatus::Failed);
+    assert!(state.retryable);
+    let actuations: i64 = f
+        .db("fan")
+        .query_row("SELECT actuation_count FROM fan_state", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(actuations, 1);
+}
+
+fn dispatch_with_held_reply(f: &goals::Fixture, response: &str) -> (Monitor, Value) {
     f.manual();
-    gate_fan(f, "execute_fenced");
+    gate_fan(f, response);
     let mut config = f.read("runtime.json");
     config["interval_ms"] = json!(10);
     config["routes"][0]["goal"]["exclusive_resources"] = json!(["device.fan-01"]);
@@ -748,10 +855,10 @@ fn assert_fan_dispatched_once(f: &goals::Fixture, action: &Value) {
     assert_eq!(committed, 1);
 }
 
-fn enqueue_independent_work(background: &parallel::Fixture) {
+fn enqueue_independent_work(background: &parallel::Fixture, id: &str) {
     background.write(
         "late.json",
-        json!({"id":"background","subject":"background","reference":"task:background",
+        json!({"id":id,"subject":id,"reference":format!("task:{id}"),
         "payload":{"values":[2,4],"target":3}}),
     );
     let queued = Command::new(support::adapter_binary("arcs-json-input"))
@@ -790,8 +897,13 @@ try:
         reply = peer.stdout.readline()
         if not reply:
             break
-        if target == message["type"] == "execute_fenced":
+        if message["type"] == "execute_fenced" and target in ("execute_fenced", "fail_execute_fenced"):
             gate("act", message["invocation"]["invocation_id"])
+            if target == "fail_execute_fenced":
+                envelope = json.loads(reply)
+                envelope["message"] = {"type":"error", "code":"unavailable",
+                                       "message":"simulated reply lost", "retryable":True}
+                reply = (json.dumps(envelope) + "\n").encode()
         sys.stdout.buffer.write(reply)
         sys.stdout.buffer.flush()
 finally:

@@ -2,7 +2,7 @@ use super::*;
 
 fn setup() -> Connection {
     let connection = Connection::open_in_memory().unwrap();
-    connection.execute_batch("CREATE TABLE runtime_jobs(sequence INTEGER PRIMARY KEY,route_id TEXT,input_version TEXT,state TEXT);
+    connection.execute_batch("CREATE TABLE runtime_jobs(sequence INTEGER PRIMARY KEY,route_id TEXT,input_version TEXT,state TEXT,goal_json TEXT);
         CREATE TABLE runtime_plan_steps(sequence INTEGER,parent_sequence INTEGER,template_id TEXT);
         CREATE TABLE runtime_job_schedules(sequence INTEGER,released_at INTEGER);
         CREATE TABLE runtime_job_joins(sequence INTEGER,state TEXT);").unwrap();
@@ -20,7 +20,7 @@ fn setup() -> Connection {
 fn add(connection: &Connection, sequence: i64, priority: u8, state: &str) {
     connection
         .execute(
-            "INSERT INTO runtime_jobs VALUES(?1,'route','input',?2)",
+            "INSERT INTO runtime_jobs(sequence,route_id,input_version,state) VALUES(?1,'route','input',?2)",
             params![sequence, state],
         )
         .unwrap();

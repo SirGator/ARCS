@@ -25,7 +25,11 @@ use arcs::input::{InputMessage, InputService};
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use serde_json::{Value, json};
 
-use super::{CompletedTask, RuntimeConfig, config::invalid, goal::GoalTask};
+use super::{
+    CompletedTask, RuntimeConfig,
+    config::invalid,
+    goal::{GoalState, GoalTask},
+};
 use crate::config::RUNTIME_ID;
 use crate::{Host, HostError};
 
@@ -46,16 +50,20 @@ pub(super) struct Journal {
     pub ids: arcs::core::SequenceIdGenerator,
     _lock: File,
 }
-pub(super) const ACTIVE: &str = "state IN ('pending','running','failed','awaiting_approval')";
-pub(super) fn active(include_failed: bool) -> &'static str {
+/// A failed goal checkpoint records a terminal decision. Legacy synchronous
+/// failures may leave the goal at its resumable step.
+pub(super) fn active(job: &str, include_failed: bool) -> String {
+    let states = format!("{job}.state IN ('pending','running','awaiting_approval')");
     if include_failed {
-        ACTIVE
+        format!(
+            "({states} OR ({job}.state='failed' AND json_extract({job}.goal_json,'$.state') IS NOT 'failed'))"
+        )
     } else {
-        "state IN ('pending','running','awaiting_approval')"
+        states
     }
 }
 pub(super) fn runnable(job: &str, include_failed: bool) -> String {
-    let states = active(include_failed).replace("state", &format!("{job}.state"));
+    let states = active(job, include_failed);
     if !include_failed {
         return states;
     }
@@ -229,15 +237,38 @@ impl Journal {
             .map_err(db)?;
         Ok(())
     }
-    pub fn fail(&self, sequence: u64, error: &HostError) -> Result<(), HostError> {
+    pub fn fail(&self, sequence: u64, error: &HostError, retry: bool) -> Result<(), HostError> {
         let transaction = self.connection.unchecked_transaction().map_err(db)?;
         let detail = error.to_string().chars().take(2000).collect::<String>();
-        transaction
-            .execute(
-                "UPDATE runtime_jobs SET state='failed',error=?2 WHERE sequence=?1",
-                params![sequence.min(i64::MAX as u64) as i64, detail],
-            )
-            .map_err(db)?;
+        let goal = if retry {
+            None
+        } else {
+            read_goal(&transaction, sequence)?
+                .map(|mut goal| {
+                    if goal.sequence != sequence {
+                        return Err(invalid("goal checkpoint identity changed"));
+                    }
+                    goal.state = GoalState::Failed;
+                    goal.detail.clone_from(&detail);
+                    serde_json::to_string(&goal).map_err(|error| invalid(error.to_string()))
+                })
+                .transpose()?
+        };
+        if let Some(goal) = goal {
+            transaction
+                .execute(
+                    "UPDATE runtime_jobs SET state='failed',error=?2,goal_json=?3 WHERE sequence=?1",
+                    params![sequence as i64, detail, goal],
+                )
+                .map_err(db)?;
+        } else {
+            transaction
+                .execute(
+                    "UPDATE runtime_jobs SET state='failed',error=?2 WHERE sequence=?1",
+                    params![sequence as i64, detail],
+                )
+                .map_err(db)?;
+        }
         let changed=transaction.execute("UPDATE runtime_plan_replanning SET state='rejected' WHERE parent_sequence=?1 AND state='planning'",[sequence.min(i64::MAX as u64) as i64]).map_err(db)?;
         let held:bool=transaction.query_row("SELECT EXISTS(SELECT 1 FROM runtime_plans p JOIN runtime_job_reservations r ON r.sequence=p.sequence WHERE p.sequence=?1 AND r.units>1)",[sequence.min(i64::MAX as u64) as i64],|r|r.get(0)).map_err(db)?;
         if changed > 0 || held {
@@ -332,7 +363,10 @@ fn bind_definition(
 // Goal checkpoint serialization belongs to the journal, not the goal engine.
 impl Journal {
     pub(in crate::task_runtime) fn goals_for_report(&self) -> Result<Vec<GoalTask>, HostError> {
-        let mut query = self.connection.prepare("SELECT goal_json FROM runtime_jobs WHERE goal_json IS NOT NULL ORDER BY (state IN ('pending','running','failed','awaiting_approval')) DESC,sequence DESC LIMIT 50").map_err(db)?;
+        let mut query = self.connection.prepare(&format!(
+            "SELECT j.goal_json FROM runtime_jobs j WHERE j.goal_json IS NOT NULL ORDER BY ({}) DESC,j.sequence DESC LIMIT 50",
+            active("j", true)
+        )).map_err(db)?;
         let rows = query
             .query_map([], |row| row.get::<_, String>(0))
             .map_err(db)?;
@@ -364,22 +398,7 @@ impl Journal {
         &self,
         sequence: u64,
     ) -> Result<Option<GoalTask>, HostError> {
-        let value: Option<Option<String>> = self
-            .connection
-            .query_row(
-                "SELECT goal_json FROM runtime_jobs WHERE sequence=?1",
-                [sequence.min(i64::MAX as u64) as i64],
-                |row| row.get(0),
-            )
-            .optional()
-            .map_err(db)?;
-        value
-            .flatten()
-            .map(|json| {
-                serde_json::from_str(&json)
-                    .map_err(|e| invalid(format!("invalid goal checkpoint: {e}")))
-            })
-            .transpose()
+        read_goal(&self.connection, sequence)
     }
 
     pub(in crate::task_runtime) fn save_goal(&self, task: &GoalTask) -> Result<(), HostError> {
@@ -392,6 +411,24 @@ impl Journal {
             .map_err(db)?;
         Ok(())
     }
+}
+
+fn read_goal(connection: &Connection, sequence: u64) -> Result<Option<GoalTask>, HostError> {
+    let value: Option<Option<String>> = connection
+        .query_row(
+            "SELECT goal_json FROM runtime_jobs WHERE sequence=?1",
+            [sequence.min(i64::MAX as u64) as i64],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(db)?;
+    value
+        .flatten()
+        .map(|json| {
+            serde_json::from_str(&json)
+                .map_err(|e| invalid(format!("invalid goal checkpoint: {e}")))
+        })
+        .transpose()
 }
 
 impl Journal {

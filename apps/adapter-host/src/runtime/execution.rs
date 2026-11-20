@@ -1,7 +1,7 @@
 //! Act workers send an authorized call. The Host validates and commits the reply.
 use super::*;
 use arcs::adapters::ActResponse;
-use arcs::execution::{ExecutionPreparation, PreparedExecution};
+use arcs::execution::{ExecutionError, ExecutionPreparation, PreparedExecution};
 use arcs::runtime::reservations::Reservation;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver};
@@ -50,6 +50,12 @@ impl Host {
         match self.ensure_adapter_available(adapter) {
             Ok(()) => Ok(self.act_workers.len() < MAX_WORKERS),
             Err(HostError::AdapterBusy(_)) => Ok(false),
+            Err(HostError::Adapter { source, .. }) => Err(HostError::Execution {
+                adapter: adapter.clone(),
+                source: ExecutionError::AdapterCall(AdapterCallError::Unavailable(format!(
+                    "{source:?}"
+                ))),
+            }),
             Err(error) => Err(error),
         }
     }

@@ -633,6 +633,70 @@ fn response_with_wrong_invocation_id_is_rejected() {
 }
 
 #[test]
+fn failed_execution_publication_leaves_the_same_dispatch_recoverable() {
+    let schemas = schemas();
+    let database = TemporaryDatabase::new();
+    let store = SqliteArtifactStore::open(&database.path).unwrap();
+    let (registry, manifest) = registry(&schemas, &store);
+    let mut ids = TestIds(1);
+    let approval = approval_chain(
+        &schemas,
+        &store,
+        &mut ids,
+        &candidate(),
+        ApprovalDecision::Approved,
+    );
+    let action = materialize(&registry, &schemas, &store, &mut ids, &approval);
+    let (endpoint, calls) = endpoint(manifest);
+    let conn = rusqlite::Connection::open(&database.path).unwrap();
+    conn.execute_batch(
+        "CREATE TRIGGER lost_execution_result BEFORE INSERT ON artifact_versions
+        WHEN NEW.schema_id='arcs.execution_result.execution_test.v1'
+        BEGIN SELECT RAISE(ABORT,'injected execution result failure'); END;",
+    )
+    .unwrap();
+
+    let mut service = ExecutionService::new(&registry, &schemas, &store, &mut ids, &FixedClock);
+    let super::ExecutionPreparation::Dispatch(prepared) = service
+        .prepare(&endpoint, &action.version_id, None)
+        .unwrap()
+    else {
+        panic!("expected a fresh dispatch");
+    };
+    let response = prepared.call().send(&endpoint);
+    assert!(matches!(
+        service.finish(*prepared, response),
+        Err(ExecutionError::Invocation(
+            crate::runtime::InvocationError::Store(_)
+        ))
+    ));
+    let first = calls.lock().unwrap()[0].clone();
+    let invocations = InvocationService::new(&store, &schemas, &FixedClock);
+    let state = invocations.lookup(&first.invocation_id).unwrap().unwrap();
+    assert_eq!(state.status, InvocationStatus::Dispatched);
+    assert!(state.result_version.is_none());
+    conn.execute_batch("DROP TRIGGER lost_execution_result")
+        .unwrap();
+
+    let super::ExecutionPreparation::Dispatch(recovery) = service
+        .prepare(&endpoint, &action.version_id, None)
+        .unwrap()
+    else {
+        panic!("expected recovery of the interrupted dispatch");
+    };
+    assert_eq!(
+        recovery.call().invocation().invocation_id,
+        first.invocation_id
+    );
+    let response = recovery.call().send(&endpoint);
+    let result = service.finish(*recovery, response).unwrap();
+    let state = invocations.lookup(&first.invocation_id).unwrap().unwrap();
+    assert_eq!(state.result_version.as_ref(), Some(&result.version_id));
+    assert_eq!(state.status, InvocationStatus::Succeeded);
+    assert_eq!(calls.lock().unwrap().len(), 2);
+}
+
+#[test]
 fn successful_execution_is_not_dispatched_again_after_restart() {
     let schemas = schemas();
     let database = TemporaryDatabase::new();

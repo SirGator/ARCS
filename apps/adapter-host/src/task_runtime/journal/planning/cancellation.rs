@@ -3,6 +3,7 @@ use rusqlite::{OptionalExtension, Transaction, params};
 
 use super::{Journal, VersionId, db, invalid};
 use crate::HostError;
+use crate::task_runtime::journal::active;
 
 impl Journal {
     pub(in crate::task_runtime) fn planning_jobs_after(
@@ -73,7 +74,10 @@ impl Journal {
                     |row| row.get(0),
                 )
                 .map_err(db)?;
-            let outstanding:bool=transaction.query_row("SELECT EXISTS(SELECT 1 FROM runtime_plan_steps s JOIN runtime_jobs j ON j.sequence=s.sequence WHERE s.parent_sequence=?1 AND j.state IN ('pending','running','failed','awaiting_approval'))",[sequence as i64],|row|row.get(0)).map_err(db)?;
+            let outstanding: bool = transaction.query_row(
+                &format!("SELECT EXISTS(SELECT 1 FROM runtime_plan_steps s JOIN runtime_jobs j ON j.sequence=s.sequence WHERE s.parent_sequence=?1 AND {})", active("j", true)),
+                [sequence as i64], |row| row.get(0)
+            ).map_err(db)?;
             if !["pending", "running", "failed"].contains(&state.as_str())
                 && !(state == "blocked" && outstanding)
             {
@@ -97,7 +101,9 @@ impl Journal {
         reason: &str,
     ) -> Result<(), HostError> {
         let children = {
-            let mut query = transaction.prepare("SELECT j.sequence FROM runtime_plan_steps s JOIN runtime_jobs j ON j.sequence=s.sequence WHERE s.parent_sequence=?1 AND j.state IN ('pending','running','failed','awaiting_approval')").map_err(db)?;
+            let mut query = transaction.prepare(&format!(
+                "SELECT j.sequence FROM runtime_plan_steps s JOIN runtime_jobs j ON j.sequence=s.sequence WHERE s.parent_sequence=?1 AND {}", active("j", true)
+            )).map_err(db)?;
             query
                 .query_map([parent as i64], |row| row.get::<_, i64>(0))
                 .map_err(db)?

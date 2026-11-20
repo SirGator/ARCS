@@ -4,6 +4,7 @@ mod control;
 pub mod deadlines;
 pub mod dependencies;
 pub mod goal;
+mod job_failure;
 mod journal;
 pub mod planning;
 pub mod queue;
@@ -29,6 +30,7 @@ use serde_json::Value;
 
 use crate::{Host, HostError};
 use config::invalid;
+use job_failure::is_core_failure;
 use journal::{Journal, db};
 
 /// Dauerhafter Übergabepunkt an die fachliche Verification/Approval-Anwendung.
@@ -524,47 +526,4 @@ fn matches_capability(
         && artifact
             .tags
             .contains(&format!("capability:{}", source.capability_id.0))
-}
-
-// Persistence/identity failures remain fatal. Isolating a component failure
-// must never hide a broken Core store or a changed topology.
-fn is_core_failure(error: &HostError) -> bool {
-    matches!(
-        error,
-        HostError::Store(_)
-            | HostError::Reduction(_)
-            | HostError::Input {
-                source: arcs::input::InputError::Store(_),
-                ..
-            }
-            | HostError::Registration(arcs::adapters::AdapterRegistryError::Store(_))
-            | HostError::Request {
-                source: arcs::request::RequestError::Store(_)
-                    | arcs::request::RequestError::Invocation(_)
-                    | arcs::request::RequestError::StaleDispatch,
-                ..
-            }
-            | HostError::Execution {
-                source: arcs::execution::ExecutionError::Store(_)
-                    | arcs::execution::ExecutionError::Invocation(
-                        arcs::runtime::InvocationError::Store(_)
-                            | arcs::runtime::InvocationError::InvalidState(_)
-                            | arcs::runtime::InvocationError::IdentityConflict(_)
-                            | arcs::runtime::InvocationError::InvalidTransition { .. }
-                            | arcs::runtime::InvocationError::MissingResult
-                    )
-                    | arcs::execution::ExecutionError::Reservation(
-                        arcs::runtime::reservations::ReservationError::Store(_)
-                    ),
-                ..
-            }
-            | HostError::Reasoning(arcs::reasoning::ReasoningError::Store(_))
-            | HostError::Reasoning(arcs::reasoning::ReasoningError::Invocation(_))
-            | HostError::Reasoning(arcs::reasoning::ReasoningError::Retrieval(
-                arcs::store::retrieval::RetrievalError::Store(_)
-            ))
-            | HostError::Reasoning(arcs::reasoning::ReasoningError::InputData(
-                arcs::adapters::input_data::InputDataError::Store(_)
-            ))
-    )
 }

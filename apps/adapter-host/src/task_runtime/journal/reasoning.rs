@@ -1,5 +1,5 @@
 //! Bind live Reason-Manager invocations to their owning operational task.
-use super::{Journal, db};
+use super::{Journal, active, db};
 use crate::{HostError, task_runtime::config::invalid};
 use rusqlite::{Connection, OptionalExtension, params};
 use std::collections::HashSet;
@@ -26,7 +26,10 @@ impl Journal {
     pub(in crate::task_runtime) fn selection_report_jobs(
         &self,
     ) -> Result<Vec<(u64, String)>, HostError> {
-        let mut query=self.connection.prepare("SELECT sequence,route_id FROM runtime_jobs ORDER BY (state IN ('pending','running','failed','awaiting_approval')) DESC,sequence DESC LIMIT 50").map_err(db)?;
+        let mut query = self.connection.prepare(&format!(
+            "SELECT j.sequence,j.route_id FROM runtime_jobs j ORDER BY ({}) DESC,j.sequence DESC LIMIT 50",
+            active("j", true)
+        )).map_err(db)?;
         query
             .query_map([], |row| Ok((row.get::<_, i64>(0)? as u64, row.get(1)?)))
             .map_err(db)?

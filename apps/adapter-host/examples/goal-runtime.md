@@ -237,10 +237,20 @@ Reservierungsprüfung. Die Aufgabe bleibt beendet und eine ungeklärte
 Gerätereservierung bleibt gehalten.
 
 Aufgaben werden zwischen Schritten fair reihum bearbeitet. Eine manuelle
-Freigabepause blockiert andere Jobs nicht. Fehler stoppen den Lauf sichtbar und
-speichern `failed`; beim ausdrücklich neu gestarteten Lauf gilt der bestehende
-Recovery-Vertrag. Abgeschlossene, abgelehnte, blockierte, abgebrochene und durch
-das Rundenbudget beendete Ziele werden nicht erneut ausgeführt.
+Freigabepause lässt andere Jobs weiterlaufen. Ein verbuchter Fehler bei einer
+Act-Ausführung beendet die betroffene Aufgabe mit `failed`. Andere Aufgaben
+laufen weiter, auch bei einem Reasoning- und einem Request-Slot. Der Eintrag
+belegt keinen Aufgabenplatz mehr. Eine ungeklärte Gerätereservierung bleibt
+bis zur bestätigten Übergabe gehalten.
+
+Beim Wiederanlauf unterscheidet der Core zwischen einem unterbrochenen
+Dispatch und einem bereits gespeicherten Act-Fehler. Einen unterbrochenen
+Dispatch kann er mit derselben Invocation-ID wiederaufnehmen. Einen
+gespeicherten Fehler übernimmt die Runtime in den Aufgabenstatus, auch wenn
+dessen Journal-Commit zuvor scheiterte. Eine abgelehnte Veröffentlichung des
+Ausführungsbelegs lässt die Invocation für die Wiederaufnahme offen.
+Beim synchronen Reasoning und bei synchronen Requests gilt der bisherige
+Recovery-Vertrag für fehlgeschlagene Aufgaben.
 
 `RuntimeReport` ergänzt `completed_goals`, `blocked_goals`, `awaiting_approval`
 und eine Liste von höchstens 50 Zielen, aktive zuerst, danach neuere Abschlüsse.

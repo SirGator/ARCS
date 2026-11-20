@@ -81,52 +81,6 @@ impl TaskRuntime {
         }))
     }
 
-    pub(super) fn record_job_failure(
-        &mut self,
-        sequence: u64,
-        route: &ReasoningRoute,
-        error: HostError,
-        report: &mut TickReport,
-    ) -> Result<(), HostError> {
-        if let HostError::ResourceBusy {
-            resource,
-            requested,
-            available,
-        } = error
-        {
-            report.waiting_resources.push(ResourceWait {
-                sequence,
-                route_id: route.id.clone(),
-                resource,
-                requested,
-                available,
-            });
-            return Ok(());
-        }
-        if matches!(error, HostError::AdapterBusy(_)) {
-            return Ok(());
-        }
-        if is_core_failure(&error) {
-            return Err(error);
-        }
-        if self.config.retry_failed_jobs() {
-            self.journal.fail(sequence, &error)?;
-            return Err(error);
-        }
-        if let Some(mut task) = self.saved_goal(sequence)? {
-            task.state = goal::GoalState::Failed;
-            task.detail = error.to_string().chars().take(2000).collect();
-            self.save_goal(&task)?;
-        }
-        self.journal.fail(sequence, &error)?;
-        report.failed.push(FailedTask {
-            sequence,
-            route_id: route.id.clone(),
-            error: error.to_string(),
-        });
-        Ok(())
-    }
-
     pub(super) fn reason_for_task(
         &mut self,
         host: &mut Host,

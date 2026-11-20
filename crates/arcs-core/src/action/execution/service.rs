@@ -11,7 +11,7 @@ use crate::core::{
     Provenance, SchemaDefinition, SchemaId, SchemaRegistry, Source, SourceClass, SourceKind,
     SubjectId, Trust, VersionId,
 };
-use crate::runtime::reservations::{Reservation, ReservationService};
+use crate::runtime::reservations::{Reservation, ReservationError, ReservationService};
 use crate::runtime::{
     InvocationKind, InvocationService, InvocationSpec, InvocationState, InvocationStatus,
     deterministic_input_fingerprint, deterministic_invocation_id,
@@ -134,7 +134,7 @@ impl<'a> ExecutionService<'a> {
         action_version: &VersionId,
         reservation: Option<&Reservation>,
     ) -> Result<Artifact, ExecutionError> {
-        match self.prepare(endpoint, action_version, reservation)? {
+        match self.prepare_inner(endpoint, action_version, reservation, true)? {
             ExecutionPreparation::Complete(result) => Ok(*result),
             ExecutionPreparation::Dispatch(prepared) => {
                 let response = prepared.call().send(endpoint);
@@ -144,11 +144,23 @@ impl<'a> ExecutionService<'a> {
     }
 
     /// Register the durable invocation and fence before the endpoint receives a call.
+    /// An interrupted dispatch can be replayed with its original identity.
+    /// A recorded failure is returned to the task scheduler for reconciliation.
     pub fn prepare(
         &self,
         endpoint: &dyn ActAdapter,
         action_version: &VersionId,
         reservation: Option<&Reservation>,
+    ) -> Result<ExecutionPreparation, ExecutionError> {
+        self.prepare_inner(endpoint, action_version, reservation, false)
+    }
+
+    fn prepare_inner(
+        &self,
+        endpoint: &dyn ActAdapter,
+        action_version: &VersionId,
+        reservation: Option<&Reservation>,
+        retry_failed: bool,
     ) -> Result<ExecutionPreparation, ExecutionError> {
         let action = self
             .store
@@ -314,6 +326,14 @@ impl<'a> ExecutionService<'a> {
                     .ok_or(crate::runtime::InvocationError::MissingResult)
                     .map_err(ExecutionError::from);
             }
+            if prepared.status == InvocationStatus::Failed && !retry_failed {
+                return Err(ExecutionError::RecordedFailure {
+                    invocation_id,
+                    detail: prepared
+                        .error
+                        .unwrap_or_else(|| "Act invocation failed".into()),
+                });
+            }
             let recovered = invocations.recover(&prepared)?;
             invocations.dispatch(&recovered)?
         };
@@ -323,7 +343,12 @@ impl<'a> ExecutionService<'a> {
                 .register_fenced_dispatch(fence, &capability)
         {
             let error = ExecutionError::Reservation(error);
-            self.record_failure(&dispatched, &error)?;
+            if !matches!(
+                error,
+                ExecutionError::Reservation(ReservationError::Store(_))
+            ) {
+                self.record_failure(&dispatched, &error)?;
+            }
             return Err(error);
         }
         Ok(ExecutionPreparation::Dispatch(Box::new(
@@ -430,18 +455,24 @@ impl<'a> ExecutionService<'a> {
                     transform: Some(format!("act_adapter:{}", capability.adapter_id.0)),
                 }),
             })?;
-            InvocationService::new(self.store, self.schemas, self.clock).succeed_with_event(
-                &dispatched,
-                &artifact,
-                &relations,
-            )?;
-            Ok(artifact)
+            Ok((artifact, relations))
         })();
 
-        if let Err(error) = &outcome {
-            self.record_failure(&dispatched, error)?;
-        }
-        outcome
+        let (artifact, relations) = match outcome {
+            Ok(result) => result,
+            Err(error) => {
+                self.record_failure(&dispatched, &error)?;
+                return Err(error);
+            }
+        };
+        // A publication error leaves the invocation dispatched. Its external
+        // effect may already exist, so recovery must use the identical call.
+        InvocationService::new(self.store, self.schemas, self.clock).succeed_with_event(
+            &dispatched,
+            &artifact,
+            &relations,
+        )?;
+        Ok(artifact)
     }
 
     fn record_failure(

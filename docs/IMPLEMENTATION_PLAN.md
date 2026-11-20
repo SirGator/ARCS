@@ -430,6 +430,13 @@
 > kann während des Aufrufs gespeichert werden. Eine ungeklärte Reservierung
 > bleibt bis zur bestätigten Übergabe gehalten.
 
+> Sechsunddreißigster Schritt gemäß v3 §7.2 PAR-08/PAR-09/PAR-10:
+> Verbuchte Act-Fehler beenden einzelne Goals auch in der Standardkonfiguration.
+> Status, Fehlertext und Goal-Checkpoint werden im Journal gemeinsam
+> aktualisiert. Der Wiederanlauf übernimmt einen bereits im Core gespeicherten
+> Fehler. Nach einem fehlgeschlagenen Ergebnis-Commit bleibt ein unterbrochener
+> Dispatch mit seiner ursprünglichen Invocation-ID wiederaufnehmbar.
+
 **Leitbild:** ARCS ist ein universeller Agent. Es soll sich einfach bedienen lassen, beliebige kompatible Systeme verbinden, eigenständig Probleme lösen und langfristige Aufgaben über Monate verfolgen.
 
 ## 1. Verbindliche Architekturregeln

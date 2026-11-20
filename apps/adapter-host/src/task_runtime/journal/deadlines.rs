@@ -1,7 +1,7 @@
 //! Lifetime admission, clock high-water mark and cancellation form one journal.
 use rusqlite::{Connection, OptionalExtension, Row, Transaction, params};
 
-use super::{Journal, db, runnable};
+use super::{Journal, active, db, runnable};
 use crate::HostError;
 use crate::task_runtime::{config::invalid, deadlines::TaskDeadline};
 use arcs::core::VersionId;
@@ -19,8 +19,9 @@ pub(super) fn initialize(connection: &Connection) -> Result<(), HostError> {
 
 fn eligible(include_failed: bool) -> String {
     format!(
-        "({} OR (d.is_plan=1 AND j.state='blocked' AND EXISTS(SELECT 1 FROM runtime_plan_steps s JOIN runtime_jobs child ON child.sequence=s.sequence WHERE s.parent_sequence=j.sequence AND child.state IN ('pending','running','failed','awaiting_approval'))))",
-        runnable("j", include_failed)
+        "({} OR (d.is_plan=1 AND j.state='blocked' AND EXISTS(SELECT 1 FROM runtime_plan_steps s JOIN runtime_jobs child ON child.sequence=s.sequence WHERE s.parent_sequence=j.sequence AND {})))",
+        runnable("j", include_failed),
+        active("child", true)
     )
 }
 
@@ -126,7 +127,10 @@ impl Journal {
             .map_err(db)?;
         let reason = format!("task lifetime exceeded: {sequence}");
         let affected = {
-            let mut query=transaction.prepare("SELECT sequence FROM runtime_jobs WHERE sequence=?1 OR (sequence IN (SELECT sequence FROM runtime_plan_steps WHERE parent_sequence=?1) AND state IN ('pending','running','failed','awaiting_approval'))").map_err(db)?;
+            let mut query = transaction.prepare(&format!(
+                "SELECT j.sequence FROM runtime_jobs j WHERE j.sequence=?1 OR (j.sequence IN (SELECT sequence FROM runtime_plan_steps WHERE parent_sequence=?1) AND {})",
+                active("j", true)
+            )).map_err(db)?;
             query
                 .query_map([sequence as i64], |row| row.get::<_, i64>(0))
                 .map_err(db)?
@@ -188,7 +192,13 @@ impl Journal {
     pub(in crate::task_runtime) fn deadlines_for_report(
         &self,
     ) -> Result<Vec<TaskDeadline>, HostError> {
-        let mut query = self.connection.prepare(&format!("{SELECT} ORDER BY (j.state IN ('pending','running','failed','awaiting_approval')) DESC,j.sequence DESC LIMIT 50")).map_err(db)?;
+        let mut query = self
+            .connection
+            .prepare(&format!(
+                "{SELECT} ORDER BY ({}) DESC,j.sequence DESC LIMIT 50",
+                active("j", true)
+            ))
+            .map_err(db)?;
         query
             .query_map([], read)
             .map_err(db)?

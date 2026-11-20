@@ -93,7 +93,7 @@ impl Journal {
             params![series.sequence as i64, revision as i64, state_text, command.reason],
         ).map_err(db)?;
 
-        let active_occurrence = active(include_failed);
+        let active_occurrence = active("runtime_jobs", include_failed);
         let mut cancelled_occurrence = None;
         match command.change {
             SeriesChange::Pause => {

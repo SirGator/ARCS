@@ -1,5 +1,5 @@
 //! Revision-checked task control and checkpoint changes commit together.
-use super::{Journal, db, runnable};
+use super::{Journal, active, db, runnable};
 use crate::{
     HostError,
     task_runtime::{
@@ -288,7 +288,7 @@ impl Journal {
         &self,
         requests: &[String],
     ) -> Result<Vec<(String, u64, String)>, HostError> {
-        let mut query=self.connection.prepare(&format!("SELECT j.sequence,j.route_id FROM runtime_reasoning_requests r JOIN runtime_jobs j ON j.sequence=r.sequence WHERE r.request_id=?1 AND r.abandoned=0 AND j.state IN ('pending','running','failed','awaiting_approval') AND {PAUSED}")).map_err(db)?;
+        let mut query=self.connection.prepare(&format!("SELECT j.sequence,j.route_id FROM runtime_reasoning_requests r JOIN runtime_jobs j ON j.sequence=r.sequence WHERE r.request_id=?1 AND r.abandoned=0 AND {} AND {PAUSED}", active("j", true))).map_err(db)?;
         let mut owned = Vec::new();
         for request in requests {
             if let Some((sequence, route)) = query
@@ -351,9 +351,9 @@ impl Journal {
             return Err(invalid("task control page size must be 1..1000"));
         }
         let order = if report {
-            "(j.state IN ('pending','running','failed','awaiting_approval')) DESC,j.sequence DESC"
+            format!("({}) DESC,j.sequence DESC", active("j", true))
         } else {
-            "j.sequence"
+            "j.sequence".into()
         };
         let mut q=self.connection.prepare(&format!("SELECT j.sequence,j.route_id,COALESCE(c.revision,0),COALESCE(c.paused,0),c.reason,COALESCE(json_extract(j.goal_json,'$.state')='executing' AND json_extract(j.goal_json,'$.dispatch_cursor') IS NOT NULL,0)
             FROM (SELECT sequence FROM runtime_task_controls UNION SELECT s.sequence FROM runtime_plan_steps s JOIN runtime_task_controls p ON p.sequence=s.parent_sequence) covered

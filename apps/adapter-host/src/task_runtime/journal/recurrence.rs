@@ -46,7 +46,7 @@ pub(super) fn initialize(connection: &Connection) -> Result<(), HostError> {
 const SERIES_ENABLED: &str = "s.control_state='active'";
 
 fn series_select(include_failed: bool) -> String {
-    let last_active = active(include_failed).replace("state", "last.state");
+    let last_active = active("last", include_failed);
     format!(
         "SELECT s.sequence, origin.route_id, origin.input_version,
         s.anchor_at,s.every_ms,s.max_occurrences,s.next_due,s.skipped,s.last_job,last.state,
@@ -150,7 +150,7 @@ impl Journal {
             return Ok(Vec::new());
         }
         let due = {
-            let active_last = active(include_failed).replace("state", "last.state");
+            let active_last = active("last", include_failed);
             let mut query = tx
                 .prepare(&format!(
                     "SELECT s.sequence,origin.route_id,origin.input_version,origin.source_sequence,
