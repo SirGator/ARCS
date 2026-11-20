@@ -1,3 +1,6 @@
+mod task_report;
+pub use task_report::TASK_REPORT_SCHEMA;
+
 use serde::{Deserialize, Serialize};
 
 use super::{OutputAdapter, OutputError, OutputInvocation, OutputResponse};

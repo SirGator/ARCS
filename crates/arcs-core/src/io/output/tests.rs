@@ -203,6 +203,55 @@ impl Fixture {
 }
 
 #[test]
+fn a_task_report_preserves_input_trust_and_exact_version_across_replay() {
+    let mut fixture = Fixture::new();
+    fixture.schemas.register_json(
+        r#"{"$id":"arcs.report.v1","type":"object","required":["title","body"],"properties":{"title":{"type":"string"},"body":{"type":"string"}},"additionalProperties":false}"#,
+    ).unwrap();
+    let registry = fixture.registry();
+    let mut ids = fixture.store.durable_id_generator("output-test").unwrap();
+    let mut service = OutputService::new(
+        &registry,
+        &fixture.schemas,
+        &fixture.store,
+        &mut ids,
+        &SystemClock,
+    );
+    let input_version = VersionId("report-v1".into());
+    let input = fixture.store.get(&input_version).unwrap().unwrap();
+    let report = service
+        .prepare_task_report("task-runtime", 1, &input_version)
+        .unwrap();
+    assert_eq!(report.trust, input.trust);
+    assert_eq!(
+        report.payload["body"],
+        serde_json::to_string_pretty(&input.payload).unwrap()
+    );
+    assert!(
+        fixture
+            .store
+            .outgoing_relations(&report.version_id)
+            .unwrap()
+            .iter()
+            .any(|edge| edge.to == input_version && edge.kind == relation_kinds::derived_from())
+    );
+    assert_eq!(
+        service
+            .prepare_task_report("task-runtime", 1, &input_version)
+            .unwrap(),
+        report
+    );
+    assert_ne!(
+        service
+            .prepare_task_report("task-runtime", 2, &input_version)
+            .unwrap()
+            .version_id,
+        report.version_id
+    );
+    assert!(fixture.endpoint.calls.lock().unwrap().is_empty());
+}
+
+#[test]
 fn output_requires_bound_request_and_commits_receipt_with_stable_replay() {
     let fixture = Fixture::new();
     let request = fixture.prepare("report.write").unwrap();
