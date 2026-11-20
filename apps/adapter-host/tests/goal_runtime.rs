@@ -11,6 +11,7 @@ use arcs_host::Host;
 use arcs_host::task_runtime::TaskRuntime;
 use arcs_host::task_runtime::goal::{GoalState, GoalTask};
 use serde_json::{Value, json};
+use std::time::{Duration, Instant};
 
 fn task(runtime: &TaskRuntime) -> GoalTask {
     runtime.goals_after(0, 100).unwrap().remove(0)
@@ -20,14 +21,19 @@ fn until(
     runtime: &mut TaskRuntime,
     expected: impl Fn(GoalState) -> bool,
 ) -> GoalTask {
-    for _ in 0..100 {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
         runtime.tick(host).unwrap();
-        let task = task(runtime);
-        if expected(task.state) {
-            return task;
+        let current = runtime.goals_after(0, 1).unwrap().into_iter().next();
+        if let Some(task) = current.as_ref().filter(|task| expected(task.state)) {
+            return task.clone();
         }
+        assert!(
+            Instant::now() < deadline,
+            "goal did not reach expected state: {current:?}"
+        );
+        std::thread::sleep(Duration::from_millis(3));
     }
-    panic!("goal did not reach expected state: {:?}", task(runtime));
 }
 fn count(host: &Host, kind: &str) -> usize {
     host.store()
@@ -188,6 +194,8 @@ fn every_phase_resumes_after_restart_and_manual_approval_is_separate_for_each_ro
     for _ in 0..60 {
         let mut host = fixture.host();
         let mut runtime = fixture.runtime(&host);
+        host.poll_inputs().unwrap();
+        host.poll_round().unwrap();
         runtime.tick(&mut host).unwrap();
         let mut current = task(&runtime);
         if !host.execution_workers().is_empty() {
@@ -617,15 +625,7 @@ fn parallel_reasoning_preserves_goal_gates_fresh_evidence_and_action_replay() {
     fixture.write("runtime.json", config);
     let mut host = fixture.host();
     let mut runtime = fixture.runtime(&host);
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
-    loop {
-        runtime.tick(&mut host).unwrap();
-        if task(&runtime).state.terminal() {
-            break;
-        }
-        assert!(std::time::Instant::now() < deadline, "{:?}", task(&runtime));
-        std::thread::sleep(std::time::Duration::from_millis(5));
-    }
+    until(&mut host, &mut runtime, GoalState::terminal);
     let completed = task(&runtime);
     assert_eq!(completed.state, GoalState::Completed);
     assert_eq!(completed.round, 2);
@@ -662,15 +662,7 @@ fn parallel_goal_rejects_invalid_assessment_and_persists_a_failed_checkpoint() {
     fixture.write("runtime.json", config);
     let mut host = fixture.host();
     let mut runtime = fixture.runtime(&host);
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
-    loop {
-        runtime.tick(&mut host).unwrap();
-        if task(&runtime).state.terminal() {
-            break;
-        }
-        assert!(std::time::Instant::now() < deadline, "{:?}", task(&runtime));
-        std::thread::sleep(std::time::Duration::from_millis(5));
-    }
+    until(&mut host, &mut runtime, GoalState::terminal);
     assert_eq!(task(&runtime).state, GoalState::Failed);
     assert!(task(&runtime).detail.contains("fresh source"));
     assert_eq!(runtime.report(0).unwrap().failed_jobs, 1);
@@ -693,15 +685,7 @@ fn recalled_memory_augments_planning_and_assessment_without_replacing_fresh_evid
     let mut host = fixture.host();
     let remembered = memory::append(&host, "goal-memory", "project:goal");
     let mut runtime = fixture.runtime(&host);
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
-    loop {
-        runtime.tick(&mut host).unwrap();
-        if task(&runtime).state.terminal() {
-            break;
-        }
-        assert!(std::time::Instant::now() < deadline, "{:?}", task(&runtime));
-        std::thread::sleep(std::time::Duration::from_millis(5));
-    }
+    until(&mut host, &mut runtime, GoalState::terminal);
     assert_eq!(task(&runtime).state, GoalState::Completed);
     assert_eq!(actuations(&fixture), 2);
     let snapshots = memory::snapshots(&host);
@@ -729,6 +713,7 @@ fn a_scheduled_goal_still_requires_verification_and_manual_approval_after_waking
     fixture.write("runtime.json", config);
     let mut host = fixture.host();
     let mut runtime = fixture.runtime(&host);
+    host.poll_inputs().unwrap();
     runtime.tick_at(&mut host, 1_800_000_000_000).unwrap();
     assert_eq!(runtime.report(0).unwrap().waiting_time, 1);
     assert!(runtime.goals_after(0, 10).unwrap().is_empty());

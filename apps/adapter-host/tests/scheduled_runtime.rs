@@ -5,10 +5,11 @@ mod support;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 
 use arcs_host::Host;
 use arcs_host::task_runtime::scheduler::{ScheduleState, SeriesState};
-use arcs_host::task_runtime::{RuntimeConfig, TaskRuntime};
+use arcs_host::task_runtime::{RuntimeConfig, TaskRuntime, TickReport};
 use serde_json::{Value, json};
 
 const NOW: u64 = 1_800_000_000_000;
@@ -135,6 +136,27 @@ fn assert_no_authority(host: &Host) {
     );
 }
 
+fn tick_until(
+    host: &mut Host,
+    runtime: &mut TaskRuntime,
+    now: u64,
+    ready: impl Fn(&Host, &TickReport) -> bool,
+) -> TickReport {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        let tick = runtime.tick_at(host, now).unwrap();
+        if ready(host, &tick) {
+            return tick;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "{:?}",
+            runtime.report(0).unwrap()
+        );
+        std::thread::sleep(Duration::from_millis(3));
+    }
+}
+
 #[test]
 fn three_month_timer_survives_restart_and_does_not_block_an_independent_task() {
     let due = NOW + 3 * MONTH;
@@ -147,6 +169,7 @@ fn three_month_timer_survives_restart_and_does_not_block_an_independent_task() {
     config["max_pending_jobs"] = json!(2);
     f.write("runtime.json", config);
     let (mut host, mut runtime) = f.open();
+    host.poll_inputs().unwrap();
     let tick = runtime.tick_at(&mut host, NOW).unwrap();
     assert_eq!(tick.ready_for_review.len(), 1);
     assert_eq!(tick.ready_for_review[0].route_id, "immediate");
@@ -190,6 +213,7 @@ fn three_month_timer_survives_restart_and_does_not_block_an_independent_task() {
 fn relative_deadline_is_frozen_at_acceptance_and_overdue_work_runs_once() {
     let f = Fixture::new(json!({"kind":"after_delay","delay_ms":MONTH}));
     let (mut host, mut runtime) = f.open();
+    host.poll_inputs().unwrap();
     assert!(
         runtime
             .tick_at(&mut host, NOW)
@@ -245,19 +269,21 @@ fn relative_deadline_is_frozen_at_acceptance_and_overdue_work_runs_once() {
 fn a_full_queue_still_receives_its_wake_input_but_holds_unrelated_input() {
     let f = Fixture::new(event_activation());
     let (mut host, mut runtime) = f.open();
+    host.poll_inputs().unwrap();
     runtime.tick_at(&mut host, NOW).unwrap();
     assert_eq!(runtime.report(0).unwrap().pending_jobs, 1);
     assert_eq!(runtime.report(0).unwrap().waiting_event, 1);
     assert_eq!(f.invocations(), 0);
     f.enqueue("other", "unrelated", "project:one");
     f.enqueue("wake", "wrong-subject", "project:two");
-    assert!(
-        runtime
-            .tick_at(&mut host, NOW + MONTH)
+    tick_until(&mut host, &mut runtime, NOW + MONTH, |host, tick| {
+        assert!(tick.ready_for_review.is_empty());
+        host.store()
+            .committed_after(0)
             .unwrap()
-            .ready_for_review
-            .is_empty()
-    );
+            .iter()
+            .any(|event| event.artifact.source.reference == "task:wrong-subject")
+    });
     assert_eq!(runtime.report(0).unwrap().waiting_event, 1);
     assert!(
         host.store()
@@ -267,10 +293,10 @@ fn a_full_queue_still_receives_its_wake_input_but_holds_unrelated_input() {
             .all(|event| event.artifact.created_by.id != "schedule.other")
     );
     f.enqueue("wake", "correct-subject", "project:one");
-    let done = runtime
-        .tick_at(&mut host, NOW + MONTH)
-        .unwrap()
-        .ready_for_review;
+    let done = tick_until(&mut host, &mut runtime, NOW + MONTH, |_, tick| {
+        !tick.ready_for_review.is_empty()
+    })
+    .ready_for_review;
     assert_eq!(done.len(), 1);
     let saved = runtime.scheduled_after(0, 1).unwrap().remove(0);
     let wake = host
@@ -308,13 +334,16 @@ fn event_wait_replays_acked_events_after_restart_and_ignores_events_before_the_t
     f.enqueue("wake", "old", "project:one");
     host.poll_inputs().unwrap();
     f.enqueue("input", "new-task", "project:one");
+    host.poll_inputs().unwrap();
     runtime.tick_at(&mut host, NOW).unwrap();
     assert_eq!(runtime.report(0).unwrap().waiting_event, 1);
+    host.shutdown().unwrap();
+    drop((runtime, host));
+    let mut host = Host::open(f.directory.join("host.json")).unwrap();
     // The external signal was ACKed to the Core, but the scheduler never saw it.
     f.enqueue("wake", "new", "project:one");
     let wake = host.poll_inputs().unwrap().remove(0).version_id;
     host.shutdown().unwrap();
-    drop(runtime);
     drop(host);
     let (mut host, mut runtime) = f.open();
     assert_eq!(
@@ -348,15 +377,19 @@ fn bounded_event_scans_are_fair_across_restarts_and_do_not_lose_full_queue_backl
     config["max_events_per_tick"] = json!(1);
     f.write("runtime.json", config);
     let (mut host, mut runtime) = f.open();
+    host.poll_inputs().unwrap();
     for _ in 0..20 {
         runtime.tick_at(&mut host, NOW).unwrap();
     }
     assert_eq!(runtime.report(0).unwrap().waiting_event, 2);
     let before = runtime.scheduled_after(0, 10).unwrap();
+    host.shutdown().unwrap();
+    drop((runtime, host));
     f.enqueue("input", "queued-behind-capacity", "project:one");
     f.enqueue("wake", "wake-both", "project:one");
-    // Both events are in the Core even though discovery cannot admit the new task yet.
-    host.poll_inputs().unwrap();
+    let (mut host, mut runtime) = f.open();
+    // Seed the Core backlog while the queue is at capacity.
+    assert_eq!(host.poll_inputs().unwrap().len(), 2);
     runtime.tick_at(&mut host, NOW).unwrap();
     let after = runtime.scheduled_after(0, 10).unwrap();
     assert!(
@@ -402,6 +435,7 @@ fn invalid_activation_or_clock_cannot_create_a_job_or_skip_the_source_event() {
     }
     let f = Fixture::new(json!({"kind":"after_delay","delay_ms":1}));
     let (mut host, mut runtime) = f.open();
+    host.poll_inputs().unwrap();
     assert!(runtime.tick_at(&mut host, u64::MAX).is_err());
     assert!(runtime.tick_at(&mut host, i64::MAX as u64).is_err());
     let input_sequence = host
@@ -425,6 +459,7 @@ fn invalid_activation_or_clock_cannot_create_a_job_or_skip_the_source_event() {
 fn existing_journals_upgrade_without_changing_identity_or_replaying_completed_work() {
     let f = Fixture::new(Value::Null);
     let (mut host, mut runtime) = f.open();
+    host.poll_inputs().unwrap();
     let done = runtime.tick_at(&mut host, NOW).unwrap().ready_for_review;
     assert_eq!(done.len(), 1);
     host.shutdown().unwrap();
@@ -468,7 +503,10 @@ fn an_authorized_observation_can_wake_a_task_when_its_queue_is_full() {
     f.write("host.json", config);
     let (mut host, mut runtime) = f.open();
     host.poll_inputs().unwrap();
-    let done = runtime.tick_at(&mut host, NOW).unwrap().ready_for_review;
+    let done = tick_until(&mut host, &mut runtime, NOW, |_, tick| {
+        !tick.ready_for_review.is_empty()
+    })
+    .ready_for_review;
     assert_eq!(done.len(), 1);
     let saved = runtime.scheduled_after(0, 1).unwrap().remove(0);
     let event = host
@@ -487,6 +525,7 @@ fn an_authorized_observation_can_wake_a_task_when_its_queue_is_full() {
 fn a_legacy_single_activation_journal_keeps_its_due_date_and_receipt_when_upgraded() {
     let f = Fixture::new(json!({"kind":"after_delay","delay_ms":MONTH}));
     let (mut host, mut runtime) = f.open();
+    host.poll_inputs().unwrap();
     runtime.tick_at(&mut host, NOW).unwrap();
     let original = runtime.scheduled_after(0, 1).unwrap().remove(0);
     host.shutdown().unwrap();
@@ -536,6 +575,7 @@ fn recurring_checks_resume_on_the_original_grid_and_coalesce_missed_dates() {
     let f = Fixture::new(Value::Null);
     f.recurring(5);
     let (mut host, mut runtime) = f.open();
+    host.poll_inputs().unwrap();
     let first = runtime
         .tick_at(&mut host, NOW)
         .unwrap()
@@ -637,6 +677,7 @@ fn recurring_admission_rolls_back_and_an_open_occurrence_blocks_the_next() {
     config["max_pending_jobs"] = json!(2);
     f.write("runtime.json", config);
     let (mut host, mut runtime) = f.open();
+    host.poll_inputs().unwrap();
     let first = runtime
         .tick_at(&mut host, NOW)
         .unwrap()
@@ -701,12 +742,17 @@ fn new_tasks_and_recurring_checks_share_a_single_queue_slot_across_restart() {
     let f = Fixture::new(Value::Null);
     f.recurring(5);
     let (mut host, mut runtime) = f.open();
+    host.poll_inputs().unwrap();
     let first = runtime
         .tick_at(&mut host, NOW)
         .unwrap()
         .ready_for_review
         .remove(0);
+    host.shutdown().unwrap();
+    drop((runtime, host));
     f.enqueue("input", "second", "project:second");
+    let (mut host, mut runtime) = f.open();
+    host.poll_inputs().unwrap();
     let second = runtime.tick_at(&mut host, NOW + MONTH).unwrap();
     assert!(second.recurring_jobs.is_empty());
     assert_eq!(second.ready_for_review.len(), 1);
@@ -719,6 +765,7 @@ fn new_tasks_and_recurring_checks_share_a_single_queue_slot_across_restart() {
 
     let (mut host, mut runtime) = f.open();
     f.enqueue("input", "third", "project:third");
+    host.poll_inputs().unwrap();
     let recurrence = runtime.tick_at(&mut host, NOW + 2 * MONTH).unwrap();
     assert_eq!(recurrence.recurring_jobs.len(), 1);
     assert_eq!(recurrence.ready_for_review.len(), 1);

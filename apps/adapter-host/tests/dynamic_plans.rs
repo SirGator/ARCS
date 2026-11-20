@@ -150,6 +150,7 @@ fn a_core_plan_published_before_a_failed_queue_commit_is_reused_without_duplicat
     config["max_concurrent_reasoning"] = json!(1);
     f.write("runtime.json", config);
     let (mut host, mut runtime) = f.open();
+    host.poll_inputs().unwrap();
     let db = rusqlite::Connection::open(f.directory.join("runtime.sqlite")).unwrap();
     db.execute_batch("CREATE TRIGGER reject_expansion BEFORE INSERT ON runtime_plan_steps BEGIN SELECT RAISE(ABORT,'injected plan admission failure'); END;").unwrap();
     assert!(runtime.tick(&mut host).is_err());
@@ -226,7 +227,9 @@ fn reservations_allow_two_full_expansions_at_capacity_and_keep_inputs_separate()
     model["gate"] = json!(true);
     f.write("planner.json", model);
     let (mut host, mut runtime) = f.open();
-    until(&mut host, &mut runtime, |_| f.started("planner"));
+    until(&mut host, &mut runtime, |r| {
+        f.started("planner") && r.report(0).unwrap().pending_jobs == 2
+    });
     assert_eq!(runtime.report(0).unwrap().pending_jobs, 2);
     assert_eq!(runtime.report(0).unwrap().capacity_used, 8);
     assert!(runtime.plans_after(0, 10).unwrap().is_empty());
@@ -261,7 +264,7 @@ fn a_failed_step_blocks_its_plan_and_dependents_while_independent_work_finishes(
     f.write("runtime.json", config);
     let (mut host, mut runtime) = f.open();
     until(&mut host, &mut runtime, |r| {
-        r.report(0).unwrap().pending_jobs == 0
+        !r.plans_after(0, 1).unwrap().is_empty() && r.report(0).unwrap().pending_jobs == 0
     });
     let plan = runtime.plans_after(0, 1).unwrap().remove(0);
     assert_eq!(plan.state, PlanState::Blocked);

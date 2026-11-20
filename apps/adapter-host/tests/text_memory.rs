@@ -61,6 +61,7 @@ fn rebuilding_old_memory_does_not_freeze_partial_context_or_hold_a_worker() {
         memory::append(&host, &format!("noise-{n}"), "project:p");
     }
     memory::append(&host, "private-calibration", "project:other");
+    host.poll_inputs().unwrap();
     let tick = runtime.tick(&mut host).unwrap();
     assert!(tick.failed.is_empty());
     assert!(

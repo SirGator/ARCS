@@ -299,6 +299,7 @@ fn lifetime_expiry_still_cancels_a_paused_task_before_it_can_dispatch() {
     config["routes"][0]["max_lifetime_ms"] = json!(10);
     f.write("runtime.json", config);
     let (mut host, mut runtime) = f.open();
+    host.poll_inputs().unwrap();
     runtime.tick_at(&mut host, 0).unwrap();
     pause(&mut runtime, &mut host, 1, "pause");
     runtime.tick_at(&mut host, 1000).unwrap();
@@ -749,6 +750,7 @@ fn a_goal_paused_before_its_first_checkpoint_uses_a_fresh_barrier_without_spendi
     f.write("runtime.json", config);
     let mut host = f.host();
     let mut runtime = f.runtime(&host);
+    host.poll_inputs().unwrap();
     runtime.tick_at(&mut host, 0).unwrap();
     assert!(runtime.goals_after(0, 10).unwrap().is_empty());
     pause(&mut runtime, &mut host, 1, "pause");
@@ -757,15 +759,15 @@ fn a_goal_paused_before_its_first_checkpoint_uses_a_fresh_barrier_without_spendi
     }
     let cursor = host.store().latest_sequence().unwrap();
     resume(&mut runtime, &mut host, 1, "resume");
-    let mut end = false;
-    for _ in 0..30 {
+    let deadline = Instant::now() + Duration::from_secs(25);
+    loop {
         runtime.tick_at(&mut host, 1000).unwrap();
         if goal(&runtime).state == GoalState::AwaitingApproval {
-            end = true;
             break;
         }
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(3));
     }
-    assert!(end);
     let task = goal(&runtime);
     assert_eq!(task.round, 1);
     let events = host.store().committed_after(cursor).unwrap();
@@ -787,6 +789,7 @@ fn cli_commands_and_additive_migration_preserve_task_control_across_restarts() {
     config["routes"][0]["activation"] = json!({"kind":"at_time","unix_ms":i64::MAX});
     f.write("runtime.json", config);
     let (mut host, mut runtime) = f.open();
+    host.poll_inputs().unwrap();
     runtime.tick_at(&mut host, 0).unwrap();
     host.shutdown().unwrap();
     drop(runtime);

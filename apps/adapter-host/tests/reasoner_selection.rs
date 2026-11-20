@@ -184,6 +184,7 @@ fn a_core_selection_survives_a_failed_queue_checkpoint_and_does_not_switch_while
     config["max_concurrent_reasoning"] = json!(1);
     f.write("runtime.json", config.clone());
     let (mut host, mut runtime) = f.open();
+    host.poll_inputs().unwrap();
     let db = rusqlite::Connection::open(f.directory.join("runtime.sqlite")).unwrap();
     db.execute_batch("CREATE TRIGGER fail_start BEFORE UPDATE ON runtime_jobs WHEN NEW.state='running' BEGIN SELECT RAISE(ABORT,'interrupted checkpoint'); END;").unwrap();
     assert!(runtime.tick(&mut host).is_err());

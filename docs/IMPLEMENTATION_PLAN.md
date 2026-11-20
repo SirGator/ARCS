@@ -437,6 +437,13 @@
 > Fehler. Nach einem fehlgeschlagenen Ergebnis-Commit bleibt ein unterbrochener
 > Dispatch mit seiner ursprünglichen Invocation-ID wiederaufnehmbar.
 
+> Siebenunddreißigster Schritt gemäß v3 §7.2 PAR-01/PAR-02/PAR-08/PAR-10/PAR-11:
+> Der Scheduler startet Input- und Observe-Dialoge auf vorhandenen
+> stdio-Transport-Threads. Er verarbeitet Antworten in späteren Takten.
+> Der Core erteilt die Bestätigung erst nach validiertem Commit. Die
+> Runtime begrenzt laufende Dialoge, prüft die Zulassung verspäteter
+> Inputs erneut und zeigt Adapterfehler einzeln im Monitor an.
+
 **Leitbild:** ARCS ist ein universeller Agent. Es soll sich einfach bedienen lassen, beliebige kompatible Systeme verbinden, eigenständig Probleme lösen und langfristige Aufgaben über Monate verfolgen.
 
 ## 1. Verbindliche Architekturregeln

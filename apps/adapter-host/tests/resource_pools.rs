@@ -419,6 +419,7 @@ fn combined_participant_claims_that_exceed_capacity_are_rejected_before_any_data
     }
     f.write("runtime.json", config);
     let (mut host, mut runtime) = f.open();
+    host.poll_inputs().unwrap();
     runtime.tick(&mut host).unwrap();
     let request = request(&f, &host, "a");
     let before = host.report().unwrap().stored_artifacts;

@@ -643,6 +643,7 @@ fn synchronous_recovery_delay_starts_after_the_failed_call_finishes() {
     let script = std::fs::read_to_string(&path).unwrap();
     std::fs::write(path,script.replace("  if c.get('mode')=='fail':","  if c.get('mode')=='fail':\n   time.sleep(.2)\n   (root/'failure-clock').write_text(str(time.time_ns()//1000000))")).unwrap();
     let (mut host, mut runtime) = f.open();
+    host.poll_inputs().unwrap();
     runtime.tick(&mut host).unwrap();
     assert_eq!(failures(&host), 1);
     let failed_at = std::fs::read_to_string(f.directory.join("failure-clock"))

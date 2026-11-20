@@ -2,7 +2,12 @@
 //! stdio ist eine lokale Prozessgrenze für alle sieben Rollen, einschließlich
 //! Input-ACKs und Reasoning V2; Netzwerk-Authentifizierung ist nicht enthalten.
 
+mod ingress;
 pub mod protocol;
+
+pub use ingress::{
+    CommittedIngress, IngressAcknowledgement, IngressKind, IngressMessage, IngressReply,
+};
 
 use std::io::BufReader;
 use std::process::{Child, Command, Stdio};
@@ -10,7 +15,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::adapters::data::{DataAdapter, DataChunk, DataRead};
 use crate::adapters::{
@@ -37,6 +42,8 @@ pub enum StdioError {
     UnsupportedVersion(u32),
     CorrelationMismatch,
     UnexpectedMessage,
+    ExchangeInProgress,
+    NoIngressExchange,
     Remote {
         code: String,
         message: String,
@@ -49,7 +56,7 @@ pub enum StdioError {
     Input(crate::input::InputError),
 }
 
-type Response = Result<Envelope<AdapterMessage>, WireError>;
+type Response = (Instant, Result<Envelope<AdapterMessage>, WireError>);
 
 /// Ein serieller Dialog. Nach Timeout/Protokollfehler wird das Child beendet;
 /// verspätete Antworten können keinen späteren Aufruf erfüllen.
@@ -68,6 +75,7 @@ struct Session {
     worker: Option<JoinHandle<()>>,
     timeout: Duration,
     next_request: u64,
+    ingress: Option<ingress::PendingIngress>,
 }
 
 impl StdioAdapter {
@@ -161,7 +169,7 @@ impl StdioAdapter {
                     let response =
                         write_frame(&mut stdin, &request).and_then(|()| read_frame(&mut stdout));
                     let failed = response.is_err();
-                    if outgoing.send(response).is_err() || failed {
+                    if outgoing.send((Instant::now(), response)).is_err() || failed {
                         break;
                     }
                 }
@@ -183,6 +191,7 @@ impl StdioAdapter {
             worker: Some(worker),
             timeout,
             next_request: 1,
+            ingress: None,
         };
         let AdapterMessage::Manifest { manifest } = session.exchange(HostMessage::Hello)? else {
             return Err(StdioError::UnexpectedMessage);
@@ -607,6 +616,9 @@ fn call_error(error: StdioError) -> AdapterCallError {
 
 impl Session {
     fn exchange(&mut self, message: HostMessage) -> Result<AdapterMessage, StdioError> {
+        if self.ingress.is_some() {
+            return Err(StdioError::ExchangeInProgress);
+        }
         let closes_fence = matches!(message, HostMessage::CloseFence { .. });
         let result = self.exchange_inner(message);
         // A correlated controller refusal leaves the resource held and can
@@ -620,7 +632,7 @@ impl Session {
         result
     }
 
-    fn exchange_inner(&mut self, message: HostMessage) -> Result<AdapterMessage, StdioError> {
+    fn send(&mut self, message: HostMessage) -> Result<String, StdioError> {
         if self.cancelled.load(Ordering::Acquire) {
             return Err(StdioError::Disconnected);
         }
@@ -632,13 +644,18 @@ impl Session {
         self.requests
             .as_ref()
             .ok_or(StdioError::Disconnected)?
-            .send(Envelope {
+            .try_send(Envelope {
                 protocol_version: WIRE_VERSION,
                 request_id: request_id.clone(),
                 message,
             })
             .map_err(|_| StdioError::Disconnected)?;
-        let started = std::time::Instant::now();
+        Ok(request_id)
+    }
+
+    fn exchange_inner(&mut self, message: HostMessage) -> Result<AdapterMessage, StdioError> {
+        let request_id = self.send(message)?;
+        let started = Instant::now();
         let response = loop {
             if self.cancelled.load(Ordering::Acquire) {
                 return Err(StdioError::Disconnected);
@@ -652,11 +669,18 @@ impl Session {
                 .responses
                 .recv_timeout(remaining.min(Duration::from_millis(25)))
             {
-                Ok(response) => break response.map_err(StdioError::Wire)?,
+                Ok((_, response)) => break response.map_err(StdioError::Wire)?,
                 Err(RecvTimeoutError::Timeout) => continue,
                 Err(RecvTimeoutError::Disconnected) => return Err(StdioError::Disconnected),
             }
         };
+        Self::correlate(&request_id, response)
+    }
+
+    fn correlate(
+        request_id: &str,
+        response: Envelope<AdapterMessage>,
+    ) -> Result<AdapterMessage, StdioError> {
         if response.protocol_version != WIRE_VERSION {
             return Err(StdioError::UnsupportedVersion(response.protocol_version));
         }
@@ -678,6 +702,7 @@ impl Session {
     }
 
     fn stop(&mut self) {
+        self.ingress = None;
         if let Ok(mut child) = self.child.lock() {
             let _ = child.kill();
             let _ = child.wait();

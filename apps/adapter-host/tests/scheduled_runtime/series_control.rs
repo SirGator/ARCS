@@ -54,6 +54,7 @@ fn a_dormant_series_can_be_paused_via_cli_and_resumes_on_its_original_grid() {
     let f = Fixture::new(Value::Null);
     f.recurring(5);
     let (mut host, mut runtime) = f.open();
+    host.poll_inputs().unwrap();
     let first = runtime
         .tick_at(&mut host, NOW)
         .unwrap()
@@ -83,6 +84,7 @@ fn a_dormant_series_can_be_paused_via_cli_and_resumes_on_its_original_grid() {
     let (mut host, mut runtime) = f.open();
     // A paused, overdue series does not take the single free slot from new work.
     f.enqueue("input", "unrelated", "project:independent");
+    host.poll_inputs().unwrap();
     let late = NOW + 3 * MONTH + 1;
     let tick = runtime.tick_at(&mut host, late).unwrap();
     assert!(tick.recurring_jobs.is_empty());

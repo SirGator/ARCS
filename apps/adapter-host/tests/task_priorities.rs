@@ -38,6 +38,7 @@ fn single_step_restarts_preserve_both_weights_and_low_priority_progress() {
     config["routes"][0]["priority"] = json!(3);
     f.write("runtime.json", config);
     let (mut host, mut runtime) = f.open();
+    host.poll_inputs().unwrap();
     for _ in 0..18 {
         let tick = runtime.tick(&mut host).unwrap();
         assert!(tick.failed.is_empty());
@@ -57,6 +58,7 @@ fn single_step_restarts_preserve_both_weights_and_low_priority_progress() {
 fn default_priority_round_robin_survives_a_host_and_runtime_restart() {
     let f = gated();
     let (mut host, mut runtime) = f.open();
+    host.poll_inputs().unwrap();
     runtime.tick(&mut host).unwrap();
     assert_eq!(
         runtime.report(0).unwrap().dispatch.classes[0].last_sequence,

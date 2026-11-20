@@ -164,7 +164,7 @@ fn snapshot(
     let reconnects = host.adapter_reconnections().map_err(fail)?;
     let adapters=report.adapters.into_iter().map(|adapter|json!({"adapter_id":adapter.adapter_id,
         "observations_received":adapter.observations_received,"observations_committed":adapter.observations_committed,
-        "requests":adapter.requests.len(),"transforms":adapter.transforms.len()})).collect::<Vec<_>>();
+        "requests":adapter.requests.len(),"transforms":adapter.transforms.len(),"ingress_error":adapter.ingress_error})).collect::<Vec<_>>();
     let reservations = runtime
         .map(|runtime| runtime.exclusive_resources(host))
         .transpose()
@@ -217,6 +217,6 @@ fn snapshot(
         writer,
         json!({"event":"snapshot","ticks":ticks,"uptime_ms":started.elapsed().as_millis(),
         "stored_artifacts":report.stored_artifacts,"world_revision":report.world_revision,
-        "adapters":adapters,"runtime":runtime,"recent_artifacts":recent,"resource_pools":report.resource_pools,"request_workers":report.request_workers,"execution_workers":host.execution_workers(),"controller_closures":host.controller_closures(),"resource_reservations":reservations,"resource_release_reviews":resource_release_reviews,"reasoner_selections":selections,"reasoning_recoveries":recoveries,"adapter_reconnections":reconnects}),
+        "adapters":adapters,"runtime":runtime,"recent_artifacts":recent,"resource_pools":report.resource_pools,"request_workers":report.request_workers,"execution_workers":host.execution_workers(),"ingress_dialogs":host.ingress_status(),"controller_closures":host.controller_closures(),"resource_reservations":reservations,"resource_release_reviews":resource_release_reviews,"reasoner_selections":selections,"reasoning_recoveries":recoveries,"adapter_reconnections":reconnects}),
     )
 }

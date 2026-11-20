@@ -107,6 +107,26 @@ fn scalar(db: &rusqlite::Connection, sql: &str) -> i64 {
     db.query_row(sql, [], |row| row.get(0)).unwrap()
 }
 
+fn tick_until(
+    host: &mut Host,
+    runtime: &mut TaskRuntime,
+    done: impl Fn(&arcs_host::task_runtime::TickReport) -> bool,
+) -> arcs_host::task_runtime::TickReport {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        let tick = runtime.tick(host).unwrap();
+        if done(&tick) {
+            return tick;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "{:?}",
+            runtime.report(0).unwrap()
+        );
+        std::thread::sleep(Duration::from_millis(3));
+    }
+}
+
 #[test]
 fn acked_input_is_discovered_after_restart_and_candidates_are_handed_to_review() {
     let fixture = Fixture::new();
@@ -170,7 +190,11 @@ fn interrupted_completion_reuses_core_and_driver_journals() {
     let fixture = Fixture::new();
     let mut host = fixture.host();
     let mut runtime = fixture.runtime(&host);
-    let done = runtime.tick(&mut host).unwrap().ready_for_review.remove(0);
+    let done = tick_until(&mut host, &mut runtime, |tick| {
+        !tick.ready_for_review.is_empty()
+    })
+    .ready_for_review
+    .remove(0);
     let count = host.report().unwrap().stored_artifacts;
     host.shutdown().unwrap();
     drop(runtime);
@@ -206,7 +230,16 @@ fn live_enqueue_survives_idle_and_deduplicates_even_after_ack() {
     let fixture = Fixture::new();
     let mut host = fixture.host();
     let mut runtime = fixture.runtime(&host);
-    runtime.tick(&mut host).unwrap();
+    tick_until(&mut host, &mut runtime, |tick| {
+        !tick.ready_for_review.is_empty()
+    });
+    let acknowledged = || {
+        scalar(
+            &fixture.db("input"),
+            "SELECT COUNT(*) FROM events WHERE ack=0",
+        ) == 0
+    };
+    tick_until(&mut host, &mut runtime, |_| acknowledged());
     assert!(runtime.tick(&mut host).unwrap().ready_for_review.is_empty());
     let event = json!({"id":"live-task","subject":"live-task","reference":"task:live","payload":{"values":[3,7,12],"target":6.5}});
     let output = fixture.enqueue(event.clone());
@@ -215,7 +248,12 @@ fn live_enqueue_survives_idle_and_deduplicates_even_after_ack() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let done = runtime.tick(&mut host).unwrap().ready_for_review.remove(0);
+    let done = tick_until(&mut host, &mut runtime, |tick| {
+        !tick.ready_for_review.is_empty()
+    })
+    .ready_for_review
+    .remove(0);
+    tick_until(&mut host, &mut runtime, |_| acknowledged());
     assert_eq!(
         host.store()
             .get(&done.candidate_version_ids[0])
@@ -264,6 +302,7 @@ fn fanout_and_backpressure_preserve_all_route_jobs_and_bound_the_queue() {
     fixture.write("runtime.json", config);
     let mut host = fixture.host();
     let mut runtime = fixture.runtime(&host);
+    host.poll_inputs().unwrap();
     let mut done = Vec::new();
     let mut pressure = false;
     for _ in 0..10 {
@@ -339,6 +378,7 @@ fn reasoning_error_is_persisted_and_does_not_advance_to_review() {
     fixture.write("runtime.json", config);
     let mut host = fixture.host();
     let mut runtime = fixture.runtime(&host);
+    host.poll_inputs().unwrap();
     assert!(runtime.tick(&mut host).is_err());
     let report = runtime.report(1).unwrap();
     assert_eq!(report.pending_jobs, 1);
@@ -461,7 +501,9 @@ done
     fixture.write("host.json", config);
     let mut host = fixture.host();
     let mut runtime = fixture.runtime(&host);
-    let tick = runtime.tick(&mut host).unwrap();
+    let tick = tick_until(&mut host, &mut runtime, |tick| {
+        !tick.ready_for_review.is_empty()
+    });
     assert_eq!(tick.ready_for_review.len(), 1);
     assert_eq!(host.report().unwrap().world_revision, 1);
     assert!(runtime.tick(&mut host).unwrap().ready_for_review.is_empty());
@@ -566,7 +608,11 @@ fn recalled_context_survives_lost_completion_and_later_memories() {
     let original = memory::append(&host, "original-memory", "project:nearest");
     memory::append(&host, "unrelated-memory", "project:other");
     let mut runtime = fixture.runtime(&host);
-    let done = runtime.tick(&mut host).unwrap().ready_for_review.remove(0);
+    let done = tick_until(&mut host, &mut runtime, |tick| {
+        !tick.ready_for_review.is_empty()
+    })
+    .ready_for_review
+    .remove(0);
     let audit = host.store().get(&done.request_version_id).unwrap().unwrap();
     let items = audit.payload["invocation"]["context"].as_array().unwrap();
     assert_eq!(items.len(), 2);

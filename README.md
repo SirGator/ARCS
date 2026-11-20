@@ -55,7 +55,8 @@ dokumentiert Slice 32. Der [Bericht zur bestätigten Controller-Übergabe](docs/
 dokumentiert Slice 33. Der [Bericht zur nebenläufigen Controller-Übergabe](docs/ZWISCHENBERICHT_2026-11-19_CONTROLLER_WORKERS.md)
 dokumentiert Slice 34. Der [Bericht zur nebenläufigen Aktionsausführung](docs/ZWISCHENBERICHT_2026-11-20_ACT_WORKERS.md)
 dokumentiert Slice 35. Der [Bericht zur Fehlerisolierung bei Aktionen](docs/ZWISCHENBERICHT_2026-11-20_ACT_FAILURE.md)
-dokumentiert Slice 36. Die Berichte vom
+dokumentiert Slice 36. Der [Bericht zum nebenläufigen Ereigniseingang](docs/ZWISCHENBERICHT_2026-11-20_INGRESS.md)
+dokumentiert Slice 37. Die Berichte vom
 [17. November](docs/ZWISCHENBERICHT_2026-11-17.md) und
 [16. November](docs/ZWISCHENBERICHT_2026-11-16.md) dokumentieren frühere
 Umsetzungsstände, Prüfergebnisse und offene Grenzen.

@@ -354,6 +354,158 @@ fn live_series_and_task_control_survive_bad_frames_eof_and_restart() {
 }
 
 #[test]
+fn a_blocked_sensor_poll_and_its_failure_leave_the_scheduler_responsive() {
+    let f = parallel::Fixture::new();
+    f.peer("slow", "normal", true);
+    f.peer("fast", "normal", false);
+    f.route("independent", "fast");
+    let path = f.directory.join("peer.py");
+    let script = std::fs::read_to_string(&path).unwrap().replace(
+        "  n+=1\n  reply={'type':'observation'",
+        "  n+=1\n  (root/'poll.entered').write_text('polling')\n  while not (root/'poll.release').exists(): time.sleep(.005)\n  reply={'type':'observation'",
+    ).replace(
+        " elif kind=='ack':",
+        "  reply={'type':'error','code':'offline','message':'simulated sensor failure','retryable':True}\n elif kind=='ack':",
+    );
+    std::fs::write(path, script).unwrap();
+    let mut runtime = f.read("runtime.json");
+    runtime["interval_ms"] = json!(15);
+    f.write("runtime.json", runtime);
+    let mut monitor = Monitor::start(&f.directory);
+    let active = monitor.until(|event| {
+        f.directory.join("poll.entered").exists() && event["runtime"]["ready_for_review"] == 1
+    });
+    assert!(
+        active["ingress_dialogs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|dialog| {
+                *dialog == json!({"adapter_id":"slow","kind":"observation","phase":"polling"})
+            })
+    );
+    assert_eq!(
+        monitor.command(
+            "queue-with-poll-pending",
+            "queue",
+            json!({"limit":4,"scope":"all"})
+        )["ok"],
+        true
+    );
+
+    std::fs::write(f.directory.join("poll.release"), "continue").unwrap();
+    let failure = monitor.until(|event| {
+        event["adapters"].as_array().is_some_and(|rows| {
+            rows.iter().any(|row| {
+                row["adapter_id"] == "slow"
+                    && row["ingress_error"]
+                        .as_str()
+                        .is_some_and(|error| error.contains("simulated sensor failure"))
+            })
+        })
+    });
+    assert_eq!(failure["world_revision"], 0);
+    enqueue_independent_work(&f, "after-sensor-failure");
+    monitor.until(|event| event["runtime"]["ready_for_review"] == 2);
+    assert_eq!(f.count("fast", "attempts"), 2);
+    monitor.stop();
+}
+
+#[test]
+fn a_lost_input_ack_replays_the_committed_event_without_repeating_the_task() {
+    let f = parallel::Fixture::new();
+    f.peer("fast", "normal", false);
+    f.route("independent", "fast");
+    let mut runtime = f.read("runtime.json");
+    runtime["interval_ms"] = json!(15);
+    f.write("runtime.json", runtime);
+    std::fs::write(
+        f.directory.join("hold-input-ack.py"),
+        r#"
+import json, pathlib, subprocess, sys, time
+root = pathlib.Path(__file__).parent
+peer = subprocess.Popen(sys.argv[1:], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+try:
+    for line in sys.stdin.buffer:
+        message = json.loads(line)["message"]
+        if message["type"] == "ack_input":
+            (root / "ack.entered").write_text(message["message_id"])
+            while not (root / "ack.release").exists():
+                time.sleep(.005)
+        peer.stdin.write(line)
+        peer.stdin.flush()
+        reply = peer.stdout.readline()
+        if not reply:
+            break
+        sys.stdout.buffer.write(reply)
+        sys.stdout.buffer.flush()
+finally:
+    peer.stdin.close()
+    peer.wait()
+"#,
+    )
+    .unwrap();
+    let mut host = f.read("host.json");
+    host["adapters"][0] = json!({
+        "program":"/usr/bin/python3",
+        "grant_file":"input-grant.json",
+        "timeout_ms":15000,
+        "args":[{"path":"hold-input-ack.py"},{"path":support::adapter_binary("arcs-json-input")},
+                {"path":"input-profile.json"},{"path":"input.sqlite"}]
+    });
+    f.write("host.json", host);
+    let acknowledgements = || -> i64 {
+        rusqlite::Connection::open(f.directory.join("input.sqlite"))
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM events WHERE ack=1", [], |row| {
+                row.get(0)
+            })
+            .unwrap()
+    };
+    let monitor = Monitor::start(&f.directory);
+    let committed = monitor.until(|event| {
+        f.directory.join("ack.entered").exists() && event["runtime"]["ready_for_review"] == 1
+    });
+    assert!(
+        committed["ingress_dialogs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|dialog| {
+                *dialog
+                    == json!({"adapter_id":"example.input","kind":"input","phase":"acknowledging"})
+            })
+    );
+    assert_eq!(acknowledgements(), 0);
+    let id = std::fs::read_to_string(f.directory.join("ack.entered")).unwrap();
+    monitor.stop();
+
+    for marker in ["monitor.stop", "ack.entered"] {
+        std::fs::remove_file(f.directory.join(marker)).unwrap();
+    }
+    std::fs::write(f.directory.join("ack.release"), "continue").unwrap();
+    let monitor = Monitor::start(&f.directory);
+    let settled = monitor.until(|event| event["event"] == "snapshot" && acknowledgements() == 1);
+    assert_eq!(settled["runtime"]["ready_for_review"], 1);
+    assert_eq!(
+        std::fs::read_to_string(f.directory.join("ack.entered")).unwrap(),
+        id
+    );
+    assert_eq!(f.count("fast", "attempts"), 1);
+    let saved: i64 = rusqlite::Connection::open(f.directory.join("core.sqlite"))
+        .unwrap()
+        .query_row(
+            "SELECT COUNT(*) FROM artifact_versions WHERE schema_id='arcs.task.nearest.v1'
+                    AND json_extract(artifact_json,'$.created_by.id')='example.input'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(saved, 1);
+    monitor.stop();
+}
+
+#[test]
 fn live_goal_review_requires_the_current_candidate_and_executes_once() {
     let f = goals::Fixture::new();
     f.manual();

@@ -229,6 +229,7 @@ fn cli_cancels_a_sleeping_planner_and_rejects_conflicting_commands_before_openin
     config["routes"][0]["activation"] = json!({"kind":"at_time","unix_ms":i64::MAX});
     f.write("runtime.json", config);
     let (mut host, mut runtime) = f.open();
+    host.poll_inputs().unwrap();
     runtime.tick(&mut host).unwrap();
     assert_eq!(runtime.planning_jobs_after(0, 1).unwrap()[0].sequence, 1);
     assert_eq!(runtime.report(0).unwrap().planning_jobs[0].state, "pending");
@@ -306,7 +307,9 @@ fn cancelling_one_input_plan_does_not_cancel_another_using_the_same_planner() {
     model["gate"] = json!(true);
     f.write("planner.json", model);
     let (mut host, mut runtime) = f.open();
-    until(&mut host, &mut runtime, |_| f.started("planner"));
+    until(&mut host, &mut runtime, |r| {
+        f.started("planner") && r.report(0).unwrap().pending_jobs == 2
+    });
     assert_eq!(runtime.report(0).unwrap().pending_jobs, 2);
     runtime
         .cancel_plan(&mut host, 1, "only the first input".into())

@@ -66,6 +66,7 @@ fn a_month_long_budget_is_frozen_on_admission_and_expires_before_a_later_activat
     config["routes"][0]["activation"] = json!({"kind":"after_delay","delay_ms":2*MONTH});
     f.write("runtime.json", config);
     let (mut host, mut runtime) = f.open();
+    host.poll_inputs().unwrap();
     runtime.tick_at(&mut host, 1000).unwrap();
     let original = runtime.deadlines_after(0, 1).unwrap().remove(0);
     assert_eq!(original.accepted_at_unix_ms, 1000);
@@ -413,6 +414,7 @@ fn a_bounded_expiry_sweep_cannot_let_an_unswept_task_dispatch_at_its_deadline() 
     config["routes"][2]["priority"] = json!(3);
     f.write("runtime.json", config);
     let (mut host, mut runtime) = f.open();
+    host.poll_inputs().unwrap();
     runtime.tick_at(&mut host, 1000).unwrap();
     let tick = runtime.tick_at(&mut host, 1100).unwrap();
     assert_eq!(tick.expired_tasks, [1, 3]);
@@ -452,6 +454,7 @@ fn default_identity_invalid_limits_and_deadline_overflow_are_checked_before_admi
     host.shutdown().unwrap();
     let f = reasoning();
     let (mut host, mut runtime) = f.open();
+    host.poll_inputs().unwrap();
     assert!(runtime.tick_at(&mut host, i64::MAX as u64 - 50).is_err());
     assert_eq!(runtime.report(0).unwrap().pending_jobs, 0);
     assert!(runtime.deadlines_after(0, 10).unwrap().is_empty());
@@ -461,18 +464,19 @@ fn default_identity_invalid_limits_and_deadline_overflow_are_checked_before_admi
 }
 
 #[test]
-fn live_time_is_rechecked_after_slow_polling_but_explicit_simulation_time_stays_fixed() {
+fn deadlines_progress_during_a_stalled_sensor_poll_and_simulated_time_stays_fixed() {
     for simulated in [false, true] {
         let f = Fixture::new();
-        f.peer("a", "normal", true);
+        f.peer("a", "gate", false);
+        f.peer("sensor", "normal", true);
         f.route("a", "a");
         let mut config = f.read("runtime.json");
-        config["routes"][0]["max_lifetime_ms"] = json!(100);
+        config["routes"][0]["max_lifetime_ms"] = json!(1000);
         f.write("runtime.json", config);
         let path = f.directory.join("peer.py");
         let peer = std::fs::read_to_string(&path).unwrap().replace(
             "elif kind=='poll':",
-            "elif kind=='poll':\n  time.sleep(.25)",
+            "elif kind=='poll':\n  (root/'poll.entered').write_text('polling')\n  while not (root/'poll.release').exists(): time.sleep(.005)",
         );
         std::fs::write(path, peer).unwrap();
         let (mut host, mut runtime) = f.open();
@@ -483,18 +487,26 @@ fn live_time_is_rechecked_after_slow_polling_but_explicit_simulation_time_stays_
             runtime.tick(&mut host)
         }
         .unwrap();
+        assert!(tick.expired_tasks.is_empty());
+        let before = Instant::now() + Duration::from_secs(15);
+        while !f.started("a") || !f.directory.join("poll.entered").exists() {
+            assert!(Instant::now() < before);
+            std::thread::sleep(Duration::from_millis(3));
+        }
+        std::thread::sleep(Duration::from_millis(1050));
         if simulated {
+            let tick = runtime.tick_at(&mut host, 1000).unwrap();
             assert!(tick.expired_tasks.is_empty());
-            assert_eq!(runtime.report(0).unwrap().expired_jobs, 0);
             assert_eq!(
                 runtime.deadlines_after(0, 1).unwrap()[0].expires_at_unix_ms,
-                1100
+                2000
             );
+            assert_eq!(runtime.tick_at(&mut host, 2000).unwrap().expired_tasks, [1]);
         } else {
-            assert_eq!(tick.expired_tasks, [1]);
-            assert_eq!(runtime.report(0).unwrap().expired_jobs, 1);
-            assert_eq!(f.count("a", "attempts"), 0);
+            assert_eq!(runtime.tick(&mut host).unwrap().expired_tasks, [1]);
         }
+        assert_eq!(runtime.report(0).unwrap().expired_jobs, 1);
+        assert_eq!(f.count("a", "attempts"), 1);
         host.shutdown().unwrap();
     }
 }

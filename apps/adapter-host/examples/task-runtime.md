@@ -274,6 +274,22 @@ Ein permanenter Fehler wird nicht als Erfolg übersprungen.
 
 ## Übergabe an die Anwendung
 
+Die Aufgabenlaufzeit startet bis zu acht laufende Input- und
+Observe-Dialoge auf den stdio-Sitzungen der Adapter. Ein Scheduler-Takt
+kann dabei enden, bevor die angefragten Ereignisse vorliegen. Er übernimmt
+fertige Antworten und gibt den Sitzungen Gelegenheit für andere
+Manager-Aufrufe, bevor er neue Polls startet. Der Core speichert jedes
+zugelassene Ereignis vor dem ACK. Eine beim Neustart erneut gelieferte
+Nachricht wird anhand ihrer gespeicherten Identität wiedererkannt.
+
+Bei voller Queue dürfen Input-Quellen für aktive Weckbedingungen weiter
+liefern. Die Runtime prüft diese Zulassung auch bei der eintreffenden
+Antwort. Sie bestätigt einen zu diesem Zeitpunkt nicht zugelassenen Input
+erst, wenn er später zugelassen und gespeichert wird. Der Monitor zeigt
+laufende Dialoge unter `ingress_dialogs` und Eingangsstörungen je Adapter
+unter `ingress_error`. Der einzelne betroffene Adapter wird aus dem
+laufenden Polling genommen.
+
 `TaskRuntime::tick(&mut Host)` liefert neue Fertigmeldungen dieser Runde.
 `completed_after(cursor, limit)` liest die dauerhafte Review-Liste in begrenzten
 Seiten. Jede Meldung enthält Eingabe-, Request-, Ergebnis- und Kandidatenversionen.

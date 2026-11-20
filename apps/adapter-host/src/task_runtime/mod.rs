@@ -28,7 +28,7 @@ use rusqlite::{OptionalExtension, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::{Host, HostError};
+use crate::{Host, HostError, runtime::IngressSelection};
 use config::invalid;
 use job_failure::is_core_failure;
 use journal::{Journal, db};
@@ -215,42 +215,24 @@ impl TaskRuntime {
             self.admit_recurring_checks(now_unix_ms, &mut report)?;
         }
         let caught_up = self.discover(host, &mut report, now_unix_ms)?;
-        // Erst alte Core-Ereignisse übernehmen. Normale Inputs nur bei freier Queue.
-        if caught_up
-            && !report.backpressure
-            && self.journal.capacity(self.config.retry_failed_jobs())?
-                < self.config.max_pending_jobs
-        {
-            host.poll_event_tick()?;
-            if has_deadlines && live_clock {
-                self.journal
-                    .advance_deadline_clock(scheduler::now_unix_ms()?)?;
-            }
-            self.discover(host, &mut report, now_unix_ms)?;
+        let selection = self.ingress_selection(caught_up, report.backpressure)?;
+        let committed_ingress = host.collect_live_ingress(&selection)?;
+        let now = if has_deadlines && live_clock {
+            let now = scheduler::now_unix_ms()?;
+            self.journal.advance_deadline_clock(now)?;
+            now
         } else {
-            // Ein voller Aufgabenpuffer darf seine eigenen Weckereignisse nicht
-            // aussperren. Nur beteiligte Input-Adapter werden weiter abgefragt.
-            let wake_sources = self.journal.waiting_input_adapters()?;
-            if !wake_sources.is_empty() {
-                host.poll_wake_inputs(&wake_sources)?;
-            }
-            if !wake_sources.is_empty()
-                || self.config.routes.iter().any(|route| {
-                    route.goal.is_some()
-                        || route.plan.as_ref().is_some_and(|plan| {
-                            plan.templates
-                                .iter()
-                                .any(|template| template.route.goal.is_some())
-                        })
-                })
-            {
-                host.poll_round()?;
-            }
-        }
+            now_unix_ms
+        };
+        let caught_up = if committed_ingress && caught_up {
+            self.discover(host, &mut report, now)?
+        } else {
+            caught_up
+        };
         if checks_due && !recurring_first {
-            self.admit_recurring_checks(now_unix_ms, &mut report)?;
+            self.admit_recurring_checks(now, &mut report)?;
         }
-        self.activate_scheduled(host, now_unix_ms)?;
+        self.activate_scheduled(host, now)?;
         self.advance_dependencies(host)?;
         self.journal.begin_dispatch_tick()?;
         for _ in 0..self.config.max_jobs_per_tick {
@@ -282,7 +264,7 @@ impl TaskRuntime {
             if !matches_source(&route, &input) {
                 return Err(invalid("saved task no longer matches source"));
             }
-            match self.advance_job(host, sequence, &route, &input, now_unix_ms) {
+            match self.advance_job(host, sequence, &route, &input, now) {
                 Ok(Some(completed)) => {
                     self.journal.complete(&completed)?;
                     report.ready_for_review.push(completed);
@@ -292,7 +274,41 @@ impl TaskRuntime {
             }
         }
         self.cleanup_control_sessions(host)?;
+        let selection = self.ingress_selection(caught_up, report.backpressure)?;
+        host.start_live_ingress(&selection)?;
         Ok(report)
+    }
+
+    fn ingress_selection(
+        &self,
+        caught_up: bool,
+        backpressure: bool,
+    ) -> Result<IngressSelection, HostError> {
+        let all_inputs = caught_up
+            && !backpressure
+            && self.journal.capacity(self.config.retry_failed_jobs())?
+                < self.config.max_pending_jobs;
+        let wake_inputs = if all_inputs {
+            Default::default()
+        } else {
+            // At capacity accept only sources needed by active event waits.
+            self.journal.waiting_input_adapters()?
+        };
+        let observations = all_inputs
+            || !wake_inputs.is_empty()
+            || self.config.routes.iter().any(|route| {
+                route.goal.is_some()
+                    || route.plan.as_ref().is_some_and(|plan| {
+                        plan.templates
+                            .iter()
+                            .any(|template| template.route.goal.is_some())
+                    })
+            });
+        Ok(IngressSelection {
+            all_inputs,
+            wake_inputs,
+            observations,
+        })
     }
 
     fn discover(

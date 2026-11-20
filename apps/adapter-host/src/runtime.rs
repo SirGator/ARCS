@@ -1,5 +1,6 @@
 mod controller_close;
 mod execution;
+mod ingress;
 mod input;
 mod reason;
 mod reconnect;
@@ -32,11 +33,13 @@ use arcs::request::RequestService;
 use arcs::runtime::reservations::ReservationError;
 use arcs::store::{ArtifactRelations, SqliteArtifactStore, relation_kinds};
 use arcs::transform::TransformService;
-use arcs::world::observation::{ObservationLog, ObservationService};
+use arcs::world::observation::{ObservationLog, ObservationService, RecordedObservation};
 use arcs::world::{WorldReducer, WorldState};
 pub use execution::ExecutionWorkerReport;
 use serde::Serialize;
 use serde_json::{Value, json};
+
+pub(crate) use ingress::IngressSelection;
 
 use crate::HostError;
 use crate::config::{
@@ -73,6 +76,8 @@ pub struct AdapterReport {
     pub transforms: Vec<TransformReport>,
     pub inputs: Vec<Artifact>,
     pub input_limit_hits: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ingress_error: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -114,6 +119,7 @@ pub struct Host {
     retiring_request_jobs: Vec<request::RetiringRequest>,
     act_workers: HashMap<AdapterId, execution::ExecutionWorker>,
     controller_workers: RefCell<controller_close::ControllerWorkers>,
+    ingress: ingress::IngressDialogs,
     unavailable_adapters: HashSet<AdapterId>,
     resource_pools: crate::resource_policy::ResourceQuantities,
     reconnect_installations: std::collections::BTreeMap<AdapterId, VersionId>,
@@ -448,6 +454,7 @@ impl Host {
                 transforms: vec![],
                 inputs: vec![],
                 input_limit_hits: 0,
+                ingress_error: None,
             };
             adapters.push(RunningAdapter {
                 config: prepared,
@@ -469,6 +476,7 @@ impl Host {
             retiring_request_jobs: Vec::new(),
             act_workers: HashMap::new(),
             controller_workers: RefCell::default(),
+            ingress: ingress::IngressDialogs::default(),
             unavailable_adapters: HashSet::new(),
             resource_pools: config.resource_pools,
             reconnect_installations,
@@ -839,23 +847,31 @@ impl Host {
                     idle = true;
                     break;
                 };
-                adapter.report.observations_received += 1;
-                if self
-                    .world
-                    .cursor()
-                    .is_none_or(|cursor| recorded.cursor() > cursor)
-                {
-                    WorldReducer::new()
-                        .reduce(&mut self.world, &recorded)
-                        .map_err(HostError::Reduction)?;
-                    adapter.report.observations_committed += 1;
-                } else {
-                    adapter.report.observations_replayed += 1;
-                }
+                Self::reduce_observation(&mut self.world, &mut adapter.report, &recorded)?;
             }
             if !idle {
                 adapter.report.poll_limit_hits += 1;
             }
+        }
+        Ok(())
+    }
+
+    fn reduce_observation(
+        world: &mut WorldState,
+        report: &mut AdapterReport,
+        recorded: &RecordedObservation,
+    ) -> Result<(), HostError> {
+        report.observations_received += 1;
+        if world
+            .cursor()
+            .is_none_or(|cursor| recorded.cursor() > cursor)
+        {
+            WorldReducer::new()
+                .reduce(world, recorded)
+                .map_err(HostError::Reduction)?;
+            report.observations_committed += 1;
+        } else {
+            report.observations_replayed += 1;
         }
         Ok(())
     }
@@ -867,6 +883,7 @@ impl Host {
         cancelled.extend(self.cancel_request_jobs());
         cancelled.extend(self.cancel_controller_closures());
         cancelled.extend(self.cancel_execution_workers());
+        cancelled.extend(self.stop_ingress());
         let mut first_error = reconnect_error;
         for adapter in &mut self.adapters {
             if cancelled.contains(&adapter.config.grant.adapter_id)
@@ -962,5 +979,6 @@ impl Drop for Host {
         self.cancel_request_jobs();
         self.cancel_controller_closures();
         self.cancel_execution_workers();
+        self.stop_ingress();
     }
 }
