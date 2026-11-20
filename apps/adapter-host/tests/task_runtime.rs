@@ -186,6 +186,86 @@ fn acked_input_is_discovered_after_restart_and_candidates_are_handed_to_review()
 }
 
 #[test]
+fn a_second_journal_recovers_a_shared_acked_input_after_its_admission_rolls_back() {
+    let fixture = Fixture::new();
+    let mut host = fixture.host();
+    let mut first = fixture.runtime(&host);
+    let delayed_config = || {
+        let mut config = fixture.config();
+        config.runtime_id = "delayed-runtime".into();
+        config.journal = fixture.directory.join("db/delayed.sqlite");
+        config
+    };
+    let mut delayed = TaskRuntime::open(&host, delayed_config()).unwrap();
+
+    let completed = tick_until(&mut host, &mut first, |tick| {
+        !tick.ready_for_review.is_empty()
+    });
+    let original = &completed.ready_for_review[0];
+    tick_until(&mut host, &mut first, |_| {
+        scalar(
+            &fixture.db("input"),
+            "SELECT COUNT(*) FROM events WHERE ack=1",
+        ) == 1
+    });
+
+    let journal = fixture.db("delayed");
+    journal
+        .execute_batch(
+            "CREATE TRIGGER reject_cursor_update BEFORE UPDATE OF cursor ON runtime_installation
+             WHEN EXISTS(SELECT 1 FROM runtime_jobs)
+             BEGIN SELECT RAISE(ABORT, 'simulated admission failure'); END;",
+        )
+        .unwrap();
+    assert!(matches!(
+        delayed.tick(&mut host),
+        Err(arcs_host::HostError::Store(_))
+    ));
+    assert_eq!(scalar(&journal, "SELECT COUNT(*) FROM runtime_jobs"), 0);
+    assert_eq!(
+        scalar(&journal, "SELECT cursor FROM runtime_installation"),
+        0
+    );
+    assert_eq!(
+        scalar(&fixture.db("solver"), "SELECT COUNT(*) FROM invocations"),
+        1
+    );
+
+    host.shutdown().unwrap();
+    drop((delayed, first, host));
+    journal
+        .execute_batch("DROP TRIGGER reject_cursor_update")
+        .unwrap();
+
+    let mut host = fixture.host();
+    let mut first = fixture.runtime(&host);
+    let mut delayed = TaskRuntime::open(&host, delayed_config()).unwrap();
+    let tick = first.tick(&mut host).unwrap();
+    assert_eq!(tick.discovered_jobs, 0);
+    assert!(tick.ready_for_review.is_empty());
+    let tick = tick_until(&mut host, &mut delayed, |tick| {
+        !tick.ready_for_review.is_empty()
+    });
+    let recovered = &tick.ready_for_review[0];
+    assert_eq!(recovered.input_version_id, original.input_version_id);
+    assert_ne!(recovered.request_version_id, original.request_version_id);
+    assert_eq!(first.completed_after(0, 2).unwrap(), [original.clone()]);
+    assert_eq!(delayed.completed_after(0, 2).unwrap(), [recovered.clone()]);
+    assert_eq!(
+        scalar(&fixture.db("solver"), "SELECT COUNT(*) FROM invocations"),
+        2
+    );
+    assert_eq!(
+        scalar(
+            &fixture.db("input"),
+            "SELECT COUNT(*) FROM events WHERE ack=1"
+        ),
+        1
+    );
+    host.shutdown().unwrap();
+}
+
+#[test]
 fn interrupted_completion_reuses_core_and_driver_journals() {
     let fixture = Fixture::new();
     let mut host = fixture.host();

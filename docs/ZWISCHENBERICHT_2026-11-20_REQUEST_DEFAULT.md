@@ -25,7 +25,14 @@ sobald der Host später hinzugekommene Aufgaben meldet. Beim Blättern bleibt
 die gewählte Seitengrenze erhalten. Der GTK-Test öffnet die leere
 Warteschlange vor dem ersten Input und prüft anschließend beide Seiten.
 
-Workspace-Build und Formatprüfung waren erfolgreich. Die Prüfprotokolle
-liegen unter `var/verification-request-default/`.
+Ein weiterer Wiederanlauftest verwendet zwei Aufgabenjournale mit demselben
+Input. Nach der Bestätigung an den Adapter unterbricht der Test die Aufnahme
+im zweiten Journal. Nach dem Neustart übernimmt dieses Journal dasselbe
+Artefakt aus dem Core. Beide Journale führen ihren Auftrag je einmal aus.
+
+Der breite Workspace-Lauf bestand 665 Tests. Danach wurden die relevanten
+Host- und Core-Pfade erneut geprüft. Der separate Drohnensimulator bestand
+33 Tests und das GTK-Kontrollpanel 46. Die Prüfprotokolle liegen unter
+`var/verification-request-default/`.
 
 Die Abnahme an realen Controllern und im monatelangen Dauerbetrieb steht aus.
