@@ -530,21 +530,43 @@ fn authorize<'a>(
     input: &Artifact,
     result: &SchemaId,
 ) -> Result<&'a RegisteredAdapter, OutputError> {
+    let registered = authorized_contract(registry, schemas, capability, &input.schema_id, result)?;
+    if serde_json::to_vec(&input.payload)?.len() > registered.grant().max_payload_bytes {
+        return Err(OutputError::InputTooLarge);
+    }
+    Ok(registered)
+}
+
+/// Check a destination's current contract before configuring a report producer.
+pub fn validate_output_contract(
+    registry: &AdapterRegistry,
+    schemas: &SchemaRegistry,
+    capability: &CapabilityRef,
+    input: &SchemaId,
+    result: &SchemaId,
+) -> Result<(), OutputError> {
+    authorized_contract(registry, schemas, capability, input, result).map(|_| ())
+}
+
+fn authorized_contract<'a>(
+    registry: &'a AdapterRegistry,
+    schemas: &SchemaRegistry,
+    capability: &CapabilityRef,
+    input: &SchemaId,
+    result: &SchemaId,
+) -> Result<&'a RegisteredAdapter, OutputError> {
     let (registered, descriptor) =
         registry.authorized_capability(&capability.adapter_id, &capability.capability_id)?;
     if registered.grant().producer_class != ProducerClass::Executor {
         return Err(OutputError::ExecutorRequired);
     }
-    if !matches!(&descriptor.contract,CapabilityContract::Output {accepts,emits,idempotent:true} if accepts.contains(&input.schema_id)&&emits.contains(result))
+    if !matches!(&descriptor.contract,CapabilityContract::Output {accepts,emits,idempotent:true} if accepts.contains(input)&&emits.contains(result))
     {
         return Err(OutputError::ContractMismatch);
     }
     let definition = schemas.get(result).ok_or(OutputError::ContractMismatch)?;
     if super::super::control_types::is_control_type(&definition.artifact_type) {
         return Err(OutputError::ControlResultForbidden);
-    }
-    if serde_json::to_vec(&input.payload)?.len() > registered.grant().max_payload_bytes {
-        return Err(OutputError::InputTooLarge);
     }
     Ok(registered)
 }

@@ -12,6 +12,7 @@ pub enum OutputError {
     Invocation(InvocationError),
     AdapterCall(AdapterCallError),
     MissingArtifact(VersionId),
+    MissingReportField(String),
     InvalidArtifact(ValidationError),
     Gate(&'static str),
     ContractMismatch,

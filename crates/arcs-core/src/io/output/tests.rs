@@ -248,6 +248,52 @@ fn a_task_report_preserves_input_trust_and_exact_version_across_replay() {
             .version_id,
         report.version_id
     );
+    let fields = vec!["body".into()];
+    let planned = service
+        .prepare_plan_report(
+            "task-runtime",
+            1,
+            &input_version,
+            &report.version_id,
+            &fields,
+        )
+        .unwrap();
+    assert_ne!(planned.version_id, report.version_id);
+    assert_eq!(planned.trust, input.trust);
+    assert_eq!(
+        planned.payload["body"],
+        serde_json::to_string_pretty(&serde_json::json!({"body":input.payload["body"]})).unwrap()
+    );
+    let relations = fixture
+        .store
+        .outgoing_relations(&planned.version_id)
+        .unwrap();
+    assert!(
+        relations
+            .iter()
+            .any(|edge| edge.to == report.version_id && edge.kind == relation_kinds::based_on())
+    );
+    assert!(
+        relations
+            .iter()
+            .any(|edge| edge.to == input_version && edge.kind == relation_kinds::derived_from())
+    );
+    assert_eq!(
+        service
+            .prepare_plan_report(
+                "task-runtime",
+                1,
+                &input_version,
+                &report.version_id,
+                &fields
+            )
+            .unwrap(),
+        planned
+    );
+    assert!(matches!(
+        service.prepare_plan_report("task-runtime", 1, &input_version, &report.version_id, &["absent".into()]),
+        Err(OutputError::MissingReportField(field)) if field == "absent"
+    ));
     assert!(fixture.endpoint.calls.lock().unwrap().is_empty());
 }
 

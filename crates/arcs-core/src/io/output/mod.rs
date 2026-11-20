@@ -7,6 +7,7 @@ mod service;
 pub use error::OutputError;
 pub use service::{
     OutputPreparation, OutputRequest, OutputService, PreparedOutput, TASK_REPORT_SCHEMA,
+    validate_output_contract,
 };
 
 #[cfg(test)]

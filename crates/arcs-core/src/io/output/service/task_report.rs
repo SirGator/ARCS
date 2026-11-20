@@ -12,23 +12,83 @@ impl OutputService<'_> {
         task_sequence: u64,
         result_version: &VersionId,
     ) -> Result<Artifact, OutputError> {
+        self.render_task_report(runtime_id, task_sequence, result_version, None)
+    }
+
+    /// Publish only the fields that the plan's operator template exports.
+    pub fn prepare_plan_report(
+        &mut self,
+        runtime_id: &str,
+        task_sequence: u64,
+        result_version: &VersionId,
+        plan_version: &VersionId,
+        fields: &[String],
+    ) -> Result<Artifact, OutputError> {
+        self.render_task_report(
+            runtime_id,
+            task_sequence,
+            result_version,
+            Some((plan_version, fields)),
+        )
+    }
+
+    fn render_task_report(
+        &mut self,
+        runtime_id: &str,
+        task_sequence: u64,
+        result_version: &VersionId,
+        plan: Option<(&VersionId, &[String])>,
+    ) -> Result<Artifact, OutputError> {
         let result = self.load(result_version)?;
+        let sequence = task_sequence.to_string();
+        let mut parents = vec![result.version_id.0.clone()];
+        let mut relations = vec![(result.version_id.clone(), relation_kinds::derived_from())];
+        let (content, key) = if let Some((plan_version, fields)) = plan {
+            let mut selected = serde_json::Map::new();
+            for field in fields {
+                let value = result
+                    .payload
+                    .get(field)
+                    .ok_or_else(|| OutputError::MissingReportField(field.clone()))?;
+                selected.insert(field.clone(), value.clone());
+            }
+            parents.push(plan_version.0.clone());
+            relations.push((plan_version.clone(), relation_kinds::based_on()));
+            (
+                serde_json::Value::Object(selected),
+                deterministic_invocation_id(
+                    InvocationKind::Output,
+                    &[
+                        "plan-report-v1",
+                        runtime_id,
+                        &sequence,
+                        &result.version_id.0,
+                        &plan_version.0,
+                        &serde_json::to_string(fields)?,
+                    ],
+                ),
+            )
+        } else {
+            (
+                result.payload,
+                deterministic_invocation_id(
+                    InvocationKind::Output,
+                    &[
+                        "task-report-v1",
+                        runtime_id,
+                        &sequence,
+                        &result.version_id.0,
+                    ],
+                ),
+            )
+        };
         let payload = serde_json::json!({
             "title": format!("ARCS – Aufgabe {task_sequence}"),
-            "body": serde_json::to_string_pretty(&result.payload)?,
+            "body": serde_json::to_string_pretty(&content)?,
         });
         if serde_json::to_vec(&payload)?.len() > 65_536 {
             return Err(OutputError::InputTooLarge);
         }
-        let key = deterministic_invocation_id(
-            InvocationKind::Output,
-            &[
-                "task-report-v1",
-                runtime_id,
-                &task_sequence.to_string(),
-                &result.version_id.0,
-            ],
-        );
         let stream = format!("task-output-report:{key}");
         let schema = self
             .schemas
@@ -52,7 +112,7 @@ impl OutputService<'_> {
             tags: vec![],
             payload,
             provenance: Some(Provenance {
-                parents: vec![result.version_id.0.clone()],
+                parents,
                 rules_applied: vec!["task_output.result_selected".into()],
                 models_used: vec![],
                 transform: Some("task_output.render_report".into()),
@@ -67,7 +127,7 @@ impl OutputService<'_> {
                     key: &stream,
                     input: &fingerprint,
                 },
-                &[(result.version_id, relation_kinds::derived_from())],
+                &relations,
             )?
             .artifact)
     }
