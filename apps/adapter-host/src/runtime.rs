@@ -1,4 +1,5 @@
 mod controller_close;
+mod execution;
 mod input;
 mod reason;
 mod reconnect;
@@ -28,11 +29,12 @@ use arcs::core::{
 use arcs::execution::ExecutionService;
 use arcs::input::{InputMessage, InputService};
 use arcs::request::RequestService;
-use arcs::runtime::reservations::{Reservation, ReservationError};
+use arcs::runtime::reservations::ReservationError;
 use arcs::store::{ArtifactRelations, SqliteArtifactStore, relation_kinds};
 use arcs::transform::TransformService;
 use arcs::world::observation::{ObservationLog, ObservationService};
 use arcs::world::{WorldReducer, WorldState};
+pub use execution::ExecutionWorkerReport;
 use serde::Serialize;
 use serde_json::{Value, json};
 
@@ -110,6 +112,7 @@ pub struct Host {
     reasoning_jobs: HashMap<String, reason::PendingReasoning>,
     request_jobs: HashMap<String, request::PendingRequest>,
     retiring_request_jobs: Vec<request::RetiringRequest>,
+    act_workers: HashMap<AdapterId, execution::ExecutionWorker>,
     controller_workers: RefCell<controller_close::ControllerWorkers>,
     unavailable_adapters: HashSet<AdapterId>,
     resource_pools: crate::resource_policy::ResourceQuantities,
@@ -464,6 +467,7 @@ impl Host {
             reasoning_jobs: HashMap::new(),
             request_jobs: HashMap::new(),
             retiring_request_jobs: Vec::new(),
+            act_workers: HashMap::new(),
             controller_workers: RefCell::default(),
             unavailable_adapters: HashSet::new(),
             resource_pools: config.resource_pools,
@@ -732,37 +736,20 @@ impl Host {
         adapter_id: &AdapterId,
         action: &VersionId,
     ) -> Result<Artifact, HostError> {
-        self.execute_approved_with_reservation(adapter_id, action, None)
-    }
-
-    pub(crate) fn execute_approved_with_reservation(
-        &mut self,
-        adapter_id: &AdapterId,
-        action: &VersionId,
-        reservation: Option<&Reservation>,
-    ) -> Result<Artifact, HostError> {
         self.ensure_adapter_available(adapter_id)?;
-        let adapter = self
+        let endpoint = self
             .adapters
             .iter()
             .find(|a| a.config.grant.adapter_id == *adapter_id)
-            .ok_or_else(|| invalid(format!("unknown adapter {}", adapter_id.0)))?;
-        let mut execution = ExecutionService::new(
-            &self.registry,
-            &self.schemas,
-            &self.store,
-            &mut self.ids,
-            &SystemClock,
-        );
-        let endpoint = adapter.endpoint.as_ref();
-        let result = match reservation {
-            Some(reservation) => execution.execute_reserved(endpoint, action, reservation),
-            None => execution.execute(endpoint, action),
-        };
-        result.map_err(|source| HostError::Execution {
-            adapter: adapter_id.clone(),
-            source,
-        })
+            .ok_or_else(|| invalid(format!("unknown adapter {}", adapter_id.0)))?
+            .endpoint
+            .clone();
+        self.execution_service()
+            .execute(endpoint.as_ref(), action)
+            .map_err(|source| HostError::Execution {
+                adapter: adapter_id.clone(),
+                source,
+            })
     }
 
     pub(crate) fn reservation_controller(
@@ -879,6 +866,7 @@ impl Host {
         let mut cancelled = self.cancel_reasoning_jobs();
         cancelled.extend(self.cancel_request_jobs());
         cancelled.extend(self.cancel_controller_closures());
+        cancelled.extend(self.cancel_execution_workers());
         let mut first_error = reconnect_error;
         for adapter in &mut self.adapters {
             if cancelled.contains(&adapter.config.grant.adapter_id)
@@ -973,5 +961,6 @@ impl Drop for Host {
         self.cancel_reasoning_jobs();
         self.cancel_request_jobs();
         self.cancel_controller_closures();
+        self.cancel_execution_workers();
     }
 }

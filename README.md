@@ -53,7 +53,8 @@ dokumentiert Slice 30. Der [Bericht zur Klärung von Gerätereservierungen](docs
 dokumentiert Slice 31. Der [Bericht zur Reservierungsprüfung am Aktor](docs/ZWISCHENBERICHT_2026-11-19_ACT_FENCE.md)
 dokumentiert Slice 32. Der [Bericht zur bestätigten Controller-Übergabe](docs/ZWISCHENBERICHT_2026-11-19_CONTROLLER_CLOSE.md)
 dokumentiert Slice 33. Der [Bericht zur nebenläufigen Controller-Übergabe](docs/ZWISCHENBERICHT_2026-11-19_CONTROLLER_WORKERS.md)
-dokumentiert Slice 34. Die Berichte vom
+dokumentiert Slice 34. Der [Bericht zur nebenläufigen Aktionsausführung](docs/ZWISCHENBERICHT_2026-11-20_ACT_WORKERS.md)
+dokumentiert Slice 35. Die Berichte vom
 [17. November](docs/ZWISCHENBERICHT_2026-11-17.md) und
 [16. November](docs/ZWISCHENBERICHT_2026-11-16.md) dokumentieren frühere
 Umsetzungsstände, Prüfergebnisse und offene Grenzen.

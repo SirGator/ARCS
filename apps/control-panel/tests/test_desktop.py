@@ -151,7 +151,8 @@ class DesktopTests(unittest.TestCase):
         path.write_text(json.dumps(runtime))
         self.window.select_configuration(Configuration(host,path))
         self.window.start_button.emit('clicked')
-        pump_until(lambda:self.window.snapshot.get('runtime') is not None and self.window.snapshot['runtime']['completed_goals']==1)
+        pump_until(lambda:self.window.snapshot.get('runtime') is not None
+                   and self.window.snapshot['runtime']['completed_goals']==1, timeout=30)
         report=self.window.snapshot['runtime']
         self.assertEqual(report['goals'][0]['state'],'completed')
         self.assertEqual(report['goals'][0]['round'],2)
@@ -164,7 +165,7 @@ class DesktopTests(unittest.TestCase):
         page.fields['minimum_actuations'][1].set_text('4')
         page.send_button.emit('clicked')
         pump_until(lambda:not page.pending and bool(page.history))
-        pump_until(lambda:self.window.snapshot['runtime']['completed_goals']==2)
+        pump_until(lambda:self.window.snapshot['runtime']['completed_goals']==2, timeout=30)
         self.assertIn('2 Ziele fertig',self.window.metrics['review'][1].get_text())
         render_window(self.window,PROJECT_ROOT/'var/control-panel/screenshots/input-form.png')
         self.window.stop_button.emit('clicked')
@@ -321,7 +322,8 @@ class DesktopTests(unittest.TestCase):
         pump_until(lambda: page.records['goal:1'][1]['dispatch_cursor'] is not None)
         page.reason.set_text('Simulierten Auftrag nach Auslösung beenden')
         page.cancel_button.emit('clicked')
-        pump_until(lambda: 'resource:1' in page.records and page.pending is None)
+        pump_until(lambda: 'resource:1' in page.records and page.pending is None
+                   and page.records['resource:1'][1]['execution'] is not None)
 
         page.selection.set_active_id('resource:1')
         self.assertIn('device.fan-01', page.detail.get_text())
@@ -477,7 +479,9 @@ class DesktopTests(unittest.TestCase):
             page.fields['raw_text'][1].get_buffer().set_text(text)
             page.send_button.emit('clicked')
             pump_until(lambda:not page.pending)
-            pump_until(lambda:self.window.snapshot.get('runtime') is not None and self.window.snapshot['runtime']['completed_goals']==completed and self.window.snapshot['runtime']['blocked_goals']==blocked)
+            pump_until(lambda:self.window.snapshot.get('runtime') is not None
+                       and self.window.snapshot['runtime']['completed_goals']==completed
+                       and self.window.snapshot['runtime']['blocked_goals']==blocked, timeout=30)
             if 'Drohne' in text:
                 self.assertIn('versteht diese Aufgabe nicht',page.status.get_text())
             else:

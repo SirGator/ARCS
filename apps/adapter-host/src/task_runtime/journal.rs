@@ -41,6 +41,7 @@ fn io(path: &Path, source: std::io::Error) -> HostError {
 
 pub(super) struct Journal {
     pub connection: Connection,
+    pub path: PathBuf,
     pub operator: AdapterRegistry,
     pub ids: arcs::core::SequenceIdGenerator,
     _lock: File,
@@ -193,6 +194,7 @@ impl Journal {
         recurrence::initialize(&connection)?;
         Ok(Self {
             connection,
+            path,
             operator,
             ids,
             _lock: lock,

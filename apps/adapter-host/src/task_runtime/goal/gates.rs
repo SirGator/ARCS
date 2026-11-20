@@ -367,7 +367,22 @@ impl TaskRuntime {
         route: &ReasoningRoute,
         config: &GoalConfig,
         task: &mut GoalTask,
-    ) -> Result<(), HostError> {
+    ) -> Result<Option<VersionId>, HostError> {
+        let capability = task
+            .capability
+            .clone()
+            .ok_or_else(|| invalid("missing action capability"))?;
+        let adapter = &capability.adapter_id;
+        if let Some(action) = &task.action
+            && host.owns_execution(&self.journal.path, task.sequence, action)
+        {
+            return host
+                .collect_execution(adapter)
+                .map(|result| result.map(|artifact| artifact.version_id));
+        }
+        if !host.execution_slot_available(adapter)? {
+            return Ok(None);
+        }
         // Revalidate policy on resume as well. Core independently checks approval,
         // schema, capability grant and idempotent execution before dispatch.
         let gate = self.gate(host, route, config, task)?;
@@ -380,10 +395,6 @@ impl TaskRuntime {
             .approval
             .as_ref()
             .ok_or_else(|| invalid("missing approval"))?;
-        let capability = task
-            .capability
-            .as_ref()
-            .ok_or_else(|| invalid("missing action capability"))?;
         let action = ActionService::new(
             host.registry(),
             host.schemas(),
@@ -391,16 +402,32 @@ impl TaskRuntime {
             &mut self.journal.ids,
             &SystemClock,
         )
-        .materialize(approval, capability)
+        .materialize(approval, &capability)
         .map_err(service_error)?;
-        let execution = host.execute_approved_with_reservation(
-            &capability.adapter_id,
+        if task
+            .action
+            .as_ref()
+            .is_some_and(|saved| saved != &action.version_id)
+        {
+            return Err(invalid("materialized action differs from checkpoint"));
+        }
+        if task.action.is_none() || task.dispatch_cursor.is_none() {
+            if task.dispatch_cursor.is_none() {
+                let cursor = host.store().latest_sequence().map_err(HostError::Store)?;
+                task.dispatch_cursor = Some(cursor);
+                task.observation_cursor = cursor;
+            }
+            task.action = Some(action.version_id.clone());
+            self.save_goal(task)?;
+        }
+        host.start_execution(
+            &self.journal.path,
+            task.sequence,
+            adapter,
             &action.version_id,
             reservation.as_ref(),
-        )?;
-        task.action = Some(action.version_id);
-        task.execution = Some(execution.version_id);
-        Ok(())
+        )
+        .map(|result| result.map(|artifact| artifact.version_id))
     }
 
     pub(super) fn record_goal_outcome(

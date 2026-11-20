@@ -189,7 +189,14 @@ fn every_phase_resumes_after_restart_and_manual_approval_is_separate_for_each_ro
         let mut host = fixture.host();
         let mut runtime = fixture.runtime(&host);
         runtime.tick(&mut host).unwrap();
-        let current = task(&runtime);
+        let mut current = task(&runtime);
+        if !host.execution_workers().is_empty() {
+            // Let the external reply reach its next checkpoint before this
+            // restart. The monitor tests restart with the reply still in flight.
+            current = until(&mut host, &mut runtime, |state| {
+                state == GoalState::Observing
+            });
+        }
         if current.state == GoalState::AwaitingApproval {
             runtime
                 .review_goal(
@@ -495,7 +502,9 @@ fn a_committed_manual_decision_is_recovered_if_its_queue_checkpoint_was_interrup
     let mut runtime = fixture.runtime(&host);
     runtime.tick(&mut host).unwrap();
     assert_eq!(task(&runtime).state, GoalState::Executing);
-    runtime.tick(&mut host).unwrap();
+    until(&mut host, &mut runtime, |state| {
+        state == GoalState::Observing
+    });
     assert_eq!(actuations(&fixture), 1);
     assert_eq!(count(&host, "approval"), 1);
     host.shutdown().unwrap();

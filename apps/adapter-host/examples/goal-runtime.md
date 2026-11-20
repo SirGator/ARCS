@@ -95,12 +95,13 @@ Core-Subject einer Observe-Quelle, damit mehrere Geräte nicht vermischt werden.
 
 Request-Abfragen erhalten pro Aufgabe, Runde, Phase und Quelle eine eigene
 persistente Eingabe. Ein Neustart verwendet dieselbe Messung, eine neue
-Phase erzeugt eine neue Abfrage. Observe-Eingaben müssen nach dem Aufgaben-
-ereignis beziehungsweise nach der gespeicherten Grenze unmittelbar vor dem
-Aktionsdispatch im Core eingetroffen sein. Alte Beobachtungen und der
-Ausführungsbeleg allein ersetzen keine frische Wirkungsbeobachtung.
-Das ist eine Empfangsgrenze, kein Beweis für die physikalische Aufnahmezeit;
-deren Auswertung bleibt beim externen Reasoner und seinem Aufnahmekontext.
+Phase erzeugt eine neue Abfrage. Vor einer Aktion beginnt das Observe-Fenster
+am gespeicherten Startcursor. Für die Wirkungsprüfung berücksichtigt die
+Runtime Beobachtungen, die nach dem validierten Ausführungsbeleg im Core
+eingetroffen sind. Damit kann ein während des Aufrufs empfangener Messwert
+die Wirkungsprüfung nicht vorzeitig erfüllen. Dieser Cursor misst den
+Empfang im Core. Die physikalische Aufnahmezeit bewertet der externe Reasoner
+anhand seiner Quellen.
 
 Für Vorher-/Nachher-Erfassung müssen alle Quellen vorliegen. Teilstände und
 Lesepositionen werden gespeichert; historische Logseiten werden begrenzt
@@ -220,11 +221,20 @@ ohne `goal` behalten ihren bisherigen Vertrag und `ready_for_review`.
 Polling-Limits bleiben veränderbar, semantische Konfigurationsänderungen
 brauchen weiterhin eine neue Runtime-ID und ein neues Journal.
 
-Vor dem Dispatch wird die Beobachtungsgrenze dauerhaft gespeichert. Bei einem
-Absturz nach externer Ausführung vor dem nächsten Checkpoint verwenden Core
-und Adapter dieselbe Action-/Invocation-Identität. Die externe Implementierung
-muss ihren Idempotenzvertrag erfüllen. Die Runtime behauptet keine generelle
-Exactly-once-Garantie für beliebige Hardware.
+Vor dem Senden speichert das Journal die Action-Version und den
+Dispatch-Cursor. Der Core bindet die Invocation an diese Action und
+gegebenenfalls an die gehaltene Reservierungsrevision. Bis zu vier
+Act-Worker übertragen solche vorbereiteten Aufrufe. Eine Adaptersitzung
+gehört jeweils einem laufenden Aufruf und wird mit den anderen Managern
+sowie der Controller-Übergabe geteilt. Im Monitor zeigt `execution_workers`
+Aufgabe, Action-Version, Invocation-ID und Capability der laufenden Aufrufe.
+
+Nach einem unterbrochenen Aufruf verwendet die Runtime dieselbe Action- und
+Invocation-ID. Der Adapter muss die Wiederholung anhand dieser ID
+deduplizieren. Nach einem Abbruch kann eine verspätete Antwort weiterhin
+einen Beleg im Artifact-Netz erzeugen. Der Monitor zeigt ihn in der
+Reservierungsprüfung. Die Aufgabe bleibt beendet und eine ungeklärte
+Gerätereservierung bleibt gehalten.
 
 Aufgaben werden zwischen Schritten fair reihum bearbeitet. Eine manuelle
 Freigabepause blockiert andere Jobs nicht. Fehler stoppen den Lauf sichtbar und

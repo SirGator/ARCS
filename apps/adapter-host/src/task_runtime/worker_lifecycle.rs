@@ -17,6 +17,22 @@ impl TaskRuntime {
                 .map(|c| c.input)
                 .collect(),
         );
+        for worker in host.finished_executions(&self.journal.path) {
+            let still_executing = self.saved_goal(worker.sequence)?.is_some_and(|task| {
+                task.state == goal::GoalState::Executing
+                    && task.action.as_ref() == Some(&worker.action_version)
+            });
+            if still_executing && !self.journal.task_is_paused(worker.sequence)? {
+                continue;
+            }
+            // A dispatched effect may already exist. Commit the receipt,
+            // but leave the stopped or paused task's checkpoint as it is.
+            if let Err(error) = host.collect_execution(&worker.capability.adapter_id)
+                && is_core_failure(&error)
+            {
+                return Err(error);
+            }
+        }
         Ok(())
     }
     pub(super) fn collect_paused_source_requests(

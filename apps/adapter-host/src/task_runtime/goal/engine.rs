@@ -266,13 +266,16 @@ impl TaskRuntime {
             GoalState::Verifying => self.verify_goal(host, route, config, &mut task)?,
             GoalState::AwaitingApproval => self.recover_goal_review(host, &mut task)?,
             GoalState::Executing => {
-                if task.dispatch_cursor.is_none() {
-                    let cursor = host.store().latest_sequence().map_err(HostError::Store)?;
-                    task.dispatch_cursor = Some(cursor);
-                    task.observation_cursor = cursor;
-                    self.save_goal(&task)?;
-                }
-                self.execute_goal(host, route, config, &mut task)?;
+                let Some(execution) = self.execute_goal(host, route, config, &mut task)? else {
+                    return Ok(());
+                };
+                // Observe only after Core has recorded the validated reply.
+                task.observation_cursor = host
+                    .store()
+                    .committed_sequence(&execution)
+                    .map_err(HostError::Store)?
+                    .ok_or_else(|| invalid("missing committed execution"))?;
+                task.execution = Some(execution);
                 task.wait_ticks = 0;
                 task.state = GoalState::Observing;
             }

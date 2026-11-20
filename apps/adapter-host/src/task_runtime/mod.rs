@@ -544,6 +544,20 @@ fn is_core_failure(error: &HostError) -> bool {
                     | arcs::request::RequestError::StaleDispatch,
                 ..
             }
+            | HostError::Execution {
+                source: arcs::execution::ExecutionError::Store(_)
+                    | arcs::execution::ExecutionError::Invocation(
+                        arcs::runtime::InvocationError::Store(_)
+                            | arcs::runtime::InvocationError::InvalidState(_)
+                            | arcs::runtime::InvocationError::IdentityConflict(_)
+                            | arcs::runtime::InvocationError::InvalidTransition { .. }
+                            | arcs::runtime::InvocationError::MissingResult
+                    )
+                    | arcs::execution::ExecutionError::Reservation(
+                        arcs::runtime::reservations::ReservationError::Store(_)
+                    ),
+                ..
+            }
             | HostError::Reasoning(arcs::reasoning::ReasoningError::Store(_))
             | HostError::Reasoning(arcs::reasoning::ReasoningError::Invocation(_))
             | HostError::Reasoning(arcs::reasoning::ReasoningError::Retrieval(

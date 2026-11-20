@@ -519,6 +519,18 @@ impl SqliteArtifactStore {
             .transpose()
     }
 
+    /// Commit cursor of an exact artifact version, including after reopening.
+    pub fn committed_sequence(&self, version: &VersionId) -> Result<Option<u64>, StoreError> {
+        self.connection
+            .query_row(
+                "SELECT sequence FROM artifact_versions WHERE version_id = ?1",
+                [&version.0],
+                |row| row.get::<_, i64>(0).map(|sequence| sequence as u64),
+            )
+            .optional()
+            .map_err(StoreError::from)
+    }
+
     /// Letzter vorhandener Commit-Cursor, ohne das historische Log zu laden.
     pub fn latest_sequence(&self) -> Result<u64, StoreError> {
         self.connection

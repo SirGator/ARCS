@@ -1,16 +1,19 @@
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::adapters::{ActAdapter, ActInvocation, AdapterRegistry, CapabilityRef, ProducerClass};
+use crate::adapters::{
+    ActAdapter, ActFence, ActInvocation, ActResponse, AdapterCallError, AdapterGrant,
+    AdapterRegistry, CapabilityRef, ProducerClass,
+};
 use crate::approval::ApprovalDecision;
 use crate::core::{
     Actor, ActorType, Artifact, ArtifactFactory, ArtifactFactoryInput, ArtifactIdGenerator, Clock,
-    Provenance, SchemaId, SchemaRegistry, Source, SourceClass, SourceKind, SubjectId, Trust,
-    VersionId,
+    Provenance, SchemaDefinition, SchemaId, SchemaRegistry, Source, SourceClass, SourceKind,
+    SubjectId, Trust, VersionId,
 };
 use crate::runtime::reservations::{Reservation, ReservationService};
 use crate::runtime::{
-    InvocationKind, InvocationService, InvocationSpec, InvocationStatus,
+    InvocationKind, InvocationService, InvocationSpec, InvocationState, InvocationStatus,
     deterministic_input_fingerprint, deterministic_invocation_id,
 };
 use crate::store::{SqliteArtifactStore, relation_kinds};
@@ -34,6 +37,52 @@ struct ApprovalGatePayload {
     target_version: String,
     verification_report_version: String,
     decision: ApprovalDecision,
+}
+
+pub enum ExecutionPreparation {
+    Complete(Box<Artifact>),
+    Dispatch(Box<PreparedExecution>),
+}
+
+/// Core-owned context for validating and recording a dispatched action's response.
+pub struct PreparedExecution {
+    call: ExecutionCall,
+    dispatched: InvocationState,
+    grant: AdapterGrant,
+    result_definition: SchemaDefinition,
+    approval_version: VersionId,
+    candidate_version: VersionId,
+}
+
+impl PreparedExecution {
+    pub fn call(&self) -> &ExecutionCall {
+        &self.call
+    }
+}
+
+/// An authorized dispatch containing only the data needed at the transport boundary.
+#[derive(Clone)]
+pub struct ExecutionCall {
+    invocation: ActInvocation,
+    fence: Option<ActFence>,
+}
+
+impl ExecutionCall {
+    pub fn invocation(&self) -> &ActInvocation {
+        &self.invocation
+    }
+
+    pub fn send(&self, endpoint: &dyn ActAdapter) -> Result<ActResponse, AdapterCallError> {
+        if endpoint.manifest().adapter_id != self.invocation.capability.adapter_id {
+            return Err(AdapterCallError::Rejected(
+                "Act endpoint identity mismatch".into(),
+            ));
+        }
+        match &self.fence {
+            Some(fence) => endpoint.execute_fenced(&self.invocation, fence),
+            None => endpoint.execute(&self.invocation),
+        }
+    }
 }
 
 /// Führt ausschließlich einen bereits materialisierten Action-Auftrag aus.
@@ -85,6 +134,22 @@ impl<'a> ExecutionService<'a> {
         action_version: &VersionId,
         reservation: Option<&Reservation>,
     ) -> Result<Artifact, ExecutionError> {
+        match self.prepare(endpoint, action_version, reservation)? {
+            ExecutionPreparation::Complete(result) => Ok(*result),
+            ExecutionPreparation::Dispatch(prepared) => {
+                let response = prepared.call().send(endpoint);
+                self.finish(*prepared, response)
+            }
+        }
+    }
+
+    /// Register the durable invocation and fence before the endpoint receives a call.
+    pub fn prepare(
+        &self,
+        endpoint: &dyn ActAdapter,
+        action_version: &VersionId,
+        reservation: Option<&Reservation>,
+    ) -> Result<ExecutionPreparation, ExecutionError> {
         let action = self
             .store
             .get(action_version)?
@@ -210,15 +275,7 @@ impl<'a> ExecutionService<'a> {
         }
 
         let grant = registered.grant();
-        let invocation_id = deterministic_invocation_id(
-            InvocationKind::Execution,
-            &[
-                &action_version.0,
-                &capability.adapter_id.0,
-                &capability.capability_id.0,
-                &result_schema.0,
-            ],
-        );
+        let invocation_id = execution_invocation_id(action_version, &capability, &result_schema);
         let invocation = ActInvocation {
             invocation_id: invocation_id.clone(),
             capability: capability.clone(),
@@ -253,6 +310,7 @@ impl<'a> ExecutionService<'a> {
                 return self
                     .store
                     .get(&result)?
+                    .map(|artifact| ExecutionPreparation::Complete(Box::new(artifact)))
                     .ok_or(crate::runtime::InvocationError::MissingResult)
                     .map_err(ExecutionError::from);
             }
@@ -260,16 +318,48 @@ impl<'a> ExecutionService<'a> {
             invocations.dispatch(&recovered)?
         };
 
+        if let Some(fence) = &fence
+            && let Err(error) = ReservationService::new(self.store, self.schemas, self.clock)
+                .register_fenced_dispatch(fence, &capability)
+        {
+            let error = ExecutionError::Reservation(error);
+            self.record_failure(&dispatched, &error)?;
+            return Err(error);
+        }
+        Ok(ExecutionPreparation::Dispatch(Box::new(
+            PreparedExecution {
+                call: ExecutionCall { invocation, fence },
+                dispatched,
+                grant: grant.clone(),
+                result_definition,
+                approval_version,
+                candidate_version,
+            },
+        )))
+    }
+
+    pub fn finish(
+        &mut self,
+        prepared: PreparedExecution,
+        response: Result<ActResponse, AdapterCallError>,
+    ) -> Result<Artifact, ExecutionError> {
+        let PreparedExecution {
+            call: ExecutionCall { invocation, fence },
+            dispatched,
+            grant,
+            result_definition,
+            approval_version,
+            candidate_version,
+        } = prepared;
+        let ActInvocation {
+            invocation_id,
+            capability,
+            action_version_id,
+            result_schema_id,
+            ..
+        } = invocation;
         let outcome = (|| {
-            if let Some(fence) = &fence {
-                ReservationService::new(self.store, self.schemas, self.clock)
-                    .register_fenced_dispatch(fence, &capability)
-                    .map_err(ExecutionError::Reservation)?;
-            }
-            let response = match &fence {
-                Some(fence) => endpoint.execute_fenced(&invocation, fence),
-                None => endpoint.execute(&invocation),
-            }?;
+            let response = response?;
             if response.invocation_id != invocation_id {
                 return Err(ExecutionError::InvocationResponseMismatch);
             }
@@ -291,11 +381,11 @@ impl<'a> ExecutionService<'a> {
                 });
             }
             self.schemas
-                .validate(&result_schema, &response.result_payload)
+                .validate(&result_schema_id, &response.result_payload)
                 .map_err(ExecutionError::InvalidPayload)?;
 
-            let mut parents = vec![action.version_id.0.clone()];
-            let mut relations = vec![(action.version_id.clone(), relation_kinds::result_of())];
+            let mut parents = vec![action_version_id.0.clone()];
+            let mut relations = vec![(action_version_id.clone(), relation_kinds::result_of())];
             if let Some(fence) = &fence {
                 parents.push(fence.reservation_version_id.0.clone());
                 relations.push((
@@ -319,13 +409,13 @@ impl<'a> ExecutionService<'a> {
                     source_class: SourceClass::External,
                 },
                 stream_key: format!("execution:{invocation_id}"),
-                subject: SubjectId(format!("execution:{}", action.version_id.0)),
+                subject: SubjectId(format!("execution:{}", action_version_id.0)),
                 tags: vec![
                     format!("adapter:{}", capability.adapter_id.0),
                     format!("capability:{}", capability.capability_id.0),
-                    format!("action:{}", action.version_id.0),
+                    format!("action:{}", action_version_id.0),
                     format!("approval:{}", approval_version.0),
-                    format!("candidate:{}", candidate.version_id.0),
+                    format!("candidate:{}", candidate_version.0),
                 ],
                 payload: response.result_payload,
                 provenance: Some(Provenance {
@@ -349,14 +439,40 @@ impl<'a> ExecutionService<'a> {
         })();
 
         if let Err(error) = &outcome {
-            let _ = InvocationService::new(self.store, self.schemas, self.clock).fail(
-                &dispatched,
-                format!("{error:?}"),
-                is_retryable(error),
-            );
+            self.record_failure(&dispatched, error)?;
         }
         outcome
     }
+
+    fn record_failure(
+        &self,
+        dispatched: &InvocationState,
+        error: &ExecutionError,
+    ) -> Result<(), ExecutionError> {
+        InvocationService::new(self.store, self.schemas, self.clock).fail(
+            dispatched,
+            format!("{error:?}"),
+            is_retryable(error),
+        )?;
+        Ok(())
+    }
+}
+
+/// Stable execution identity for an approved action and its declared result schema.
+pub fn execution_invocation_id(
+    action: &VersionId,
+    capability: &CapabilityRef,
+    result_schema: &SchemaId,
+) -> String {
+    deterministic_invocation_id(
+        InvocationKind::Execution,
+        &[
+            &action.0,
+            &capability.adapter_id.0,
+            &capability.capability_id.0,
+            &result_schema.0,
+        ],
+    )
 }
 
 fn capability_name(capability: &CapabilityRef) -> String {

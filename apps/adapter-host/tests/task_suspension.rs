@@ -638,7 +638,20 @@ fn unresolved_dispatch_resume_is_explicit_and_reuses_the_existing_device_effect(
     let old = goal_until(&mut host, &mut runtime, GoalState::AwaitingApproval);
     approve(&host, &mut runtime, &old);
     f.db("runtime").execute_batch("CREATE TRIGGER lost_execution_checkpoint BEFORE UPDATE OF goal_json ON runtime_jobs WHEN json_extract(NEW.goal_json,'$.state')='observing' BEGIN SELECT RAISE(ABORT,'lost checkpoint'); END;").unwrap();
-    assert!(runtime.tick(&mut host).is_err());
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let error = loop {
+        match runtime.tick(&mut host) {
+            Ok(_) => {
+                assert!(
+                    Instant::now() < deadline,
+                    "execution checkpoint was never attempted"
+                );
+                std::thread::sleep(Duration::from_millis(3));
+            }
+            Err(error) => break error,
+        }
+    };
+    assert!(error.to_string().contains("lost checkpoint"), "{error}");
     assert_eq!(actuations(&f), 1);
     f.db("runtime")
         .execute_batch("DROP TRIGGER lost_execution_checkpoint")

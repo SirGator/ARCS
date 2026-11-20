@@ -422,6 +422,14 @@
 > Reservierungsrevisionen. Betreiberentscheidungen bleiben im Journal
 > erhalten und werden nach einem Host-Neustart weiterverarbeitet.
 
+> Fünfunddreißigster Schritt gemäß v3 §7.2 PAR-01/PAR-02/PAR-04/PAR-07/PAR-08/PAR-10:
+> Die Goal-Runtime sendet freigegebene Aktionen über begrenzte Act-Worker.
+> Adapter und Controller teilen sich die exklusive Adaptersitzung. Der Core
+> hält Invocation und Reservierungsrevision vor dem Aufruf fest und
+> speichert den validierten Ausführungsbeleg bei der Antwort. Ein Abbruch
+> kann während des Aufrufs gespeichert werden. Eine ungeklärte Reservierung
+> bleibt bis zur bestätigten Übergabe gehalten.
+
 **Leitbild:** ARCS ist ein universeller Agent. Es soll sich einfach bedienen lassen, beliebige kompatible Systeme verbinden, eigenständig Probleme lösen und langfristige Aufgaben über Monate verfolgen.
 
 ## 1. Verbindliche Architekturregeln

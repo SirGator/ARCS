@@ -2,7 +2,9 @@
 use super::{ControlSession, Host, HostError, TaskRuntime, held_reservations, invalid};
 use crate::task_runtime::goal::{GoalState, GoalTask};
 use arcs::core::{Artifact, SystemClock, VersionId};
+use arcs::execution::{ExecutionError, execution_invocation_id};
 use arcs::runtime::reservations::{Reservation, ReservationService, ReservationState};
+use arcs::runtime::{InvocationError, InvocationKind, InvocationService, InvocationStatus};
 use serde::Serialize;
 use std::collections::BTreeMap;
 
@@ -53,6 +55,7 @@ impl TaskRuntime {
 
     pub(crate) fn resource_release_reviews(
         &self,
+        host: &Host,
         reservations: &[Reservation],
     ) -> Result<Vec<ResourceReleaseReview>, HostError> {
         if !reservations
@@ -85,11 +88,12 @@ impl TaskRuntime {
                     })
                     .collect();
                 if !reservations.is_empty() {
+                    let execution = execution_evidence(host, &goal)?;
                     reviews.push(ResourceReleaseReview {
                         sequence,
                         route_id: goal.route_id,
                         state: goal.state,
-                        execution: goal.execution,
+                        execution,
                         outcome: goal.outcome,
                         reservations,
                         release_requested: session.release_intent.is_some(),
@@ -161,4 +165,44 @@ impl TaskRuntime {
         }
         Ok(review)
     }
+}
+
+// Late replies are visible as evidence without advancing the terminal task.
+fn execution_evidence(host: &Host, goal: &GoalTask) -> Result<Option<VersionId>, HostError> {
+    if let Some(execution) = &goal.execution {
+        return Ok(Some(execution.clone()));
+    }
+    let (Some(action), Some(capability)) = (&goal.action, &goal.capability) else {
+        return Ok(None);
+    };
+    let Ok((_, descriptor)) = host
+        .registry()
+        .authorized_capability(&capability.adapter_id, &capability.capability_id)
+    else {
+        return Ok(None);
+    };
+    let Some([schema]) = descriptor.contract.act().map(|contract| contract.emits) else {
+        return Ok(None);
+    };
+    let id = execution_invocation_id(action, capability, schema);
+    let failure = |error| HostError::Execution {
+        adapter: capability.adapter_id.clone(),
+        source: ExecutionError::Invocation(error),
+    };
+    let invocation = InvocationService::new(host.store(), host.schemas(), &SystemClock)
+        .lookup(&id)
+        .map_err(failure)?;
+    let Some(invocation) = invocation else {
+        return Ok(None);
+    };
+    if invocation.kind != InvocationKind::Execution || &invocation.input_version != action {
+        return Err(failure(InvocationError::IdentityConflict(id)));
+    }
+    if invocation.status == InvocationStatus::Succeeded {
+        return invocation
+            .result_version
+            .map(Some)
+            .ok_or_else(|| failure(InvocationError::MissingResult));
+    }
+    Ok(None)
 }

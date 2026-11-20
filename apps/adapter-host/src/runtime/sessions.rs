@@ -17,6 +17,7 @@ impl Host {
             )
             .chain(self.reconnect_jobs.keys().cloned())
             .chain(self.controller_worker_adapters())
+            .chain(self.act_workers.keys().cloned())
             .collect()
     }
 

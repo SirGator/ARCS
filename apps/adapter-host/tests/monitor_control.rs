@@ -436,7 +436,7 @@ fn a_live_controller_release_keeps_independent_work_running_and_resumes_after_re
     let f = goals::Fixture::new();
     f.manual();
     let background = add_independent_route(&f);
-    gate_fan_closure(&f);
+    gate_fan(&f, "close_fence");
     let mut fan = f.read("fan-profile.json");
     fan["fenced_resource"] = json!("device.fan-01");
     f.write("fan-profile.json", fan);
@@ -447,19 +447,21 @@ fn a_live_controller_release_keeps_independent_work_running_and_resumes_after_re
     f.write("runtime.json", config);
     let mut host = f.host();
     let mut runtime = f.runtime(&host);
-    let mut until = |state| {
-        let deadline = Instant::now() + Duration::from_secs(20);
-        loop {
-            runtime.tick(&mut host).unwrap();
-            if let Some(goal) = runtime.goals_after(0, 1).unwrap().into_iter().next()
-                && goal.state == state
-            {
-                return goal;
+    let until =
+        |host: &mut arcs_host::Host, runtime: &mut arcs_host::task_runtime::TaskRuntime, state| {
+            let deadline = Instant::now() + Duration::from_secs(20);
+            loop {
+                runtime.tick(host).unwrap();
+                if let Some(goal) = runtime.goals_after(0, 1).unwrap().into_iter().next()
+                    && goal.state == state
+                {
+                    return goal;
+                }
+                assert!(Instant::now() < deadline);
+                std::thread::sleep(Duration::from_millis(3));
             }
-            assert!(Instant::now() < deadline);
-        }
-    };
-    let goal = until(GoalState::AwaitingApproval);
+        };
+    let goal = until(&mut host, &mut runtime, GoalState::AwaitingApproval);
     let actor = Actor {
         actor_type: ActorType::Human,
         id: "simulator.test".into(),
@@ -474,9 +476,7 @@ fn a_live_controller_release_keeps_independent_work_running_and_resumes_after_re
             "simulated action".into(),
         )
         .unwrap();
-    runtime.tick(&mut host).unwrap();
-    let goal = runtime.goals_after(0, 1).unwrap().remove(0);
-    assert_eq!(goal.state, GoalState::Observing);
+    let goal = until(&mut host, &mut runtime, GoalState::Observing);
     let evidence = goal.execution.unwrap();
     runtime
         .cancel_goal(&host, goal.sequence, "settle the simulated dispatch".into())
@@ -551,23 +551,7 @@ fn a_live_controller_release_keeps_independent_work_running_and_resumes_after_re
         false
     );
 
-    background.write(
-        "late.json",
-        json!({"id":"background","subject":"background","reference":"task:background",
-        "payload":{"values":[2,4],"target":3}}),
-    );
-    let queued = Command::new(support::adapter_binary("arcs-json-input"))
-        .arg("--enqueue")
-        .arg(background.directory.join("input-profile.json"))
-        .arg(background.directory.join("input.sqlite"))
-        .arg(background.directory.join("late.json"))
-        .output()
-        .unwrap();
-    assert!(
-        queued.status.success(),
-        "{}",
-        String::from_utf8_lossy(&queued.stderr)
-    );
+    enqueue_independent_work(&background);
     let running = monitor.until(|event| event["runtime"]["ready_for_review"] == 1);
     assert_eq!(running["resource_reservations"][0]["state"], "held");
     assert_eq!(
@@ -615,24 +599,199 @@ fn a_live_controller_release_keeps_independent_work_running_and_resumes_after_re
     monitor.stop();
 }
 
-fn gate_fan_closure(f: &goals::Fixture) {
+#[test]
+fn an_act_reply_can_be_delayed_across_restart_while_independent_work_completes() {
+    let f = goals::Fixture::new();
+    let background = add_independent_route(&f);
+    let (monitor, action) = dispatch_with_held_reply(&f);
+    enqueue_independent_work(&background);
+    let running = monitor.until(|event| event["runtime"]["ready_for_review"] == 1);
+    assert_eq!(running["execution_workers"][0], action);
+    assert_eq!(running["runtime"]["goals"][0]["state"], "executing");
+    assert!(running["runtime"]["goals"][0]["execution"].is_null());
+    assert_eq!(running["resource_reservations"][0]["state"], "held");
+    monitor.stop();
+
+    std::fs::remove_file(f.directory.join("monitor.stop")).unwrap();
+    std::fs::remove_file(f.directory.join("act.entered")).unwrap();
+    let monitor = Monitor::start(&f.directory);
+    let replay = monitor.until(|event| {
+        f.directory.join("act.entered").exists() && event["execution_workers"][0] == action
+    });
+    assert_eq!(replay["runtime"]["ready_for_review"], 1);
+    assert_eq!(
+        std::fs::read_to_string(f.directory.join("act.entered")).unwrap(),
+        action["invocation_id"].as_str().unwrap()
+    );
+    std::fs::write(f.directory.join("act.release"), "continue").unwrap();
+    let snapshot = monitor.until(|event| {
+        matches!(
+            event["runtime"]["goals"][0]["state"].as_str(),
+            Some("completed" | "awaiting_approval" | "blocked" | "failed")
+        )
+    });
+    assert_eq!(
+        snapshot["runtime"]["completed_goals"], 1,
+        "{}",
+        snapshot["runtime"]["goals"]
+    );
+    assert!(snapshot["execution_workers"].as_array().unwrap().is_empty());
+    let goal = &snapshot["runtime"]["goals"][0];
+    assert_eq!(goal["action"], action["action_version"]);
+    let recorded_at: i64 = f
+        .db("core")
+        .query_row(
+            "SELECT sequence FROM artifact_versions WHERE version_id=?1",
+            [goal["execution"].as_str().unwrap()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(goal["observation_cursor"], recorded_at);
+    assert!(recorded_at > goal["dispatch_cursor"].as_i64().unwrap());
+    assert_fan_dispatched_once(&f, &action);
+    monitor.stop();
+}
+
+#[test]
+fn a_cancelled_goal_keeps_its_reservation_and_audits_the_delayed_act_reply() {
+    let f = goals::Fixture::new();
+    let (mut monitor, action) = dispatch_with_held_reply(&f);
+    let cancelled = monitor.command(
+        "cancel-during-act",
+        "goal",
+        json!({
+            "command":"cancel","sequence":action["sequence"],"reason":"stop the simulated task"
+        }),
+    );
+    assert_eq!(cancelled["ok"], true, "{cancelled}");
+    let still_running = monitor.until(|event| event["runtime"]["goals"][0]["state"] == "cancelled");
+    assert_eq!(still_running["execution_workers"][0], action);
+    std::fs::write(f.directory.join("act.release"), "continue").unwrap();
+    let settled = monitor.until(|event| {
+        event["runtime"]["goals"][0]["state"] == "cancelled"
+            && event["execution_workers"]
+                .as_array()
+                .is_some_and(Vec::is_empty)
+    });
+    assert_eq!(settled["resource_reservations"][0]["state"], "held");
+    assert!(settled["runtime"]["goals"][0]["execution"].is_null());
+    let evidence = &settled["resource_release_reviews"][0]["execution"];
+    let id = action["invocation_id"].as_str().unwrap();
+    let saved: String = f
+        .db("core")
+        .query_row(
+            "SELECT version_id FROM artifact_versions WHERE stream_key=?1",
+            [format!("execution:{id}")],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(evidence, &json!(saved));
+    assert_fan_dispatched_once(&f, &action);
+    monitor.stop();
+}
+
+fn dispatch_with_held_reply(f: &goals::Fixture) -> (Monitor, Value) {
+    f.manual();
+    gate_fan(f, "execute_fenced");
+    let mut config = f.read("runtime.json");
+    config["interval_ms"] = json!(10);
+    config["routes"][0]["goal"]["exclusive_resources"] = json!(["device.fan-01"]);
+    config["routes"][0]["goal"]["actions"][0]["fenced_resource"] = json!("device.fan-01");
+    f.write("runtime.json", config);
+    let mut fan = f.read("fan-profile.json");
+    fan["fenced_resource"] = json!("device.fan-01");
+    f.write("fan-profile.json", fan);
+    let mut input = f.read("input-profile.json");
+    input["events"][0]["payload"] =
+        json!({"device_id":"fan-01","enabled":true,"minimum_actuations":1});
+    f.write("input-profile.json", input);
+    let mut monitor = Monitor::start(&f.directory);
+    let waiting = monitor.until(|event| event["runtime"]["awaiting_approval"] == 1);
+    let goal = &waiting["runtime"]["goals"][0];
+    let approved = monitor.command("approve", "goal", json!({
+        "command":"review","sequence":goal["sequence"],"candidate_version_id":goal["candidate"],
+        "decision":"approved","operator_id":"simulator.test","reason":"approve the simulated action"
+    }));
+    assert_eq!(approved["ok"], true, "{approved}");
+    let dispatched = monitor.until(|event| {
+        f.directory.join("act.entered").exists() && event["execution_workers"][0].is_object()
+    });
+    let worker = dispatched["execution_workers"][0].clone();
+    assert_eq!(
+        std::fs::read_to_string(f.directory.join("act.entered")).unwrap(),
+        worker["invocation_id"].as_str().unwrap()
+    );
+    assert!(dispatched["runtime"]["goals"][0]["dispatch_cursor"].is_u64());
+    (monitor, worker)
+}
+
+fn assert_fan_dispatched_once(f: &goals::Fixture, action: &Value) {
+    let id = action["invocation_id"].as_str().unwrap();
+    let fan = f.db("fan");
+    let (count, recorded_id): (i64, String) = fan
+        .query_row(
+            "SELECT actuation_count, (SELECT invocation_id FROM invocations) FROM fan_state",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(count, 1);
+    assert_eq!(recorded_id, id);
+    let committed: i64 = f
+        .db("core")
+        .query_row(
+            "SELECT COUNT(*) FROM artifact_versions WHERE stream_key=?1",
+            [format!("execution:{id}")],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(committed, 1);
+}
+
+fn enqueue_independent_work(background: &parallel::Fixture) {
+    background.write(
+        "late.json",
+        json!({"id":"background","subject":"background","reference":"task:background",
+        "payload":{"values":[2,4],"target":3}}),
+    );
+    let queued = Command::new(support::adapter_binary("arcs-json-input"))
+        .arg("--enqueue")
+        .arg(background.directory.join("input-profile.json"))
+        .arg(background.directory.join("input.sqlite"))
+        .arg(background.directory.join("late.json"))
+        .output()
+        .unwrap();
+    assert!(
+        queued.status.success(),
+        "{}",
+        String::from_utf8_lossy(&queued.stderr)
+    );
+}
+
+fn gate_fan(f: &goals::Fixture, message: &str) {
     std::fs::write(
         f.directory.join("gated-fan.py"),
         r#"
 import json, pathlib, subprocess, sys, time
 root = pathlib.Path(__file__).parent
-peer = subprocess.Popen(sys.argv[1:], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+target = sys.argv[1]
+peer = subprocess.Popen(sys.argv[2:], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+def gate(name, value):
+    (root / (name + ".entered")).write_text(value)
+    while not (root / (name + ".release")).exists():
+        time.sleep(.005)
 try:
     for line in sys.stdin.buffer:
-        if json.loads(line)["message"]["type"] == "close_fence":
-            (root / "close.entered").write_text("entered")
-            while not (root / "close.release").exists():
-                time.sleep(.005)
+        message = json.loads(line)["message"]
+        if target == message["type"] == "close_fence":
+            gate("close", "entered")
         peer.stdin.write(line)
         peer.stdin.flush()
         reply = peer.stdout.readline()
         if not reply:
             break
+        if target == message["type"] == "execute_fenced":
+            gate("act", message["invocation"]["invocation_id"])
         sys.stdout.buffer.write(reply)
         sys.stdout.buffer.flush()
 finally:
@@ -643,7 +802,7 @@ finally:
     .unwrap();
     let mut host = f.read("host.json");
     host["adapters"][1] = json!({"program":"/usr/bin/python3", "grant_file":"fan-grant.json", "timeout_ms":15000,
-        "args":[{"path":"gated-fan.py"},{"path":support::adapter_binary("arcs-simulated-fan")},
+        "args":[{"path":"gated-fan.py"},message,{"path":support::adapter_binary("arcs-simulated-fan")},
                 {"path":"fan-profile.json"},{"path":"fan.sqlite"}]});
     f.write("host.json", host);
 }

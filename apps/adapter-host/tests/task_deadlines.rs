@@ -375,8 +375,9 @@ fn expiry_after_dispatch_keeps_an_unresolved_device_reservation_across_restart()
     });
     let waiting = goal(&runtime);
     approve(&host, &mut runtime, &waiting);
-    runtime.tick_at(&mut host, 1000).unwrap();
-    assert_eq!(goal(&runtime).state, GoalState::Observing);
+    until(&mut host, &mut runtime, 1000, |r| {
+        goal(r).state == GoalState::Observing
+    });
     assert_eq!(acts(&f), 1);
     runtime.tick_at(&mut host, 1100).unwrap();
     let reservation = runtime.exclusive_resources(&host).unwrap().remove(0);
