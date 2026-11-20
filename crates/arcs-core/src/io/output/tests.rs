@@ -291,11 +291,49 @@ fn timeouts_recover_with_the_same_id_without_a_second_effect() {
     let mut fixture = Fixture::new();
     let request = fixture.prepare("report.write").unwrap();
     let approval = fixture.approve(&request.version_id, ApprovalDecision::Approved);
+    let registry = fixture.registry();
+    let mut ids = fixture.store.durable_id_generator("output-test").unwrap();
+    let service = OutputService::new(
+        &registry,
+        &fixture.schemas,
+        &fixture.store,
+        &mut ids,
+        &SystemClock,
+    );
+    let count = fixture.store.len().unwrap();
+    let manifest = &fixture.endpoint.manifest;
+    let checked = service
+        .check_delivery(manifest, &request.version_id, &approval.version_id)
+        .unwrap();
+    assert!(matches!(
+        service.prepare_delivery(
+            manifest,
+            &request.version_id,
+            &approval.version_id,
+            "different-id"
+        ),
+        Err(OutputError::Invocation(
+            crate::runtime::InvocationError::IdentityConflict(_)
+        ))
+    ));
+    assert_eq!(fixture.store.len().unwrap(), count);
+
     fixture.endpoint.failure = 4;
     assert!(matches!(
         fixture.deliver(&request.version_id, &approval.version_id),
         Err(OutputError::AdapterCall(_))
     ));
+    assert!(matches!(
+        service.prepare_delivery(
+            manifest,
+            &request.version_id,
+            &approval.version_id,
+            &checked.invocation_id
+        ),
+        Err(OutputError::RecordedFailure(_))
+    ));
+    assert_eq!(fixture.endpoint.calls.lock().unwrap().len(), 1);
+
     fixture.endpoint.failure = 0;
     fixture
         .deliver(&request.version_id, &approval.version_id)

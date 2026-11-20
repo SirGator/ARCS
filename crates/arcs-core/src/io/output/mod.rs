@@ -5,7 +5,7 @@ pub use crate::adapters::{OutputAdapter, OutputInvocation, OutputResponse};
 mod error;
 mod service;
 pub use error::OutputError;
-pub use service::{OutputRequest, OutputService};
+pub use service::{OutputPreparation, OutputRequest, OutputService, PreparedOutput};
 
 #[cfg(test)]
 mod tests;

@@ -21,6 +21,8 @@ pub enum OutputError {
     InvalidResponse,
     ResultTooLarge,
     CachedResultNotPermitted,
+    RecordedFailure(String),
+    StaleDispatch,
 }
 impl From<AdapterRegistryError> for OutputError {
     fn from(value: AdapterRegistryError) -> Self {

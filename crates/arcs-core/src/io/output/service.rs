@@ -1,10 +1,10 @@
 use serde::{Deserialize, Serialize};
 
-use super::{OutputAdapter, OutputError, OutputInvocation};
+use super::{OutputAdapter, OutputError, OutputInvocation, OutputResponse};
 use crate::adapters::registration::RegisteredAdapter;
 use crate::adapters::{
-    AdapterCallError, AdapterManifest, AdapterRegistry, CapabilityContract, CapabilityRef,
-    ProducerClass,
+    AdapterCallError, AdapterGrant, AdapterManifest, AdapterRegistry, CapabilityContract,
+    CapabilityRef, ProducerClass,
 };
 use crate::approval::ApprovalDecision;
 use crate::core::{
@@ -13,7 +13,7 @@ use crate::core::{
     TrustLevel, VersionId, validate_artifact,
 };
 use crate::runtime::{
-    InvocationKind, InvocationService, InvocationSpec, InvocationStatus,
+    InvocationKind, InvocationService, InvocationSpec, InvocationState, InvocationStatus,
     deterministic_invocation_id,
 };
 use crate::store::{Idempotency, SqliteArtifactStore, relation_kinds};
@@ -30,6 +30,25 @@ pub struct OutputRequest {
     pub capability: CapabilityRef,
     pub result_schema_id: SchemaId,
     pub manifest: AdapterManifest,
+}
+
+/// A validated dispatch. External workers receive only the protocol message.
+pub struct PreparedOutput {
+    invocation: OutputInvocation,
+    grant: AdapterGrant,
+    manifest: AdapterManifest,
+    dispatched: InvocationState,
+}
+
+impl PreparedOutput {
+    pub fn invocation(&self) -> &OutputInvocation {
+        &self.invocation
+    }
+}
+
+pub enum OutputPreparation {
+    Complete(Box<Artifact>),
+    Dispatch(Box<PreparedOutput>),
 }
 
 pub struct OutputService<'a> {
@@ -157,6 +176,32 @@ impl<'a> OutputService<'a> {
         request_version: &VersionId,
         approval_version: &VersionId,
     ) -> Result<Artifact, OutputError> {
+        match self.prepare_dispatch(endpoint.manifest(), request_version, approval_version, None)? {
+            OutputPreparation::Complete(receipt) => Ok(*receipt),
+            OutputPreparation::Dispatch(prepared) => {
+                let response = endpoint.deliver(prepared.invocation());
+                self.finish_delivery(*prepared, response)
+            }
+        }
+    }
+
+    /// Validate the exact request and approval without preparing a dispatch.
+    pub fn check_delivery(
+        &self,
+        manifest: &AdapterManifest,
+        request_version: &VersionId,
+        approval_version: &VersionId,
+    ) -> Result<OutputInvocation, OutputError> {
+        self.validated_delivery(manifest, request_version, approval_version)
+            .map(|(invocation, _)| invocation)
+    }
+
+    fn validated_delivery(
+        &self,
+        manifest: &AdapterManifest,
+        request_version: &VersionId,
+        approval_version: &VersionId,
+    ) -> Result<(OutputInvocation, AdapterGrant), OutputError> {
         let request_artifact = self.load(request_version)?;
         if request_artifact.schema_id.0 != REQUEST_SCHEMA
             || request_artifact.created_by.actor_type != ActorType::System
@@ -178,7 +223,7 @@ impl<'a> OutputService<'a> {
         )?;
         if input.schema_id != request.artifact_schema_id
             || &request.manifest != registered.manifest()
-            || endpoint.manifest() != registered.manifest()
+            || manifest != registered.manifest()
         {
             return Err(OutputError::ContractMismatch);
         }
@@ -215,46 +260,117 @@ impl<'a> OutputService<'a> {
             result_schema_id: request.result_schema_id.clone(),
             max_result_bytes: grant.max_payload_bytes,
         };
-        let fingerprint = serde_json::to_string(&invocation)?;
-        let dispatched = {
-            let lifecycle = InvocationService::new(self.store, self.schemas, self.clock);
-            let state = lifecycle.prepare(InvocationSpec {
-                invocation_id: id.clone(),
-                kind: InvocationKind::Output,
-                capability: format!(
-                    "{}/{}",
-                    request.capability.adapter_id.0, request.capability.capability_id.0
-                ),
-                input_version: request_version.clone(),
-                input_fingerprint: fingerprint,
-            })?;
-            if state.status == InvocationStatus::Succeeded {
-                let result = self.load(
-                    &state
-                        .result_version
-                        .ok_or(crate::runtime::InvocationError::MissingResult)?,
-                )?;
-                if result.schema_id != request.result_schema_id
-                    || result.created_by.actor_type != ActorType::Executor
-                    || result.created_by.id != request.capability.adapter_id.0
-                    || result.trust.source_class != SourceClass::External
-                    || matches!(
-                        (grant.assigned_trust, result.trust.level),
-                        (TrustLevel::Low, TrustLevel::Medium | TrustLevel::High)
-                            | (TrustLevel::Medium, TrustLevel::High)
-                    )
-                    || serde_json::to_vec(&result.payload)?.len() > grant.max_payload_bytes
-                    || result.source.reference.len() > grant.max_external_reference_bytes
-                {
-                    return Err(OutputError::CachedResultNotPermitted);
-                }
-                return Ok(result);
+        Ok((invocation, grant.clone()))
+    }
+
+    /// Persist the dispatch before I/O. A worker can replay a completed receipt
+    /// or recover an interrupted dispatch using its original invocation ID.
+    pub fn prepare_delivery(
+        &self,
+        manifest: &AdapterManifest,
+        request_version: &VersionId,
+        approval_version: &VersionId,
+        expected_invocation_id: &str,
+    ) -> Result<OutputPreparation, OutputError> {
+        self.prepare_dispatch(
+            manifest,
+            request_version,
+            approval_version,
+            Some(expected_invocation_id),
+        )
+    }
+
+    fn prepare_dispatch(
+        &self,
+        manifest: &AdapterManifest,
+        request_version: &VersionId,
+        approval_version: &VersionId,
+        queued_id: Option<&str>,
+    ) -> Result<OutputPreparation, OutputError> {
+        let (invocation, grant) =
+            self.validated_delivery(manifest, request_version, approval_version)?;
+        if let Some(id) = queued_id
+            && id != invocation.invocation_id
+        {
+            return Err(crate::runtime::InvocationError::IdentityConflict(id.into()).into());
+        }
+        let lifecycle = InvocationService::new(self.store, self.schemas, self.clock);
+        let state = lifecycle.prepare(InvocationSpec {
+            invocation_id: invocation.invocation_id.clone(),
+            kind: InvocationKind::Output,
+            capability: format!(
+                "{}/{}",
+                invocation.capability.adapter_id.0, invocation.capability.capability_id.0
+            ),
+            input_version: request_version.clone(),
+            input_fingerprint: serde_json::to_string(&invocation)?,
+        })?;
+        if state.status == InvocationStatus::Succeeded {
+            let receipt = self.load(
+                &state
+                    .result_version
+                    .ok_or(crate::runtime::InvocationError::MissingResult)?,
+            )?;
+            if receipt.schema_id != invocation.result_schema_id
+                || receipt.created_by.actor_type != ActorType::Executor
+                || receipt.created_by.id != invocation.capability.adapter_id.0
+                || receipt.trust.source_class != SourceClass::External
+                || matches!(
+                    (grant.assigned_trust, receipt.trust.level),
+                    (TrustLevel::Low, TrustLevel::Medium | TrustLevel::High)
+                        | (TrustLevel::Medium, TrustLevel::High)
+                )
+                || serde_json::to_vec(&receipt.payload)?.len() > grant.max_payload_bytes
+                || receipt.source.reference.len() > grant.max_external_reference_bytes
+            {
+                return Err(OutputError::CachedResultNotPermitted);
             }
-            lifecycle.dispatch(&lifecycle.recover(&state)?)?
-        };
-        let outcome = (|| {
-            let response = endpoint.deliver(&invocation)?;
-            if response.invocation_id != id
+            return Ok(OutputPreparation::Complete(Box::new(receipt)));
+        }
+        if state.status == InvocationStatus::Failed && queued_id.is_some() {
+            return Err(OutputError::RecordedFailure(state.error.ok_or_else(
+                || {
+                    crate::runtime::InvocationError::InvalidState(
+                        "failed output has no error".into(),
+                    )
+                },
+            )?));
+        }
+        let dispatched = lifecycle.dispatch(&lifecycle.recover(&state)?)?;
+        Ok(OutputPreparation::Dispatch(Box::new(PreparedOutput {
+            invocation,
+            grant,
+            manifest: manifest.clone(),
+            dispatched,
+        })))
+    }
+
+    /// Validate the reply and publish the receipt atomically on the Core thread.
+    pub fn finish_delivery(
+        &mut self,
+        prepared: PreparedOutput,
+        response: Result<OutputResponse, AdapterCallError>,
+    ) -> Result<Artifact, OutputError> {
+        let PreparedOutput {
+            invocation,
+            grant,
+            manifest,
+            dispatched,
+        } = prepared;
+        let lifecycle = InvocationService::new(self.store, self.schemas, self.clock);
+        if lifecycle.lookup(&invocation.invocation_id)?.as_ref() != Some(&dispatched) {
+            return Err(OutputError::StaleDispatch);
+        }
+        let request = &invocation.request_version_id;
+        let approval = &invocation.approval_version_id;
+        let input = &invocation.artifact_version_id;
+        let result = (|| {
+            let (_, current_grant) = self.validated_delivery(&manifest, request, approval)?;
+            if current_grant != grant {
+                return Err(OutputError::ContractMismatch);
+            }
+            let response = response?;
+            if response.invocation_id != invocation.invocation_id
                 || response.external_reference.trim().is_empty()
                 || response.external_reference.len() > grant.max_external_reference_bytes
                 || response.external_reference.chars().any(char::is_control)
@@ -265,18 +381,19 @@ impl<'a> OutputService<'a> {
                 return Err(OutputError::ResultTooLarge);
             }
             self.schemas
-                .validate(&request.result_schema_id, &response.result_payload)
+                .validate(&invocation.result_schema_id, &response.result_payload)
                 .map_err(|_| OutputError::InvalidResponse)?;
-            let artifact =
+            let schema = self
+                .schemas
+                .get(&invocation.result_schema_id)
+                .ok_or(OutputError::ContractMismatch)?
+                .clone();
+            Ok(
                 ArtifactFactory::new(self.clock, self.ids).create(ArtifactFactoryInput {
-                    schema: self
-                        .schemas
-                        .get(&request.result_schema_id)
-                        .ok_or(OutputError::ContractMismatch)?
-                        .clone(),
+                    schema,
                     created_by: Actor {
                         actor_type: ActorType::Executor,
-                        id: request.capability.adapter_id.0.clone(),
+                        id: invocation.capability.adapter_id.0.clone(),
                     },
                     source: Source {
                         kind: SourceKind::External,
@@ -286,19 +403,15 @@ impl<'a> OutputService<'a> {
                         level: grant.assigned_trust,
                         source_class: SourceClass::External,
                     },
-                    stream_key: format!("output:{id}"),
-                    subject: SubjectId(format!("output:{}", request_version.0)),
+                    stream_key: format!("output:{}", invocation.invocation_id),
+                    subject: SubjectId(format!("output:{}", request.0)),
                     tags: vec![
-                        format!("output:{}", request_version.0),
-                        format!("approval:{}", approval_version.0),
+                        format!("output:{}", request.0),
+                        format!("approval:{}", approval.0),
                     ],
                     payload: response.result_payload,
                     provenance: Some(Provenance {
-                        parents: vec![
-                            input.version_id.0.clone(),
-                            request_version.0.clone(),
-                            approval_version.0.clone(),
-                        ],
+                        parents: vec![input.0.clone(), request.0.clone(), approval.0.clone()],
                         rules_applied: vec![
                             "output.request_validated".into(),
                             "output.approval_checked".into(),
@@ -308,32 +421,34 @@ impl<'a> OutputService<'a> {
                         models_used: vec![],
                         transform: Some("output.deliver".into()),
                     }),
-                })?;
-            InvocationService::new(self.store, self.schemas, self.clock).succeed_with_event(
-                &dispatched,
-                &artifact,
-                &[
-                    (request_version.clone(), relation_kinds::result_of()),
-                    (approval_version.clone(), relation_kinds::based_on()),
-                    (input.version_id.clone(), relation_kinds::derived_from()),
-                ],
-            )?;
-            Ok(artifact)
+                })?,
+            )
         })();
-        if let Err(error) = &outcome {
-            let retryable = matches!(
-                error,
-                OutputError::AdapterCall(
-                    AdapterCallError::Timeout | AdapterCallError::Unavailable(_)
-                )
-            );
-            InvocationService::new(self.store, self.schemas, self.clock).fail(
-                &dispatched,
-                format!("{error:?}"),
-                retryable,
-            )?;
-        }
-        outcome
+        let receipt = match result {
+            Ok(receipt) => receipt,
+            Err(error @ (OutputError::Store(_) | OutputError::Invocation(_))) => return Err(error),
+            Err(error) => {
+                let retryable = matches!(
+                    error,
+                    OutputError::AdapterCall(
+                        AdapterCallError::Timeout | AdapterCallError::Unavailable(_)
+                    )
+                );
+                lifecycle.fail(&dispatched, format!("{error:?}"), retryable)?;
+                return Err(error);
+            }
+        };
+        // An interrupted receipt commit leaves the dispatch open for replay.
+        lifecycle.succeed_with_event(
+            &dispatched,
+            &receipt,
+            &[
+                (request.clone(), relation_kinds::result_of()),
+                (approval.clone(), relation_kinds::based_on()),
+                (input.clone(), relation_kinds::derived_from()),
+            ],
+        )?;
+        Ok(receipt)
     }
 
     fn check_approval(&self, request: &VersionId, approval: &VersionId) -> Result<(), OutputError> {
