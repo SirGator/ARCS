@@ -15,6 +15,7 @@ pub mod recovery;
 mod routes;
 pub mod scheduler;
 pub mod suspension;
+pub mod task_output;
 mod worker_lifecycle;
 pub use config::{ReasoningRoute, RuntimeConfig};
 pub(crate) use control::ControlReleaseIntent;
@@ -189,6 +190,7 @@ impl TaskRuntime {
         }
         host.collect_controller_closures()?;
         host.poll_reconnections_at(now_unix_ms)?;
+        self.advance_task_output_reviews(host)?;
         self.advance_output_deliveries(host)?;
         self.live_clock = live_clock;
         let has_deadlines = self.config.routes.iter().any(|route| {

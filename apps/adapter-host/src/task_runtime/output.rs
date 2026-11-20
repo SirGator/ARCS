@@ -1,10 +1,9 @@
 //! Durable scheduling of separately verified and approved Output deliveries.
 use arcs::adapters::AdapterId;
 use arcs::core::VersionId;
-use arcs::output::OutputError;
 use serde::{Deserialize, Serialize};
 
-use super::{TaskRuntime, config::invalid};
+use super::{TaskRuntime, config::invalid, is_core_failure};
 use crate::{Host, HostError};
 
 #[derive(Deserialize)]
@@ -84,16 +83,7 @@ impl TaskRuntime {
                     .journal
                     .finish_output(job.sequence, Ok(&receipt.version_id))?,
                 Ok(None) | Err(HostError::AdapterBusy(_) | HostError::ResourceBusy { .. }) => {}
-                Err(
-                    error @ (HostError::Store(_)
-                    | HostError::Output {
-                        source:
-                            OutputError::Store(_)
-                            | OutputError::Invocation(_)
-                            | OutputError::StaleDispatch,
-                        ..
-                    }),
-                ) => return Err(error),
+                Err(error) if is_core_failure(&error) => return Err(error),
                 Err(error) => self.journal.finish_output(job.sequence, Err(&error))?,
             }
         }

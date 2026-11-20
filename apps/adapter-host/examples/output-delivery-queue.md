@@ -1,5 +1,44 @@
 # Freigegebene Ausgaben im Dauerbetrieb
 
+## Ergebnis einer Aufgabe ausgeben
+
+Im GTK-Kontrollpanel öffnest du **Aufgaben → Alle Aufgaben**, wählst eine
+fertige Aufgabe und klickst auf **Ausgeben …**. Wähle die Ergebnisversion
+und den Zieladapter. **Bericht anzeigen** lädt den genauen Bericht zur
+Prüfung. Eine Entscheidung braucht eine Begründung. Nach der Zustellung
+zeigt der Dialog die Quittung. Dieselbe Vorschau zeigt sie auch nach einem
+Host-Neustart.
+
+Der Monitor verwendet dafür den Befehlstyp `task_output`. Bei gestopptem
+Host nimmt `--task-output-command command.json` dieselben Befehle an.
+Die CLI gibt die Antwort unter `task_output` aus.
+
+Die verfügbaren Ergebnisversionen und Zieladapter liefert diese Anfrage.
+
+```json
+{"request_id":"report-options","control":{"kind":"task_output","command":{"command":"options","task_sequence":1}}}
+```
+
+Für `preview` enthält `target` dieselbe `task_sequence`, die
+`result_version_id` und einen Eintrag aus `destinations` mit
+`destination` und `receipt_schema_id`. Die Antwort enthält den Bericht,
+die `request_version_id` und die `verification_version_id`.
+
+Für `review` übergibst du ein Objekt `review` mit diesen drei Werten
+`target`, `request_version_id` und `verification_version_id` sowie
+`operator_id`, `reason` und `decision` mit `approved` oder
+`rejected`. Die Runtime protokolliert die Entscheidung und übernimmt die
+Freigabe beim nächsten Lauf. `inspect` liest den Stand anhand der
+`request_version_id`. Sobald die Antwort eine `delivery_sequence` enthält,
+liest der Ausgabeport die Zustellung über diese Sequenz.
+
+Der Bericht enthält die ausgewählte Ergebnisversion und behält deren
+Vertrauensniveau. Bei Plänen sind abgeschlossene Schritte der aktuellen
+Generation auswählbar. Die Runtime prüft die Zuordnung. Der Core prüft den Zielvertrag.
+Die inhaltliche Prüfung übernimmt der Betreiber anhand der Vorschau.
+
+## Freigaben aus anderen Anwendungen übernehmen
+
 Der laufende Host stellt freigegebene Ausgabeaufträge über den Output-Manager
 zu. Eine Anwendung erstellt den Auftrag mit `Host::prepare_output` und
 speichert eine bestandene Verification sowie eine Approval für genau diese

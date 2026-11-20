@@ -7,6 +7,7 @@ mod support;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 
 use arcs::adapters::{
     AdapterGrant, AdapterId, AdapterManifest, AdapterRegistry, CapabilityContract,
@@ -166,19 +167,7 @@ fn approve(host: &Host, request: &Artifact, decision: ApprovalDecision) -> Artif
         .unwrap()
 }
 
-#[test]
-fn a_queued_output_keeps_the_monitor_live_and_replays_an_interrupted_receipt() {
-    let f = parallel::Fixture::new();
-    f.peer("independent", "normal", false);
-    f.route("independent", "independent");
-    let mut runtime = f.read("runtime.json");
-    runtime["interval_ms"] = json!(15);
-    f.write("runtime.json", runtime);
-    let mut input_profile = f.read("input-profile.json");
-    let event = input_profile["events"][0].clone();
-    input_profile["events"] = json!([]);
-    f.write("input-profile.json", input_profile);
-    f.write("review-input.json", event);
+fn file_output_host(f: &parallel::Fixture) -> Value {
     f.write(
         "output-profile.json",
         json!({"adapter_id":"example.file-output","directory":"reports"}),
@@ -194,6 +183,190 @@ fn a_queued_output_keeps_the_monitor_live_and_replays_an_interrupted_receipt() {
             root.join(format!("adapters/file-output/schemas/{schema}.schema.json"))
         ));
     }
+    config
+}
+
+#[test]
+fn a_task_result_requires_exact_review_and_recovers_its_approval_after_queue_rollback() {
+    let f = parallel::Fixture::new();
+    f.peer("numeric", "normal", false);
+    f.route("analysis", "numeric");
+    f.route("follow-up", "numeric");
+    let mut config = file_output_host(&f);
+    config["adapters"].as_array_mut().unwrap().push(json!({
+        "program":support::adapter_binary("arcs-file-output"),"profile":"output-profile.json",
+        "args":[{"path":"output.sqlite"}],"grant_file":"output-grant.json"
+    }));
+    f.write("host.json", config);
+    let mut monitor = Monitor::start(&f.directory);
+    monitor.until(|event| event["runtime"]["ready_for_review"] == 2);
+    let mut targets = Vec::new();
+    for sequence in [1, 2] {
+        let options = monitor.command(
+            &format!("options-{sequence}"),
+            "task_output",
+            json!({"command":"options","task_sequence":sequence}),
+        );
+        assert_eq!(options["ok"], true, "{options}");
+        let options = &options["receipt"];
+        let mut target = options["destinations"][0].clone();
+        target["task_sequence"] = json!(sequence);
+        target["result_version_id"] = options["result_versions"][0].clone();
+        targets.push(target);
+    }
+    assert_ne!(
+        targets[0]["result_version_id"],
+        targets[1]["result_version_id"]
+    );
+    let preview = |monitor: &mut Monitor, id, target: &Value| {
+        let response = monitor.command(
+            id,
+            "task_output",
+            json!({"command":"preview","target":target}),
+        );
+        assert_eq!(response["ok"], true, "{response}");
+        response["receipt"].clone()
+    };
+    let first = preview(&mut monitor, "preview-1", &targets[0]);
+    assert_eq!(
+        preview(&mut monitor, "preview-1-replay", &targets[0]),
+        first
+    );
+    let second = preview(&mut monitor, "preview-2", &targets[1]);
+    let contents: Value = serde_json::from_str(first["payload"]["body"].as_str().unwrap()).unwrap();
+    assert!(contents["value"].is_number());
+    assert!(contents.get("private_note").is_none());
+    assert_eq!(f.count("output", "deliveries"), 0);
+    let review = |preview: &Value, decision| {
+        json!({"command":"review","review":{
+            "target":preview["target"],"request_version_id":preview["request_version_id"],
+            "verification_version_id":preview["verification_version_id"],"operator_id":"local-operator",
+            "decision":decision,"reason":"Reviewed this exact report and destination"
+        }})
+    };
+    let approve = review(&first, "approved");
+    let mut wrong = approve.clone();
+    wrong["review"]["verification_version_id"] = second["verification_version_id"].clone();
+    assert_eq!(
+        monitor.command("wrong-verification", "task_output", wrong)["ok"],
+        false
+    );
+    let mut wrong = approve.clone();
+    wrong["review"]["target"]["result_version_id"] = targets[1]["result_version_id"].clone();
+    assert_eq!(
+        monitor.command("wrong-result", "task_output", wrong)["ok"],
+        false
+    );
+    let rejected = monitor.command("reject-2", "task_output", review(&second, "rejected"));
+    assert_eq!(rejected["receipt"]["state"], "pending", "{rejected}");
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        let rejected = monitor.command(
+            "inspect-2",
+            "task_output",
+            json!({"command":"inspect","request_version_id":second["request_version_id"]}),
+        );
+        if rejected["receipt"]["state"] == "rejected" {
+            assert!(rejected["receipt"]["approval_version_id"].is_string());
+            assert!(rejected["receipt"]["delivery_sequence"].is_null());
+            break;
+        }
+        assert!(Instant::now() < deadline, "{rejected}");
+    }
+    assert_eq!(f.count("output", "deliveries"), 0);
+    monitor.stop();
+    std::fs::remove_file(f.directory.join("monitor.stop")).unwrap();
+
+    f.write("review.json", approve.clone());
+    let cli = Command::new(env!("CARGO_BIN_EXE_arcs-host"))
+        .current_dir(&f.directory)
+        .args([
+            "--config",
+            "host.json",
+            "--runtime",
+            "runtime.json",
+            "--task-output-command",
+            "review.json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        cli.status.success(),
+        "{}",
+        String::from_utf8_lossy(&cli.stderr)
+    );
+    let accepted: Value = serde_json::from_slice(&cli.stdout).unwrap();
+    assert_eq!(accepted["task_output"]["state"], "pending");
+
+    let (mut host, mut runtime) = f.open();
+    let journal = rusqlite::Connection::open(f.directory.join("runtime.sqlite")).unwrap();
+    journal
+        .execute_batch(
+            "CREATE TRIGGER lose_admission BEFORE INSERT ON runtime_output_deliveries
+         BEGIN SELECT RAISE(ABORT, 'simulated output admission rollback'); END;",
+        )
+        .unwrap();
+    assert!(matches!(runtime.tick(&mut host), Err(HostError::Store(_))));
+    let approval = host
+        .store()
+        .find_by_stream_key(&format!(
+            "approval:{}",
+            first["request_version_id"].as_str().unwrap()
+        ))
+        .unwrap()
+        .unwrap();
+    assert_eq!(approval.payload["decision"], "approved");
+    assert_eq!(f.count("output", "deliveries"), 0);
+    journal
+        .execute_batch("DROP TRIGGER lose_admission")
+        .unwrap();
+    host.shutdown().unwrap();
+    drop((runtime, host));
+
+    let mut monitor = Monitor::start(&f.directory);
+    let completed =
+        monitor.until(|event| event["runtime"]["output_deliveries"][0]["state"] == "delivered");
+    let delivery = &completed["runtime"]["output_deliveries"][0];
+    let replay = monitor.command("approve-replay", "task_output", approve);
+    assert_eq!(replay["receipt"]["state"], "queued");
+    assert_eq!(
+        replay["receipt"]["approval_version_id"],
+        json!(approval.version_id)
+    );
+    assert_eq!(replay["receipt"]["delivery_sequence"], delivery["sequence"]);
+    assert_eq!(
+        monitor.command(
+            "conflicting-decision",
+            "task_output",
+            review(&first, "rejected")
+        )["ok"],
+        false
+    );
+    let files = std::fs::read_dir(f.directory.join("reports"))
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert_eq!(files.len(), 1);
+    let file: Value = serde_json::from_slice(&std::fs::read(files[0].path()).unwrap()).unwrap();
+    assert_eq!(file["payload"], first["payload"]);
+    assert_eq!(f.count("output", "deliveries"), 1);
+    monitor.stop();
+}
+
+#[test]
+fn a_queued_output_keeps_the_monitor_live_and_replays_an_interrupted_receipt() {
+    let f = parallel::Fixture::new();
+    f.peer("independent", "normal", false);
+    f.route("independent", "independent");
+    let mut runtime = f.read("runtime.json");
+    runtime["interval_ms"] = json!(15);
+    f.write("runtime.json", runtime);
+    let mut input_profile = f.read("input-profile.json");
+    let event = input_profile["events"][0].clone();
+    input_profile["events"] = json!([]);
+    f.write("input-profile.json", input_profile);
+    f.write("review-input.json", event);
+    let mut config = file_output_host(&f);
     config["adapters"].as_array_mut().unwrap().push(json!({
         "program":"/usr/bin/python3","timeout_ms":30000,"grant_file":"output-grant.json",
         "args":[{"path":"hold-receipt.py"},{"path":support::adapter_binary("arcs-file-output")},

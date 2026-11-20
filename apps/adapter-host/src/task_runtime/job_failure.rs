@@ -52,6 +52,12 @@ pub(super) fn is_core_failure(error: &HostError) -> bool {
                 ..
             }
             | HostError::Registration(arcs::adapters::AdapterRegistryError::Store(_))
+            | HostError::Output {
+                source: arcs::output::OutputError::Store(_)
+                    | arcs::output::OutputError::Invocation(_)
+                    | arcs::output::OutputError::StaleDispatch,
+                ..
+            }
             | HostError::Request {
                 source: arcs::request::RequestError::Store(_)
                     | arcs::request::RequestError::Invocation(_)

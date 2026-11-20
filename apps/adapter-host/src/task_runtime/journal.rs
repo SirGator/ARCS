@@ -11,6 +11,7 @@ mod reasoning;
 mod recurrence;
 mod scheduling;
 pub(super) mod suspension;
+mod task_output;
 pub(super) use planning::capacity_query;
 
 use std::fs::File;
@@ -184,6 +185,7 @@ impl Journal {
         deadlines::initialize(&connection)?;
         recurrence::initialize(&connection)?;
         output::initialize(&connection)?;
+        task_output::initialize(&connection)?;
         Ok(Self {
             connection,
             path,

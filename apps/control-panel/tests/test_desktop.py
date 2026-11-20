@@ -143,6 +143,73 @@ class DesktopTests(unittest.TestCase):
             self.window.stop_button.emit('clicked')
             pump_until(lambda:not self.window.controller.busy and self.window.state=='idle')
 
+    def test_task_output_previews_exact_destination_and_restores_the_receipt(self):
+        runtime = json.loads((PROJECT_ROOT / 'apps/adapter-host/config/roles/runtime.json').read_text())
+        runtime.update(runtime_id='desktop-output', journal='state/task-output.sqlite', interval_ms=20)
+        runtime['routes'][0]['source']['adapter_id'] = 'multi.input.left'
+        runtime['routes'][0]['reasoner']['adapter_id'] = 'multi.reasoner.solver'
+        path = self.directory / 'task-output.json'
+        path.write_text(json.dumps(runtime))
+        self.window.select_configuration(Configuration(self.host, path))
+        self.window.show_page('tasks')
+        page = self.window.queue_page
+
+        def open_output():
+            self.window.start_button.emit('clicked')
+            pump_until(lambda: (self.window.snapshot.get('runtime') or {}).get('ready_for_review') == 1)
+            page.scope.set_active_id('all')
+            pump_until(lambda: page.page and page.page['scope'] == 'all' and 1 in page.tasks)
+            page.tree.get_selection().select_path(0)
+            self.assertTrue(page.output_button.get_sensitive())
+            page.output_button.emit('clicked')
+            dialog = page.output_dialog
+            pump_until(lambda: dialog.pending is None)
+            self.assertIsNotNone(dialog.options, dialog.status.get_text())
+            self.assertEqual(len(dialog.options['destinations']), 2)
+            return dialog
+
+        def select_destination(dialog, side):
+            index = next(index for index, target in enumerate(dialog.options['destinations'])
+                         if target['destination']['adapter_id'].endswith(f'.{side}'))
+            dialog.destination_choice.set_active(index)
+
+        dialog = open_output()
+        select_destination(dialog, 'left')
+        dialog.preview_button.emit('clicked')
+        pump_until(lambda: dialog.preview is not None)
+        dialog.reason.set_text('Bericht für das rechte Archiv prüfen')
+        self.assertTrue(dialog.approve_button.get_sensitive())
+        select_destination(dialog, 'right')
+        self.assertFalse(dialog.approve_button.get_sensitive())
+        self.assertIsNone(dialog.preview)
+        dialog.preview_button.emit('clicked')
+        pump_until(lambda: dialog.preview is not None)
+        request = dialog.preview['request_version_id']
+        rendered = dialog.preview['payload']
+        self.assertTrue(dialog.preview['target']['destination']['adapter_id'].endswith('.right'))
+        self.assertEqual(list((self.directory / 'reports-right').glob('*.json')), [])
+        dialog.reason.set_text('Diesen Bericht im rechten Archiv ablegen')
+        dialog.approve_button.emit('clicked')
+        pump_until(lambda: dialog.delivery and dialog.delivery['state'] == 'delivered')
+        receipt = dialog.delivery['receipt_version_id']
+        files = list((self.directory / 'reports-right').glob('*.json'))
+        self.assertEqual(len(files), 1)
+        self.assertEqual(json.loads(files[0].read_text())['payload'], rendered)
+        self.assertEqual(list((self.directory / 'reports-left').glob('*.json')), [])
+        dialog.response(Gtk.ResponseType.CLOSE)
+        self.window.stop_button.emit('clicked')
+        pump_until(lambda: not self.window.controller.busy and self.window.state == 'idle')
+
+        dialog = open_output()
+        select_destination(dialog, 'right')
+        dialog.preview_button.emit('clicked')
+        pump_until(lambda: dialog.delivery and dialog.delivery['state'] == 'delivered')
+        self.assertEqual(dialog.preview['request_version_id'], request)
+        self.assertEqual(dialog.delivery['receipt_version_id'], receipt)
+        self.assertFalse(dialog.approve_button.get_sensitive())
+        self.assertEqual(list((self.directory / 'reports-right').glob('*.json')), files)
+        dialog.response(Gtk.ResponseType.CLOSE)
+
     def test_goal_loop_completion_and_progress_are_displayed_from_real_backend(self):
         host=real_configuration(PROJECT_ROOT,self.directory,'goals')
         runtime=json.loads((self.directory/'runtime.json').read_text())

@@ -307,6 +307,7 @@ fn replanning_configuration_requires_bounded_revisions_and_valid_context() {
 
 #[test]
 fn completed_step_exports_are_available_without_private_template_fields_or_unselected_data() {
+    use arcs_host::task_runtime::task_output::{TaskOutputCommand, TaskOutputResponse};
     let f = fixture();
     let mut model = f.read("planner.json");
     model["proposal"] = json!({"steps":[{"id":"done","template":"b"},{"id":"fails","template":"a","dependencies":[{"step_id":"done","payload_fields":["value"]}]}]});
@@ -319,6 +320,28 @@ fn completed_step_exports_are_available_without_private_template_fields_or_unsel
     let plan = runtime.plans_after(0, 1).unwrap().remove(0);
     assert_eq!(plan.state, PlanState::ReadyForReview);
     assert_eq!(plan.steps[0].state, "ready_for_review");
+    let current = plan.steps.iter().find(|step| step.revision == 1).unwrap();
+    let output = runtime
+        .control_task_output(
+            &mut host,
+            TaskOutputCommand::Options {
+                task_sequence: current.sequence,
+            },
+        )
+        .unwrap();
+    assert!(
+        matches!(output, TaskOutputResponse::Options(options) if options.result_versions.len() == 1)
+    );
+    assert!(
+        runtime
+            .control_task_output(
+                &mut host,
+                TaskOutputCommand::Options {
+                    task_sequence: plan.steps[0].sequence,
+                }
+            )
+            .is_err()
+    );
     let inputs = planner_inputs(&f);
     let second = &inputs[1];
     let output = second["context"]

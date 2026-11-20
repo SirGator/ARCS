@@ -70,7 +70,7 @@ impl Journal {
             )
             .map_err(db)?;
         if queued >= MAX_QUEUED_OUTPUTS {
-            return Err(invalid("output queue is full"));
+            return Err(HostError::OutputQueueFull);
         }
         tx.execute(
             "INSERT INTO runtime_output_deliveries(invocation_id,adapter,request_version,approval_version)

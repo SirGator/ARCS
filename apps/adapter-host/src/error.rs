@@ -14,6 +14,7 @@ use arcs::world::ReduceError;
 pub enum HostError {
     Memory(arcs::memory::MemoryError),
     AdapterBusy(AdapterId),
+    OutputQueueFull,
     ControlReleasePending(String),
     ResourceBusy {
         resource: String,
@@ -81,6 +82,7 @@ impl fmt::Display for HostError {
                 "adapter {} is reserved by an active operation",
                 adapter.0
             ),
+            Self::OutputQueueFull => write!(f, "output queue is full"),
             Self::ControlReleasePending(message) => {
                 write!(f, "controller release pending: {message}")
             }

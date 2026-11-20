@@ -82,6 +82,7 @@ class ControlWindow(Gtk.ApplicationWindow):
         self._source_id = None
         self._control_protocol = False
         self._review_preview = False
+        self._task_output_review = False
         self._resource_review_available = False
         self._queue_size = None
         self._task_cancel = False
@@ -482,7 +483,7 @@ class ControlWindow(Gtk.ApplicationWindow):
         self.control_page.set_connected(state == "running" and self._control_protocol,
                                         self._review_preview, self._resource_review_available)
         queue_size = self._queue_size if state == "running" and self._control_protocol else None
-        self.queue_page.set_connected(queue_size, self._task_cancel)
+        self.queue_page.set_connected(queue_size, self._task_cancel, self._task_output_review)
         text, sub = {
             "idle": ("Bereit", "Wartet auf den Start"), "building": ("Build", "Programme werden gebaut"),
             "starting": ("Startet", "Adapter werden verbunden"), "running": ("Läuft", "Verarbeitung ist aktiv"),
@@ -583,6 +584,7 @@ class ControlWindow(Gtk.ApplicationWindow):
                 control = event.get("control") or {}
                 self._control_protocol = control.get("protocol_version") == 1 and control.get("transport") == "stdin_jsonl"
                 self._review_preview = control.get("goal_review_preview") is True
+                self._task_output_review = control.get("task_output_review") is True
                 self._resource_review_available = control.get("resource_release_review") is True
                 queue_features = control.get("task_queue") or {}
                 queue_size = queue_features.get("max_page_size")
@@ -600,6 +602,7 @@ class ControlWindow(Gtk.ApplicationWindow):
                 self.input_page.goal_progress(runtime.get("goals", []) if runtime else [])
                 self.recent = (self.recent + event.get("recent_artifacts", []))[-20:]
                 self.control_page.snapshot(runtime or {}, event.get("resource_release_reviews", []), self.recent)
+                self.queue_page.snapshot(runtime or {})
                 if runtime and self.stack.get_visible_child_name() == "tasks":
                     self.queue_page.load_if_needed(runtime.get("latest_task_sequence", 0))
                 self.metrics["review"][0].set_text(str(runtime["ready_for_review"] + runtime.get("awaiting_approval", 0)) if runtime else "—")

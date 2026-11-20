@@ -4,6 +4,7 @@ from datetime import datetime
 from gi.repository import Gtk, Pango
 
 from .control_widgets import STATE_NAMES, local_operator, reason_text, revision_command, text_label
+from .task_output import TaskOutputDialog
 
 
 WAIT_LABELS = {
@@ -35,6 +36,8 @@ class QueuePage(Gtk.Box):
         self.operator = local_operator()
         self.page_size = None
         self.cancel_available = False
+        self.output_available = False
+        self.output_dialog = None
         self.page = None
         self.cursors = (0,)
         self.pending = None
@@ -98,20 +101,29 @@ class QueuePage(Gtk.Box):
         actions.pack_start(self.reason, True, True, 0)
         actions.pack_start(self.pause_button, False, False, 0)
         actions.pack_start(self.cancel_button, False, False, 0)
+        self.output_button = Gtk.Button(label="Ausgeben …", no_show_all=True)
+        self.output_button.connect("clicked", self._open_output)
+        actions.pack_start(self.output_button, False, False, 0)
         self.pack_start(actions, False, False, 0)
         self.status = text_label(css="muted")
         self.status.set_selectable(True)
         self.pack_start(self.status, False, False, 0)
         self._refresh()
 
-    def set_connected(self, max_page_size, cancel_available=False):
+    def set_connected(self, max_page_size, cancel_available=False, output_available=False):
         self.page_size = min(max_page_size, 25) if max_page_size else None
         self.cancel_available = bool(self.page_size and cancel_available)
+        self.output_available = bool(self.page_size and output_available)
+        if not self.output_available and self.output_dialog is not None:
+            self.output_dialog.destroy()
         self._refresh()
 
     def reset(self):
         self.page_size = None
         self.cancel_available = False
+        self.output_available = False
+        if self.output_dialog is not None:
+            self.output_dialog.destroy()
         self.page = None
         self.cursors = (0,)
         self.pending = None
@@ -161,6 +173,23 @@ class QueuePage(Gtk.Box):
         self.reason.set_text("")
         self._refresh()
 
+    def _open_output(self, button):
+        if not button.get_sensitive():
+            return
+        if self.output_dialog is not None:
+            self.output_dialog.present()
+            return
+        task = self._selected()
+        self.output_dialog = TaskOutputDialog(self.get_toplevel(), self.submit, task["sequence"])
+        self.output_dialog.connect("destroy", self._close_output)
+
+    def _close_output(self, _):
+        self.output_dialog = None
+
+    def snapshot(self, runtime):
+        if self.output_dialog is not None:
+            self.output_dialog.snapshot(runtime)
+
     def _change_task(self, button, cancel=False):
         if not button.get_sensitive():
             return
@@ -184,6 +213,8 @@ class QueuePage(Gtk.Box):
         self._refresh()
 
     def result(self, event):
+        if self.output_dialog is not None:
+            self.output_dialog.result(event)
         if self.pending is None or event.get("request_id") != self.pending[0]:
             return
         _, cursors = self.pending
@@ -230,6 +261,9 @@ class QueuePage(Gtk.Box):
         self.pause_button.set_sensitive(can_pause and has_reason)
         self.cancel_button.set_visible(self.cancel_available)
         self.cancel_button.set_sensitive(can_cancel and has_reason)
+        self.output_button.set_visible(self.output_available)
+        self.output_button.set_sensitive(bool(ready and self.output_available and matches_scope and task
+                                              and task["state"] in ("ready_for_review", "completed")))
         if not self.page_size:
             detail = "Starte einen Host mit Aufgaben-Runtime und Unterstützung für die Warteschlange."
         elif not task:

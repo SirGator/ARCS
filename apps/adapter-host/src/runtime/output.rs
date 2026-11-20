@@ -22,6 +22,18 @@ pub(super) struct OutputWorker {
 }
 
 impl Host {
+    pub(crate) fn prepare_task_report(
+        &mut self,
+        adapter: &AdapterId,
+        runtime_id: &str,
+        sequence: u64,
+        result: &VersionId,
+    ) -> Result<Artifact, HostError> {
+        self.output_service()
+            .prepare_task_report(runtime_id, sequence, result)
+            .map_err(|source| output_error(adapter, source))
+    }
+
     pub(super) fn output_service(&mut self) -> OutputService<'_> {
         OutputService::new(
             &self.registry,

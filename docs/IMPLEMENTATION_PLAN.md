@@ -465,6 +465,14 @@
 > und Quittung unter einer stabilen Identität. Nach einem Neustart setzt die
 > Runtime die Zustellung fort oder übernimmt die vorhandene Quittung.
 
+> Einundvierzigster Schritt gemäß v3 §4 Output, §7.2 PAR-10/PAR-11 und
+> §10.1 SEC-03/SEC-04/SEC-09. Der Betreiber wählt ein konkretes Ergebnis
+> einer fertigen Aufgabe oder eines aktuellen Planschritts. ARCS erzeugt
+> einen Bericht mit belegbarer Herkunft und prüft den Zielvertrag. Die
+> Freigabe bindet Vorschau und ausgewählten Adapter. Die Runtime speichert
+> die Entscheidung vor der Übergabe und übernimmt bereits gespeicherte
+> Freigaben nach einem Neustart.
+
 **Leitbild:** ARCS ist ein universeller Agent. Es soll sich einfach bedienen lassen, beliebige kompatible Systeme verbinden, eigenständig Probleme lösen und langfristige Aufgaben über Monate verfolgen.
 
 ## 1. Verbindliche Architekturregeln

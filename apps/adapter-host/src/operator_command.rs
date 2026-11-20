@@ -7,6 +7,7 @@ use crate::task_runtime::output::{OutputCommand, OutputDelivery};
 use crate::task_runtime::queue::{TaskQueuePage, TaskQueueQuery};
 use crate::task_runtime::scheduler::{SeriesControlCommand, SeriesControlReceipt};
 use crate::task_runtime::suspension::{TaskControlCommand, TaskControlReceipt};
+use crate::task_runtime::task_output::{TaskOutputCommand, TaskOutputResponse};
 use crate::task_runtime::{ControlReleaseIntent, ResourceEvidenceReview, goal::GoalReview};
 use crate::{Host, HostError, task_runtime::TaskRuntime};
 
@@ -62,6 +63,7 @@ pub enum OperatorCommand {
     Plan(PlanCommand),
     Goal(GoalCommand),
     Output(OutputCommand),
+    TaskOutput(TaskOutputCommand),
 }
 
 #[derive(Serialize)]
@@ -71,6 +73,7 @@ pub enum CommandReceipt {
     Task(TaskControlReceipt),
     Series(SeriesControlReceipt),
     Output(OutputDelivery),
+    TaskOutput(TaskOutputResponse),
     GoalReview(GoalReview),
     ResourceEvidenceReview(ResourceEvidenceReview),
     ResourceRelease {
@@ -119,6 +122,9 @@ impl OperatorCommand {
             Self::Output(command) => runtime
                 .control_output(host, command)
                 .map(|receipt| Some(CommandReceipt::Output(receipt))),
+            Self::TaskOutput(command) => runtime
+                .control_task_output(host, command)
+                .map(|receipt| Some(CommandReceipt::TaskOutput(receipt))),
         }
     }
 }

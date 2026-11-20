@@ -59,7 +59,8 @@ dokumentiert Slice 36. Der [Bericht zum nebenläufigen Ereigniseingang](docs/ZWI
 dokumentiert Slice 37. Der [Bericht zu nicht blockierenden Standardabfragen](docs/ZWISCHENBERICHT_2026-11-20_REQUEST_DEFAULT.md)
 dokumentiert Slice 38. Der [Bericht zu nicht blockierendem Standard-Reasoning](docs/ZWISCHENBERICHT_2026-11-20_REASONING_DEFAULT.md)
 dokumentiert Slice 39. Der [Bericht zur dauerhaften Ausgabewarteschlange](docs/ZWISCHENBERICHT_2026-11-20_OUTPUT_QUEUE.md)
-dokumentiert Slice 40. Die Berichte vom
+dokumentiert Slice 40. Der [Bericht zur geprüften Aufgabenausgabe](docs/ZWISCHENBERICHT_2026-11-21_TASK_OUTPUT.md)
+dokumentiert Slice 41. Die Berichte vom
 [17. November](docs/ZWISCHENBERICHT_2026-11-17.md) und
 [16. November](docs/ZWISCHENBERICHT_2026-11-16.md) dokumentieren frühere
 Umsetzungsstände, Prüfergebnisse und offene Grenzen.

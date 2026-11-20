@@ -133,7 +133,7 @@ class SessionController:
             self._push("input_queued", adapter_id=target.adapter_id, id=event["id"])
 
     def submit_control(self, kind: str, command: dict) -> str:
-        if kind not in {"task", "series", "plan", "goal", "queue"}:
+        if kind not in {"task", "series", "plan", "goal", "queue", "task_output", "output"}:
             raise ValueError("Unbekannter Steuerungsbefehl.")
         request_id = uuid4().hex
         request = {"request_id": request_id, "control": {"kind": kind, "command": command}}
