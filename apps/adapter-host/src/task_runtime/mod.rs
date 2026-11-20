@@ -127,6 +127,7 @@ pub struct TaskRuntime {
     control_cursor: u64,
     has_reasoner_selection: bool,
     has_reasoning_recovery: bool,
+    has_reasoning_request_limits: bool,
     has_recurrence: bool,
     live_clock: bool,
 }
@@ -150,6 +151,10 @@ impl TaskRuntime {
                         .any(|template| template.route.reasoning_recovery.is_some())
                 })
         });
+        let has_reasoning_request_limits = config
+            .routes
+            .iter()
+            .any(|route| route.max_reasoning_requests.is_some());
         let has_recurrence = config.routes.iter().any(|route| route.recurrence.is_some());
         Ok(Self {
             config,
@@ -159,6 +164,7 @@ impl TaskRuntime {
             control_cursor: 0,
             has_reasoner_selection,
             has_reasoning_recovery,
+            has_reasoning_request_limits,
             has_recurrence,
             live_clock: true,
         })
@@ -474,7 +480,6 @@ impl TaskRuntime {
             completed_goals: count("completed")?,
             blocked_goals: self.journal.blocked_goal_count()?
                 + count("rejected")?
-                + count("budget_exhausted")?
                 + cancelled_goals,
             awaiting_approval: count("awaiting_approval")?,
             waiting_time,

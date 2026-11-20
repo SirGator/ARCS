@@ -156,6 +156,7 @@ fn read_task(row: &Row<'_>) -> rusqlite::Result<TaskQueueRow> {
         not_before_unix_ms: optional_sequence(7)?,
         deadline_unix_ms: optional_sequence(8)?,
         parent_plan_sequence: optional_sequence(9)?,
+        reasoning_budget: None,
         series_sequence: optional_sequence(10)?,
         control_revision: row.get::<_, i64>(11)? as u64,
         locally_paused: row.get(12)?,

@@ -89,6 +89,11 @@ impl PlanningConfig {
                     "goal templates require manual approval and an explicit aggregate action limit",
                 ));
             }
+            if route.max_reasoning_requests.is_some() {
+                return Err(invalid(
+                    "max_reasoning_requests belongs to the plan's entry route",
+                ));
+            }
             validate_route_contract(host, route, manifests)?;
             if let Some(output) = &template.output {
                 let limit = if route.goal.is_some() {

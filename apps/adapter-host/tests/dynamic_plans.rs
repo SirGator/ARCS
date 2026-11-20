@@ -366,10 +366,13 @@ fn a_lost_planner_response_reuses_its_proposal_and_capacity_reservation() {
 
 #[test]
 fn planned_steps_keep_their_operator_defined_waits_over_a_month_and_a_restart() {
+    use arcs_host::task_runtime::queue::{TaskQueueQuery, TaskQueueScope};
+
     let f = fixture("normal", "normal");
     let mut config = f.read("runtime.json");
     const NOW: u64 = 1_800_000_000_000;
     const MONTH: u64 = 2_592_000_000;
+    config["routes"][0]["max_reasoning_requests"] = json!(4);
     config["routes"][0]["plan"]["templates"][0]["route"]["activation"] =
         json!({"kind":"after_delay","delay_ms":MONTH});
     f.write("runtime.json", config);
@@ -383,6 +386,20 @@ fn planned_steps_keep_their_operator_defined_waits_over_a_month_and_a_restart() 
         std::thread::sleep(Duration::from_millis(3));
     }
     assert!(!f.started("a"));
+    let budget_since_admission = |runtime: &TaskRuntime| {
+        let row = runtime
+            .task_queue(TaskQueueQuery {
+                scope: TaskQueueScope::All,
+                after_sequence: 0,
+                through_sequence: None,
+                limit: 1,
+            })
+            .unwrap()
+            .tasks
+            .remove(0);
+        row.reasoning_budget.unwrap().used
+    };
+    assert_eq!(budget_since_admission(&runtime), 2);
     let version = runtime.plans_after(0, 1).unwrap()[0]
         .plan_version_id
         .clone();
@@ -391,6 +408,7 @@ fn planned_steps_keep_their_operator_defined_waits_over_a_month_and_a_restart() 
     drop(host);
     let (mut host, mut runtime) = f.open();
     runtime.tick_at(&mut host, NOW + MONTH - 1).unwrap();
+    assert_eq!(budget_since_admission(&runtime), 2);
     assert!(!f.started("a"));
     let until = Instant::now() + Duration::from_secs(25);
     while runtime.report(0).unwrap().ready_for_review != 4 {
@@ -403,6 +421,7 @@ fn planned_steps_keep_their_operator_defined_waits_over_a_month_and_a_restart() 
         version
     );
     assert_eq!(f.count("planner", "attempts"), 1);
+    assert_eq!(budget_since_admission(&runtime), 4);
     assert_eq!(runtime.report(0).unwrap().capacity_used, 0);
     host.shutdown().unwrap();
 }

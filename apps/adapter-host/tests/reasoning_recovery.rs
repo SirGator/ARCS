@@ -110,6 +110,34 @@ fn actual_fallback_preserves_the_initial_selection_and_independent_work() {
 }
 
 #[test]
+fn a_new_fallback_needs_a_remaining_reasoning_request() {
+    use arcs_host::task_runtime::queue::{TaskQueueQuery, TaskQueueScope};
+
+    let f = simple("fail", "normal");
+    let mut config = f.read("runtime.json");
+    config["routes"][0]["max_reasoning_requests"] = json!(1);
+    f.write("runtime.json", config);
+    let (mut host, mut runtime) = f.open();
+    until(&mut host, &mut runtime, None, |_, runtime| {
+        runtime
+            .task_queue(TaskQueueQuery {
+                scope: TaskQueueScope::All,
+                after_sequence: 0,
+                through_sequence: None,
+                limit: 1,
+            })
+            .unwrap()
+            .tasks
+            .iter()
+            .any(|task| task.state == "budget_exhausted")
+    });
+    assert_eq!(f.count("a", "attempts"), 1);
+    assert_eq!(f.count("b", "attempts"), 0);
+    assert_eq!(failures(&host), 1);
+    host.shutdown().unwrap();
+}
+
+#[test]
 fn permanent_invalid_answers_and_no_solution_do_not_trigger_fallback() {
     for mode in ["invalid", "no_solution"] {
         let f = simple(mode, "normal");

@@ -218,12 +218,17 @@ impl Journal {
     pub fn fail(&self, sequence: u64, error: &HostError) -> Result<(), HostError> {
         let transaction = self.connection.unchecked_transaction().map_err(db)?;
         let detail = error.to_string().chars().take(2000).collect::<String>();
+        let terminal = if matches!(error, HostError::ReasoningBudgetExhausted { .. }) {
+            GoalState::BudgetExhausted
+        } else {
+            GoalState::Failed
+        };
         let goal = read_goal(&transaction, sequence)?
             .map(|mut goal| {
                 if goal.sequence != sequence {
                     return Err(invalid("goal checkpoint identity changed"));
                 }
-                goal.state = GoalState::Failed;
+                goal.state = terminal;
                 goal.detail.clone_from(&detail);
                 serde_json::to_string(&goal).map_err(|error| invalid(error.to_string()))
             })
@@ -231,15 +236,15 @@ impl Journal {
         if let Some(goal) = goal {
             transaction
                 .execute(
-                    "UPDATE runtime_jobs SET state='failed',error=?2,goal_json=?3 WHERE sequence=?1",
-                    params![sequence as i64, detail, goal],
+                    "UPDATE runtime_jobs SET state=?2,error=?3,goal_json=?4 WHERE sequence=?1",
+                    params![sequence as i64, terminal.queue_state(), detail, goal],
                 )
                 .map_err(db)?;
         } else {
             transaction
                 .execute(
-                    "UPDATE runtime_jobs SET state='failed',error=?2 WHERE sequence=?1",
-                    params![sequence as i64, detail],
+                    "UPDATE runtime_jobs SET state=?2,error=?3 WHERE sequence=?1",
+                    params![sequence as i64, terminal.queue_state(), detail],
                 )
                 .map_err(db)?;
         }

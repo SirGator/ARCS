@@ -1,6 +1,7 @@
 //! Read-only, bounded pages over the active runtime journal.
 use arcs::core::VersionId;
 use serde::{Deserialize, Serialize};
+use std::collections::btree_map::{BTreeMap, Entry};
 
 use super::{TaskRuntime, config::invalid};
 use crate::HostError;
@@ -50,6 +51,13 @@ pub enum TaskWait {
     Approval,
 }
 
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct ReasoningRequestBudget {
+    pub task_sequence: u64,
+    pub used: u64,
+    pub limit: u32,
+}
+
 #[derive(Debug, Serialize)]
 pub struct TaskQueueRow {
     pub sequence: u64,
@@ -62,6 +70,8 @@ pub struct TaskQueueRow {
     pub not_before_unix_ms: Option<u64>,
     pub deadline_unix_ms: Option<u64>,
     pub parent_plan_sequence: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_budget: Option<ReasoningRequestBudget>,
     pub series_sequence: Option<u64>,
     pub control_revision: u64,
     pub locally_paused: bool,
@@ -84,6 +94,28 @@ impl TaskRuntime {
     /// reuse it while reporting the current state of each matching task.
     pub fn task_queue(&self, query: TaskQueueQuery) -> Result<TaskQueuePage, HostError> {
         query.validate()?;
-        self.journal.task_queue(query)
+        let mut page = self.journal.task_queue(query)?;
+        if self.has_reasoning_request_limits {
+            let mut scopes = BTreeMap::new();
+            for task in &mut page.tasks {
+                let scope = task.parent_plan_sequence.unwrap_or(task.sequence);
+                task.reasoning_budget = match scopes.entry(scope) {
+                    Entry::Occupied(entry) => *entry.get(),
+                    Entry::Vacant(entry) => {
+                        let budget = if let Some(limit) = self.reasoning_request_limit(scope)? {
+                            Some(ReasoningRequestBudget {
+                                task_sequence: scope,
+                                used: self.journal.reasoning_request_count(scope)?,
+                                limit,
+                            })
+                        } else {
+                            None
+                        };
+                        *entry.insert(budget)
+                    }
+                };
+            }
+        }
+        Ok(page)
     }
 }

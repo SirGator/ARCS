@@ -239,6 +239,83 @@ fn losing_a_replanning_response_preserves_the_exact_request_and_generation() {
     host.shutdown().unwrap();
 }
 #[test]
+fn reasoning_request_limit_survives_checkpoint_rollback_replanning_and_restart() {
+    use arcs_host::task_runtime::queue::{TaskQueueQuery, TaskQueueScope};
+
+    let f = fixture();
+    f.peer("side", "normal", false);
+    f.route("independent", "side");
+    let mut config = f.read("runtime.json");
+    config["routes"][0]["max_reasoning_requests"] = json!(3);
+    config["max_pending_jobs"] = json!(5);
+    f.write("runtime.json", config);
+    let mut model = f.read("planner.json");
+    model["gate_revision"] = json!(1);
+    f.write("planner.json", model);
+    let (mut host, mut runtime) = f.open();
+    let db = rusqlite::Connection::open(f.directory.join("runtime.sqlite")).unwrap();
+    db.execute_batch(
+        "CREATE TRIGGER lose_reasoning_binding BEFORE INSERT ON runtime_reasoning_requests
+         WHEN NEW.sequence=1 BEGIN SELECT RAISE(ABORT,'simulated request binding rollback'); END;",
+    )
+    .unwrap();
+    support::wait_for_interrupted_checkpoint(|| runtime.tick(&mut host));
+    assert_eq!(f.count("planner", "attempts"), 0);
+    db.execute_batch("DROP TRIGGER lose_reasoning_binding")
+        .unwrap();
+    until(&mut host, &mut runtime, |_| {
+        f.directory.join("planner.r1.started").exists() && f.started("side")
+    });
+    let independent_queue = |runtime: &TaskRuntime| {
+        runtime
+            .task_queue(TaskQueueQuery {
+                scope: TaskQueueScope::All,
+                after_sequence: 0,
+                through_sequence: None,
+                limit: 10,
+            })
+            .unwrap()
+    };
+    let before = independent_queue(&runtime).tasks[0]
+        .reasoning_budget
+        .unwrap();
+    assert_eq!((before.task_sequence, before.used, before.limit), (1, 3, 3));
+    host.shutdown().unwrap();
+    drop((host, runtime, db));
+
+    release_revision(&f, 1);
+    let (mut host, mut runtime) = f.open();
+    until(&mut host, &mut runtime, |runtime| {
+        terminal(runtime) && runtime.report(0).unwrap().ready_for_review == 1
+    });
+    let plan = runtime.plans_after(0, 1).unwrap().remove(0);
+    assert_eq!(plan.state, PlanState::Blocked);
+    assert_eq!(plan.revisions.len(), 2);
+    let denied = plan.steps.iter().find(|step| step.revision == 1).unwrap();
+    assert_eq!(denied.state, "budget_exhausted");
+    assert_eq!(f.count("planner", "attempts"), 3);
+    assert_eq!(f.count("planner", "results"), 2);
+    assert_eq!(f.count("b", "attempts"), 0);
+    assert_eq!(f.count("side", "attempts"), 1);
+    let tasks = independent_queue(&runtime).tasks;
+    for task in tasks
+        .iter()
+        .filter(|task| task.sequence == 1 || task.parent_plan_sequence == Some(1))
+    {
+        let budget = task.reasoning_budget.unwrap();
+        assert_eq!((budget.task_sequence, budget.used, budget.limit), (1, 3, 3));
+    }
+    let side = tasks
+        .iter()
+        .find(|task| task.route_id == "independent")
+        .unwrap();
+    assert_eq!(side.state, "ready_for_review");
+    assert!(side.reasoning_budget.is_none());
+    assert_eq!(runtime.report(0).unwrap().blocked_goals, 0);
+    host.shutdown().unwrap();
+}
+
+#[test]
 fn a_published_replacement_survives_a_rolled_back_queue_commit_without_another_model_call() {
     let f = fixture();
     let (mut host, mut runtime) = f.open();

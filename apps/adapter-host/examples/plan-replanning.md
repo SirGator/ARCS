@@ -93,6 +93,29 @@ bestehende Fehlerisolation. Pause, Abbruch und Fristen gelten auch während
 Neuplanung. Berichte zeigen `replanning`, die angenommenen Revisionen und die
 zugehörigen alten und neuen Schritte.
 
+## Kontingent für Reasoning-Anfragen
+
+Setze optional `max_reasoning_requests` auf der Route, die eine Aufgabe
+aufnimmt, zum Beispiel auf `12`. Jede Aufgabe erhält ein eigenes Kontingent.
+Ein Arbeitsplan teilt es zwischen Planer, Teilschritten und allen
+Ersatzgenerationen. Bei einer wiederkehrenden Prüfung erhält jeder Termin
+ein eigenes Kontingent. Die Einstellung gehört zur gespeicherten Identität
+der Runtime-Konfiguration und gilt somit auch nach einem Neustart.
+
+Zum Kontingent zählen erstmals zugelassene Request-IDs. Dazu gehören auch
+Fallbacks und Nachprüfungen. Ein einmal reservierter Platz bleibt verbraucht,
+wenn eine Anfrage scheitert oder die Aufgabe sie später verwirft. Eine
+Wiederaufnahme derselben Request-ID belegt denselben Platz. Vor einer
+freigegebenen Aktion reserviert die Runtime den Platz für die Bewertung
+ihrer Wirkung. Bei erschöpftem Kontingent werden keine weiteren
+Reasoning-Anfragen zugelassen. Die Aufgabenwarteschlange zeigt unter
+`reasoning_budget` die Aufgabensequenz sowie den Verbrauch und das Limit.
+Im Kontrollpanel stehen dieselben Werte in den Aufgabendetails.
+
+Ein Adapter kann nach einem verlorenen Antwortpaket dieselbe Anfrage erneut
+erhalten. Je nach Anbieter kann dabei ein weiterer abrechenbarer Aufruf
+anfallen. Das Kontingent begrenzt unterschiedliche ARCS-Request-IDs.
+
 ## Ausführbares Simulatorbeispiel
 
 [Die Konfiguration](../config/plan-replanning/runtime.json) verwendet ausschließlich

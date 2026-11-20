@@ -36,29 +36,75 @@ impl Journal {
             .map(|row| row.map_err(db))
             .collect()
     }
+    pub(in crate::task_runtime) fn reasoning_budget_scope(
+        &self,
+        sequence: u64,
+    ) -> Result<u64, HostError> {
+        self.connection
+            .query_row(
+                "SELECT COALESCE((SELECT parent_sequence FROM runtime_plan_steps WHERE sequence=?1),?1)",
+                [sequence as i64],
+                |row| row.get::<_, i64>(0).map(|n| n as u64),
+            )
+            .map_err(db)
+    }
+
+    pub(in crate::task_runtime) fn reasoning_request_count(
+        &self,
+        scope: u64,
+    ) -> Result<u64, HostError> {
+        Self::count_reasoning_requests(&self.connection, scope)
+    }
+
+    fn count_reasoning_requests(connection: &Connection, scope: u64) -> Result<u64, HostError> {
+        connection
+            .query_row(
+                "SELECT count(*) FROM runtime_reasoning_requests
+                 WHERE sequence=?1 OR sequence IN (
+                    SELECT sequence FROM runtime_plan_steps WHERE parent_sequence=?1
+                 )",
+                [scope as i64],
+                |row| row.get::<_, i64>(0).map(|n| n as u64),
+            )
+            .map_err(db)
+    }
+
     pub(in crate::task_runtime) fn bind_reasoning(
         &self,
         sequence: u64,
         request: &str,
+        budget: Option<(u64, u32)>,
     ) -> Result<(), HostError> {
-        self.connection
-            .execute(
-                "INSERT OR IGNORE INTO runtime_reasoning_requests(request_id,sequence) VALUES(?1,?2)",
-                params![request, sequence as i64],
-            )
-            .map_err(db)?;
-        let owner: i64 = self
-            .connection
+        let transaction = self.connection.unchecked_transaction().map_err(db)?;
+        let existing: Option<i64> = transaction
             .query_row(
                 "SELECT sequence FROM runtime_reasoning_requests WHERE request_id=?1",
                 [request],
                 |row| row.get(0),
             )
+            .optional()
             .map_err(db)?;
-        if owner != sequence as i64 {
-            return Err(invalid("reasoning request task identity changed"));
+        if let Some(owner) = existing {
+            if owner != sequence as i64 {
+                return Err(invalid("reasoning request task identity changed"));
+            }
+        } else {
+            if let Some((scope, limit)) = budget
+                && Self::count_reasoning_requests(&transaction, scope)? >= u64::from(limit)
+            {
+                return Err(HostError::ReasoningBudgetExhausted {
+                    task_sequence: scope,
+                    limit,
+                });
+            }
+            transaction
+                .execute(
+                    "INSERT INTO runtime_reasoning_requests(request_id,sequence) VALUES(?1,?2)",
+                    params![request, sequence as i64],
+                )
+                .map_err(db)?;
         }
-        Ok(())
+        transaction.commit().map_err(db)
     }
     pub(in crate::task_runtime) fn cancelled_reasoning(
         &self,

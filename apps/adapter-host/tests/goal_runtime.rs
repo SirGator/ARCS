@@ -102,6 +102,54 @@ fn external_planner_and_assessor_complete_two_rounds_with_fresh_requests_and_obs
 }
 
 #[test]
+fn a_goal_reserves_its_assessment_budget_before_sending_an_action() {
+    use arcs_host::task_runtime::queue::{TaskQueueQuery, TaskQueueScope};
+
+    for limit in [1_u32, 2] {
+        let fixture = Fixture::new();
+        fixture.manual();
+        let mut config = fixture.read("runtime.json");
+        config["routes"][0]["max_reasoning_requests"] = json!(limit);
+        fixture.write("runtime.json", config);
+        let mut host = fixture.host();
+        let mut runtime = fixture.runtime(&host);
+        let waiting = until(&mut host, &mut runtime, |state| {
+            state == GoalState::AwaitingApproval
+        });
+        runtime
+            .review_goal(
+                &host,
+                waiting.sequence,
+                waiting.candidate.as_ref().unwrap(),
+                ApprovalDecision::Approved,
+                human(),
+                "Simulated action and assessment reviewed".into(),
+            )
+            .unwrap();
+        let done = until(&mut host, &mut runtime, GoalState::terminal);
+        assert_eq!(done.state, GoalState::BudgetExhausted);
+        let expected = limit - 1;
+        assert_eq!(actuations(&fixture), i64::from(expected));
+        assert_eq!(count(&host, "action"), expected as usize);
+        assert_eq!(count(&host, "outcome"), expected as usize);
+        let row = runtime
+            .task_queue(TaskQueueQuery {
+                scope: TaskQueueScope::All,
+                after_sequence: 0,
+                through_sequence: None,
+                limit: 10,
+            })
+            .unwrap()
+            .tasks
+            .remove(0);
+        let budget = row.reasoning_budget.unwrap();
+        assert_eq!(budget.used, u64::from(limit));
+        assert_eq!(row.state, "budget_exhausted");
+        host.shutdown().unwrap();
+    }
+}
+
+#[test]
 fn action_verification_blocks_a_schema_valid_but_disallowed_payload_before_approval() {
     let fixture = Fixture::new();
     let mut schema = fixture.read("policy.schema.json");

@@ -562,8 +562,13 @@ fn a_legacy_single_activation_journal_keeps_its_due_date_and_receipt_when_upgrad
 
 #[test]
 fn recurring_checks_resume_on_the_original_grid_and_coalesce_missed_dates() {
+    use arcs_host::task_runtime::queue::{TaskQueueQuery, TaskQueueScope};
+
     let f = Fixture::new(Value::Null);
     f.recurring(5);
+    let mut config = f.read("runtime.json");
+    config["routes"][0]["max_reasoning_requests"] = json!(1);
+    f.write("runtime.json", config);
     let (mut host, mut runtime) = f.open();
     host.poll_inputs().unwrap();
     let first = review_at(&mut host, &mut runtime, NOW);
@@ -643,6 +648,23 @@ fn recurring_checks_resume_on_the_original_grid_and_coalesce_missed_dates() {
         runtime.completed_after(0, 10).unwrap(),
         [first, third, last]
     );
+    let tasks = runtime
+        .task_queue(TaskQueueQuery {
+            scope: TaskQueueScope::All,
+            after_sequence: 0,
+            through_sequence: None,
+            limit: 10,
+        })
+        .unwrap()
+        .tasks;
+    assert_eq!(tasks.len(), 3);
+    for task in tasks {
+        let budget = task.reasoning_budget.unwrap();
+        assert_eq!(
+            (budget.task_sequence, budget.used, budget.limit),
+            (task.sequence, 1, 1)
+        );
+    }
     assert_eq!(f.invocations(), 3);
     host.shutdown().unwrap();
 }

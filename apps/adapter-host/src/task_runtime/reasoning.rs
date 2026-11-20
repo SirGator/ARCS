@@ -81,6 +81,32 @@ impl TaskRuntime {
         }))
     }
 
+    pub(super) fn reasoning_request_limit(&self, scope: u64) -> Result<Option<u32>, HostError> {
+        let (id, _) = self.journal.selection_job(scope)?;
+        if id.starts_with("check:") {
+            return Ok(self.recurring_route(scope, &id)?.max_reasoning_requests);
+        }
+        self.config
+            .routes
+            .iter()
+            .find(|route| route.id == id)
+            .map(|route| route.max_reasoning_requests)
+            .ok_or_else(|| config::invalid("reasoning budget scope has no entry route"))
+    }
+
+    pub(super) fn reasoning_request_budget_for_task(
+        &self,
+        sequence: u64,
+    ) -> Result<Option<(u64, u32)>, HostError> {
+        if !self.has_reasoning_request_limits {
+            return Ok(None);
+        }
+        let scope = self.journal.reasoning_budget_scope(sequence)?;
+        Ok(self
+            .reasoning_request_limit(scope)?
+            .map(|limit| (scope, limit)))
+    }
+
     pub(super) fn reason_for_task(
         &mut self,
         host: &mut Host,
@@ -138,7 +164,9 @@ impl TaskRuntime {
                 .bind_recovery(sequence, &call.definition_version_id)?;
         }
         let request = call.map_or(request, |call| call.request);
-        self.journal.bind_reasoning(sequence, &request.request_id)?;
+        let budget = self.reasoning_request_budget_for_task(sequence)?;
+        self.journal
+            .bind_reasoning(sequence, &request.request_id, budget)?;
         let unavailable = recovery.is_some() && host.recovery_adapter_unavailable(&request)?;
         let result = if unavailable {
             host.reject_quarantined_recovery(request, inputs).map(Some)

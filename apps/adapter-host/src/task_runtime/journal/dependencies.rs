@@ -157,7 +157,7 @@ impl Journal {
     pub(in crate::task_runtime) fn blocked_goal_count(&self) -> Result<u64, HostError> {
         self.connection
             .query_row(
-                "SELECT COUNT(*) FROM runtime_jobs WHERE state='blocked' AND goal_json IS NOT NULL",
+                "SELECT COUNT(*) FROM runtime_jobs WHERE state IN ('blocked','budget_exhausted') AND goal_json IS NOT NULL",
                 [],
                 |row| row.get::<_, i64>(0).map(|n| n as u64),
             )

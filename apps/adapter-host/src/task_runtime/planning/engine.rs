@@ -113,16 +113,20 @@ impl TaskRuntime {
                         .is_some_and(|r| r.index < p.max_revisions)
                 })
             {
-                if self
+                let mut exhausted = None;
+                if let Some(limit) = route.max_reasoning_requests
+                    && self.journal.reasoning_request_count(sequence)? >= u64::from(limit)
+                {
+                    exhausted = Some("reasoning request budget exhausted before replanning");
+                } else if self
                     .revision_budget(host, sequence, config, route, &[])?
                     .is_none()
                 {
-                    self.journal.finish_plan(
-                        &saved.completion,
-                        Some("plan aggregate budget exhausted before replanning"),
-                        true,
-                        &[],
-                    )?;
+                    exhausted = Some("plan aggregate budget exhausted before replanning");
+                }
+                if let Some(reason) = exhausted {
+                    self.journal
+                        .finish_plan(&saved.completion, Some(reason), true, &[])?;
                     self.reap_abandoned_task_work(host)?;
                     return Ok(());
                 }

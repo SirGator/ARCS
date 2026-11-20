@@ -482,6 +482,13 @@
 > Planversion. Desktop und CLI verwenden die vorhandene Freigabe und
 > Zustellwarteschlange.
 
+> Dreiundvierzigster Schritt gemäß v3 §7.2 PAR-10/PAR-11 und §8.2 LNG-06.
+> Eine Eingangsroute kann die Zahl neuer Reasoning-Request-IDs je Aufgabe
+> begrenzen. Pläne teilen das Kontingent mit ihren Schritten und Revisionen.
+> Die Runtime prüft und reserviert Plätze im bestehenden Journal. Sie
+> reserviert die Wirkungsbewertung vor der Aktorausführung. CLI und GTK zeigen
+> den Verbrauch und das Limit pro Aufgabe.
+
 **Leitbild:** ARCS ist ein universeller Agent. Es soll sich einfach bedienen lassen, beliebige kompatible Systeme verbinden, eigenständig Probleme lösen und langfristige Aufgaben über Monate verfolgen.
 
 ## 1. Verbindliche Architekturregeln

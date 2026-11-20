@@ -15,6 +15,10 @@ pub enum HostError {
     Memory(arcs::memory::MemoryError),
     AdapterBusy(AdapterId),
     OutputQueueFull,
+    ReasoningBudgetExhausted {
+        task_sequence: u64,
+        limit: u32,
+    },
     ControlReleasePending(String),
     ResourceBusy {
         resource: String,
@@ -83,6 +87,13 @@ impl fmt::Display for HostError {
                 adapter.0
             ),
             Self::OutputQueueFull => write!(f, "output queue is full"),
+            Self::ReasoningBudgetExhausted {
+                task_sequence,
+                limit,
+            } => write!(
+                f,
+                "reasoning request budget exhausted for task {task_sequence} (limit {limit})"
+            ),
             Self::ControlReleasePending(message) => {
                 write!(f, "controller release pending: {message}")
             }

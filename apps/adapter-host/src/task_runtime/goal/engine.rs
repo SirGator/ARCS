@@ -267,6 +267,15 @@ impl TaskRuntime {
             GoalState::Verifying => self.verify_goal(host, route, config, &mut task)?,
             GoalState::AwaitingApproval => self.recover_goal_review(host, &mut task)?,
             GoalState::Executing => {
+                // Reserve the independent assessment before issuing any effect.
+                // The eventual assessment uses this same request ID on every replay.
+                if let Some(budget) = self.reasoning_request_budget_for_task(task.sequence)? {
+                    self.journal.bind_reasoning(
+                        task.sequence,
+                        &self.goal_request_id(&task, "assess"),
+                        Some(budget),
+                    )?;
+                }
                 let Some(execution) = self.execute_goal(host, route, config, &mut task)? else {
                     return Ok(());
                 };

@@ -515,6 +515,7 @@ class DesktopTests(unittest.TestCase):
         template['source']['adapter_id'] = 'multi.input.left'
         template['reasoner']['adapter_id'] = 'multi.reasoner.solver'
         template['activation'] = {'kind': 'at_time', 'unix_ms': 4102444800000}
+        template['max_reasoning_requests'] = 2
         runtime['routes'] = [{**template, 'id': f'waiting-{index}'} for index in range(26)]
         path = self.directory / 'task-queue.json'
         path.write_text(json.dumps(runtime))
@@ -554,6 +555,7 @@ class DesktopTests(unittest.TestCase):
         self.assertEqual(page.pause_button.get_label(), 'Fortsetzen')
         self.assertEqual(page.rows[0][2], 'Pausiert')
         self.assertIn('Frühestens', page.detail.get_text())
+        self.assertIn('Reasoning-Anfragen für Aufgabe 26 · 0 von 2', page.detail.get_text())
         render_window(window, PROJECT_ROOT / 'var/control-panel/screenshots/task-queue.png')
         page.previous_button.emit('clicked')
         pump_until(lambda: len(page.tasks) == 25 and page.pending is None)

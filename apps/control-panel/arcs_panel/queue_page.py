@@ -278,6 +278,9 @@ class QueuePage(Gtk.Box):
                 lines.append(f"Plan {task['parent_plan_sequence']}")
             if task.get("series_sequence") is not None:
                 lines.append(f"Prüfserie {task['series_sequence']}")
+            if budget := task.get("reasoning_budget"):
+                lines.append(f"Reasoning-Anfragen für Aufgabe {budget['task_sequence']} · "
+                             f"{budget['used']} von {budget['limit']}")
             if recover:
                 lines.append("Die Fortsetzung erfordert die ausdrückliche Wiederaufnahme des Aktorauftrags über die CLI.")
             detail = " · ".join(lines)

@@ -59,6 +59,9 @@ pub struct ReasoningRoute {
     /// Gesamte Lebensdauer ab Aufnahme, einschließlich Wartephasen und Ausfällen.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_lifetime_ms: Option<u64>,
+    /// Distinct Reasoning request IDs admitted for a task and its plan descendants.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_reasoning_requests: Option<u32>,
     pub source: CapabilityRef,
     pub input_schema_id: SchemaId,
     pub payload_fields: Vec<String>,
@@ -202,6 +205,7 @@ pub(super) fn validate_route_contract(
     let mut fields = HashSet::new();
     if !identifier(&route.id)
         || route.priority > 3
+        || route.max_reasoning_requests == Some(0)
         || route
             .max_lifetime_ms
             .is_some_and(|ms| !(1..=315_576_000_000).contains(&ms))
