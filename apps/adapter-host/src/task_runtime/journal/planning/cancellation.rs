@@ -75,7 +75,7 @@ impl Journal {
                 )
                 .map_err(db)?;
             let outstanding: bool = transaction.query_row(
-                &format!("SELECT EXISTS(SELECT 1 FROM runtime_plan_steps s JOIN runtime_jobs j ON j.sequence=s.sequence WHERE s.parent_sequence=?1 AND {})", active("j", true)),
+                &format!("SELECT EXISTS(SELECT 1 FROM runtime_plan_steps s JOIN runtime_jobs j ON j.sequence=s.sequence WHERE s.parent_sequence=?1 AND {})", active("j")),
                 [sequence as i64], |row| row.get(0)
             ).map_err(db)?;
             if !["pending", "running", "failed"].contains(&state.as_str())
@@ -102,7 +102,7 @@ impl Journal {
     ) -> Result<(), HostError> {
         let children = {
             let mut query = transaction.prepare(&format!(
-                "SELECT j.sequence FROM runtime_plan_steps s JOIN runtime_jobs j ON j.sequence=s.sequence WHERE s.parent_sequence=?1 AND {}", active("j", true)
+                "SELECT j.sequence FROM runtime_plan_steps s JOIN runtime_jobs j ON j.sequence=s.sequence WHERE s.parent_sequence=?1 AND {}", active("j")
             )).map_err(db)?;
             query
                 .query_map([parent as i64], |row| row.get::<_, i64>(0))

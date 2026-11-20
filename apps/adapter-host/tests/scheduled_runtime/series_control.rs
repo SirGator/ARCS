@@ -1,7 +1,7 @@
 #[path = "../support/parallel.rs"]
 mod parallel;
 
-use super::{Fixture, MONTH, NOW, assert_no_authority};
+use super::{Fixture, MONTH, NOW, assert_no_authority, review_at};
 use crate::support;
 use arcs::core::{Actor, ActorType};
 use arcs_host::{
@@ -55,11 +55,7 @@ fn a_dormant_series_can_be_paused_via_cli_and_resumes_on_its_original_grid() {
     f.recurring(5);
     let (mut host, mut runtime) = f.open();
     host.poll_inputs().unwrap();
-    let first = runtime
-        .tick_at(&mut host, NOW)
-        .unwrap()
-        .ready_for_review
-        .remove(0);
+    let first = review_at(&mut host, &mut runtime, NOW);
     host.shutdown().unwrap();
     drop((runtime, host));
     // Reopen an operational journal from before series controls were introduced.
@@ -88,11 +84,8 @@ fn a_dormant_series_can_be_paused_via_cli_and_resumes_on_its_original_grid() {
     let late = NOW + 3 * MONTH + 1;
     let tick = runtime.tick_at(&mut host, late).unwrap();
     assert!(tick.recurring_jobs.is_empty());
-    assert_eq!(tick.ready_for_review.len(), 1);
-    assert_ne!(
-        tick.ready_for_review[0].input_version_id,
-        first.input_version_id
-    );
+    let unrelated = review_at(&mut host, &mut runtime, late);
+    assert_ne!(unrelated.input_version_id, first.input_version_id);
     assert!(
         runtime
             .control_check_series(
@@ -134,10 +127,8 @@ fn a_dormant_series_can_be_paused_via_cli_and_resumes_on_its_original_grid() {
     let (mut host, mut runtime) = f.open();
     let tick = runtime.tick_at(&mut host, late).unwrap();
     assert_eq!(tick.recurring_jobs.len(), 1);
-    assert_eq!(
-        tick.ready_for_review[0].input_version_id,
-        first.input_version_id
-    );
+    let recurrence = review_at(&mut host, &mut runtime, late);
+    assert_eq!(recurrence.input_version_id, first.input_version_id);
     let occurrence = runtime
         .check_occurrences_after(first.sequence, first.sequence, 1)
         .unwrap()
@@ -407,7 +398,7 @@ fn cancelling_a_live_occurrence_is_atomic_and_keeps_the_series_on_its_grid() {
 }
 
 #[test]
-fn switching_to_synchronous_retry_cannot_revive_failed_occurrences_of_a_cancelled_series() {
+fn lowering_the_worker_limit_never_revives_failed_occurrences() {
     let f = gated_fixture(false);
     let mut peer = f.read("a.json");
     peer["mode"] = json!("invalid");
@@ -438,9 +429,8 @@ fn switching_to_synchronous_retry_cannot_revive_failed_occurrences_of_a_cancelle
     };
     set_parallelism(1);
     let (mut host, mut runtime) = f.open();
-    // Only the latest failed occurrence is eligible for synchronous retry.
-    assert_eq!(runtime.report(0).unwrap().pending_jobs, 1);
-    assert_eq!(runtime.report(0).unwrap().capacity_used, 1);
+    assert_eq!(runtime.report(0).unwrap().pending_jobs, 0);
+    assert_eq!(runtime.report(0).unwrap().capacity_used, 0);
     runtime.tick_at(&mut host, NOW + 3 * MONTH).unwrap();
     assert_eq!(f.count("a", "attempts"), 2);
     host.shutdown().unwrap();

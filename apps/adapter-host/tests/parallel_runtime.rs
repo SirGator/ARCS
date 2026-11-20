@@ -85,6 +85,18 @@ fn worker_capacity_and_single_session_reservations_are_enforced() {
         f.route(id, id);
     }
     f.route("same-a", "a");
+    // File gates determine the order in this test. Allow them to stay closed
+    // while parallel suites contend for CPU; a separate test covers deadlines.
+    let mut runtime_config = f.read("runtime.json");
+    for route in runtime_config["routes"].as_array_mut().unwrap() {
+        route["budget"]["max_runtime_ms"] = json!(30_000);
+    }
+    f.write("runtime.json", runtime_config);
+    let mut host_config = f.read("host.json");
+    for adapter in &mut host_config["adapters"].as_array_mut().unwrap()[1..] {
+        adapter["timeout_ms"] = json!(30_000);
+    }
+    f.write("host.json", host_config);
     let (mut host, mut runtime) = f.open();
     until(&mut host, &mut runtime, |_| {
         f.started("a") && f.started("b")
@@ -223,6 +235,104 @@ fn shutdown_interrupts_a_worker_and_restart_reuses_its_journaled_result() {
     assert_eq!(f.count("slow", "attempts"), 2);
     assert_eq!(f.count("working", "attempts"), 1);
     host.shutdown().unwrap();
+}
+
+#[test]
+fn single_worker_restart_distinguishes_persisted_failure_from_interrupted_result_commit() {
+    use arcs::core::SystemClock;
+    use arcs::runtime::{InvocationService, InvocationStatus};
+    use arcs_host::HostError;
+
+    for model_failed in [true, false] {
+        let f = Fixture::new();
+        f.peer("model", if model_failed { "fail" } else { "normal" }, false);
+        f.route("model", "model");
+        let mut config = f.read("runtime.json");
+        config
+            .as_object_mut()
+            .unwrap()
+            .remove("max_concurrent_reasoning");
+        f.write("runtime.json", config);
+        let (mut host, mut runtime) = f.open();
+        let db_name = if model_failed {
+            "runtime.sqlite"
+        } else {
+            "core.sqlite"
+        };
+        let db = rusqlite::Connection::open(f.directory.join(db_name)).unwrap();
+        let trigger = if model_failed {
+            "CREATE TRIGGER interrupt_commit BEFORE UPDATE ON runtime_jobs
+             WHEN NEW.state='failed' BEGIN SELECT RAISE(ABORT,'interrupted checkpoint'); END;"
+        } else {
+            "CREATE TRIGGER interrupt_commit BEFORE INSERT ON artifact_versions
+             WHEN NEW.schema_id='arcs.reasoning_result.v2'
+             BEGIN SELECT RAISE(ABORT,'interrupted result commit'); END;"
+        };
+        db.execute_batch(trigger).unwrap();
+
+        let deadline = Instant::now() + Duration::from_secs(20);
+        loop {
+            match runtime.tick(&mut host) {
+                Err(HostError::Store(_)) if model_failed => break,
+                Err(HostError::Reasoning(arcs::reasoning::ReasoningError::Invocation(
+                    arcs::runtime::InvocationError::Store(_),
+                ))) if !model_failed => break,
+                Err(error) => panic!("unexpected failure: {error}"),
+                Ok(_) => {}
+            }
+            assert!(Instant::now() < deadline, "fault was not reached");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let id: String = rusqlite::Connection::open(f.directory.join("model.sqlite"))
+            .unwrap()
+            .query_row("SELECT id FROM attempts", [], |row| row.get(0))
+            .unwrap();
+        let status = InvocationService::new(host.store(), host.schemas(), &SystemClock)
+            .lookup(&id)
+            .unwrap()
+            .unwrap()
+            .status;
+        assert_eq!(
+            status,
+            if model_failed {
+                InvocationStatus::Failed
+            } else {
+                InvocationStatus::Dispatched
+            }
+        );
+        assert_eq!(runtime.report(0).unwrap().failed_jobs, 0);
+        assert_eq!(f.count("model", "attempts"), 1);
+        db.execute_batch("DROP TRIGGER interrupt_commit").unwrap();
+        host.shutdown().unwrap();
+        drop((runtime, host));
+
+        let (mut host, mut runtime) = f.open();
+        until(&mut host, &mut runtime, |runtime| {
+            let report = runtime.report(0).unwrap();
+            if model_failed {
+                report.failed_jobs == 1
+            } else {
+                report.ready_for_review == 1
+            }
+        });
+        let peer = rusqlite::Connection::open(f.directory.join("model.sqlite")).unwrap();
+        let identities: i64 = peer
+            .query_row("SELECT COUNT(DISTINCT id) FROM attempts", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(identities, 1);
+        assert_eq!(
+            f.count("model", "attempts"),
+            if model_failed { 1 } else { 2 }
+        );
+        assert_eq!(
+            f.count("model", "results"),
+            if model_failed { 0 } else { 1 }
+        );
+        assert_eq!(runtime.report(0).unwrap().pending_jobs, 0);
+        host.shutdown().unwrap();
+    }
 }
 
 #[test]

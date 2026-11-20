@@ -451,6 +451,13 @@
 > in den Aufgabenstand übernommen. Fehlschläge beim Commit einer validierten
 > Antwort lassen den Dispatch mit derselben Invocation-ID wiederaufnehmbar.
 
+> Neununddreißigster Schritt gemäß v3 §7.2 PAR-01/PAR-02/PAR-07/PAR-08/PAR-10:
+> Reasoning belegt auch beim Standardwert eins einen Worker. Die Runtime
+> verarbeitet während des Modellaufrufs andere Manager und Steuerbefehle.
+> Fehlerisolierung gilt für alle Limits. Ein verbuchter Modellfehler wird
+> beim Wiederanlauf übernommen. Ein unterbrochener Ergebnis-Commit lässt
+> denselben Dispatch wiederaufnehmbar. Neuplanung nutzt dieselben Regeln.
+
 **Leitbild:** ARCS ist ein universeller Agent. Es soll sich einfach bedienen lassen, beliebige kompatible Systeme verbinden, eigenständig Probleme lösen und langfristige Aufgaben über Monate verfolgen.
 
 ## 1. Verbindliche Architekturregeln

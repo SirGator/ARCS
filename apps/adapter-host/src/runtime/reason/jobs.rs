@@ -10,6 +10,7 @@ use arcs::reasoning::general::{
     ReasoningResult,
 };
 use arcs::reasoning::{ReasoningError, ReasoningRequestV2, ReasoningResponseV2};
+use arcs::runtime::InvocationStatus;
 
 use super::*;
 
@@ -56,25 +57,28 @@ impl Host {
             }
             return self.collect_pending_reasoning(&key);
         }
-        let cached = self.has_reasoning_result(&key)?;
-        if !cached && self.reasoning_jobs.len() >= limit {
+        let recorded = matches!(
+            self.reasoning_status(&key)?,
+            Some(InvocationStatus::Succeeded | InvocationStatus::Failed)
+        );
+        if !recorded && self.reasoning_jobs.len() >= limit {
             return Ok(None);
         }
         let resources: HashSet<_> = std::iter::once(request.capability.adapter_id.clone())
             .chain(inputs.iter().map(|input| input.source.adapter_id.clone()))
             .collect();
-        for resource in resources.iter().filter(|_| !cached) {
+        for resource in resources.iter().filter(|_| !recorded) {
             match self.ensure_adapter_available(resource) {
                 Err(HostError::AdapterBusy(_)) => return Ok(None),
                 other => other?,
             }
         }
-        let claims = if cached {
+        let claims = if recorded {
             crate::runtime::resources::ResourceClaims::new()
         } else {
             self.reasoning_claims(&resources)?
         };
-        if !cached {
+        if !recorded {
             self.ensure_resources_available(&claims)?;
         }
         let endpoint = self
@@ -85,14 +89,14 @@ impl Host {
             .ok_or_else(|| invalid("unknown reasoning adapter"))?;
         let prepared = match self
             .reasoning_service()
-            .prepare(endpoint.as_ref(), request, inputs)
+            .prepare_for_worker(endpoint.as_ref(), request, inputs)
             .map_err(HostError::Reasoning)?
         {
             ReasoningPreparation::Complete(result) => return Ok(Some(result)),
             ReasoningPreparation::Dispatch(prepared) => *prepared,
         };
-        if cached {
-            return Err(invalid("cached reasoning state changed during admission"));
+        if recorded {
+            return Err(invalid("recorded reasoning state changed during admission"));
         }
         let invocation = prepared.invocation().clone();
         let deadline = Instant::now() + Duration::from_millis(invocation.budget.max_runtime_ms);
@@ -288,7 +292,7 @@ impl Host {
             .find(|adapter| adapter.config.grant.adapter_id == request.capability.adapter_id)
             .map(|adapter| Arc::clone(&adapter.endpoint))
             .ok_or_else(|| invalid("unknown recovery endpoint"))?;
-        match self.reasoning_service().prepare(endpoint.as_ref(),request,inputs).map_err(HostError::Reasoning)? {
+        match self.reasoning_service().prepare_for_worker(endpoint.as_ref(),request,inputs).map_err(HostError::Reasoning)? {
             ReasoningPreparation::Complete(result)=>Ok(result),
             ReasoningPreparation::Dispatch(prepared)=>self.reasoning_service().finish(*prepared,Err(ReasoningError::AdapterCall(AdapterCallError::Unavailable("reasoning session is quarantined; request rejected locally before backend delivery".into())))).map_err(HostError::Reasoning),
         }

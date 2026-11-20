@@ -312,7 +312,7 @@ fn restart_replays_the_same_invocation_and_rebuilds_logical_capacity_from_new_li
 }
 
 #[test]
-fn separate_runtimes_in_one_host_share_capacity_and_synchronous_waiting_is_not_a_failure() {
+fn separate_runtimes_in_one_host_share_reasoning_admission_and_resource_capacity() {
     let f = fixture(&[("a", "gate"), ("b", "normal")]);
     configure(
         &f,
@@ -337,7 +337,7 @@ fn separate_runtimes_in_one_host_share_capacity_and_synchronous_waiting_is_not_a
     .unwrap();
     let report = two.tick(&mut host).unwrap();
     assert!(report.failed.is_empty());
-    assert_eq!(report.waiting_resources.len(), 1);
+    assert_eq!(used(&host, "gpu"), 1);
     assert_eq!(two.report(0).unwrap().failed_jobs, 0);
     assert!(!f.started("b"));
     f.release("a");

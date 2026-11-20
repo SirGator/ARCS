@@ -219,8 +219,9 @@ fn a_core_selection_survives_a_failed_queue_checkpoint_and_does_not_switch_while
     until(&mut host, &mut other, |r| {
         r.report(0).unwrap().ready_for_review == 1
     });
-    runtime.tick(&mut host).unwrap();
-    assert_eq!(runtime.report(0).unwrap().ready_for_review, 1);
+    until(&mut host, &mut runtime, |r| {
+        r.report(0).unwrap().ready_for_review == 1
+    });
     assert_eq!(f.count("a", "attempts"), 2);
     assert_eq!(f.count("b", "attempts"), 0);
     host.shutdown().unwrap();

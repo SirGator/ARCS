@@ -28,7 +28,7 @@ impl Journal {
     ) -> Result<Vec<(u64, String)>, HostError> {
         let mut query = self.connection.prepare(&format!(
             "SELECT j.sequence,j.route_id FROM runtime_jobs j ORDER BY ({}) DESC,j.sequence DESC LIMIT 50",
-            active("j", true)
+            active("j")
         )).map_err(db)?;
         query
             .query_map([], |row| Ok((row.get::<_, i64>(0)? as u64, row.get(1)?)))

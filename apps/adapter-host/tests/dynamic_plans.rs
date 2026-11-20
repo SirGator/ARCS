@@ -153,7 +153,7 @@ fn a_core_plan_published_before_a_failed_queue_commit_is_reused_without_duplicat
     host.poll_inputs().unwrap();
     let db = rusqlite::Connection::open(f.directory.join("runtime.sqlite")).unwrap();
     db.execute_batch("CREATE TRIGGER reject_expansion BEFORE INSERT ON runtime_plan_steps BEGIN SELECT RAISE(ABORT,'injected plan admission failure'); END;").unwrap();
-    assert!(runtime.tick(&mut host).is_err());
+    support::wait_for_interrupted_checkpoint(|| runtime.tick(&mut host));
     let plan = artifacts(&host, "arcs.plan.v1");
     assert_eq!(plan.len(), 1);
     assert!(runtime.plans_after(0, 10).unwrap().is_empty());

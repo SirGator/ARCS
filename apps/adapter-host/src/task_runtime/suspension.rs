@@ -133,7 +133,6 @@ impl TaskRuntime {
             core_cursor,
             &limits,
             is_plan,
-            self.config.retry_failed_jobs(),
         )?;
         // A failed control transaction must never discard a live response.
         self.reap_abandoned_task_work(host)?;

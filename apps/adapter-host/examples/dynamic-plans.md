@@ -199,9 +199,7 @@ Begründung und erzeugt keine Kindaufträge. Formal fehlerhafte Antworten werden
 bereits als normaler Reasoning-Fehler abgewiesen. `no_solution` erzeugt keinen
 ausführbaren Plan. Misslingt später ein benötigter Schritt, wird der Plan
 `blocked`; seine abhängigen Nachfolger werden ebenfalls blockiert. Bereits
-unabhängig gestartete Berechnungen dürfen fertig werden. Es gibt keine
-verdeckte Neuplanung oder automatische Wiederholungsschleife. Der vorhandene
-besondere Fehler-/Restart-Vertrag des synchronen Modus bleibt erhalten.
+unabhängig gestartete Berechnungen dürfen fertig werden. Für eine weitere Planung braucht der Auftrag eine eigene Replanning-Policy.
 
 ## Status und noch offene Arbeit
 
@@ -271,8 +269,8 @@ erfindet weder einen Erfolg noch eine Rücknahme externer Wirkungen.
 
 Unabhängige Pläne bleiben ausführbar. Abgebrochene Aufträge werden nach einem
 Neustart, einem späteren Termin oder einem Weckereignis nicht erneut gestartet.
-Im synchronen Modus ist der Abbruch zwischen Aufrufen möglich; ein bereits
-blockierender Aufruf behält seine normale Deadline.
+Bereits laufende Worker behalten ihre reservierte Kapazität bis zur Antwort
+oder zum Abbruch an der Deadline.
 
 ## Grenzen der aktuellen Planung
 

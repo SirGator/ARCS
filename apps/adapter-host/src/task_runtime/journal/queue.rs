@@ -1,7 +1,7 @@
 use arcs::core::VersionId;
 use rusqlite::{Connection, Row, Transaction, params};
 
-use super::{Journal, db, runnable, suspension::PAUSED};
+use super::{Journal, active, db, suspension::PAUSED};
 use crate::HostError;
 use crate::task_runtime::{
     config::invalid,
@@ -24,7 +24,6 @@ impl Journal {
     pub(in crate::task_runtime) fn task_queue(
         &self,
         query: TaskQueueQuery,
-        include_failed: bool,
     ) -> Result<TaskQueuePage, HostError> {
         let tx = self.connection.unchecked_transaction().map_err(db)?;
         let last = Self::latest_task_sequence(&tx)?;
@@ -32,7 +31,7 @@ impl Journal {
         if through > last || query.after_sequence > through {
             return Err(invalid("task queue sequence range is outside this journal"));
         }
-        let mut ids = page_ids(&tx, &query, through, include_failed)?;
+        let mut ids = page_ids(&tx, &query, through)?;
         let more = ids.len() > query.limit;
         ids.truncate(query.limit);
         let next_after_sequence = if more {
@@ -40,7 +39,7 @@ impl Journal {
         } else {
             None
         };
-        let tasks = read_tasks(&tx, &ids, include_failed)?;
+        let tasks = read_tasks(&tx, &ids)?;
         tx.commit().map_err(db)?;
         Ok(TaskQueuePage {
             scope: query.scope,
@@ -56,7 +55,6 @@ fn page_ids(
     tx: &Transaction<'_>,
     query: &TaskQueueQuery,
     through: u64,
-    include_failed: bool,
 ) -> Result<Vec<i64>, HostError> {
     let after = query.after_sequence as i64;
     let through = through as i64;
@@ -72,12 +70,12 @@ fn page_ids(
 
     // Select small runs from the state/sequence index, then merge by sequence.
     // A sparse open queue does not require scanning the completed history.
-    let open = runnable("j", include_failed);
+    let open = active("j");
     let mut statement = tx.prepare(&format!("SELECT j.sequence FROM runtime_jobs j INDEXED BY runtime_pending
         WHERE j.state=?1 AND j.sequence>?2 AND j.sequence<=?3 AND {open} ORDER BY j.sequence LIMIT ?4")).map_err(db)?;
     let mut ids: Vec<i64> = Vec::new();
-    let states = ["pending", "running", "awaiting_approval", "failed"];
-    for state in &states[..if include_failed { 4 } else { 3 }] {
+    let states = ["pending", "running", "awaiting_approval"];
+    for state in states {
         let rows = statement
             .query_map(params![state, after, through, limit], |row| row.get(0))
             .map_err(db)?;
@@ -90,16 +88,12 @@ fn page_ids(
     Ok(ids)
 }
 
-fn read_tasks(
-    tx: &Transaction<'_>,
-    ids: &[i64],
-    include_failed: bool,
-) -> Result<Vec<TaskQueueRow>, HostError> {
+fn read_tasks(tx: &Transaction<'_>, ids: &[i64]) -> Result<Vec<TaskQueueRow>, HostError> {
     if ids.is_empty() {
         return Ok(Vec::new());
     }
-    let open = runnable("j", include_failed);
-    let child_open = runnable("child", include_failed);
+    let open = active("j");
+    let child_open = active("child");
     let sql = format!("SELECT j.sequence, j.route_id, j.input_version, priority.priority, j.state,
         json_extract(j.goal_json,'$.state'),
         CASE WHEN NOT ({open}) THEN NULL

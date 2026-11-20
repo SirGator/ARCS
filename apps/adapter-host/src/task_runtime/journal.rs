@@ -50,35 +50,10 @@ pub(super) struct Journal {
     pub ids: arcs::core::SequenceIdGenerator,
     _lock: File,
 }
-/// A failed goal checkpoint records a terminal decision. Legacy synchronous
-/// failures may leave the goal at its resumable step.
-pub(super) fn active(job: &str, include_failed: bool) -> String {
-    let states = format!("{job}.state IN ('pending','running','awaiting_approval')");
-    if include_failed {
-        format!(
-            "({states} OR ({job}.state='failed' AND json_extract({job}.goal_json,'$.state') IS NOT 'failed'))"
-        )
-    } else {
-        states
-    }
+pub(super) fn active(job: &str) -> String {
+    format!("{job}.state IN ('pending','running','awaiting_approval')")
 }
-pub(super) fn runnable(job: &str, include_failed: bool) -> String {
-    let states = active(job, include_failed);
-    if !include_failed {
-        return states;
-    }
-    // A runtime may reopen in synchronous retry mode after a series advanced
-    // past a failure in parallel mode. Historical failures stay terminal.
-    format!("({states} AND ({job}.state<>'failed' OR NOT EXISTS(
-        SELECT 1 FROM runtime_check_occurrences occurrence JOIN runtime_check_series series ON series.sequence=occurrence.series
-        WHERE occurrence.sequence={job}.sequence AND (series.last_job<>{job}.sequence OR series.control_state='cancelled'))))")
-}
-pub(super) fn pending_query(include_failed: bool) -> String {
-    format!(
-        "SELECT COUNT(*) FROM runtime_jobs j WHERE {}",
-        runnable("j", include_failed)
-    )
-}
+
 impl Journal {
     pub fn open(host: &Host, config: &RuntimeConfig, identity: Value) -> Result<Self, HostError> {
         let absolute = std::env::current_dir()
@@ -190,6 +165,13 @@ impl Journal {
                 CREATE INDEX runtime_pending ON runtime_jobs(state,sequence);
                 COMMIT;").map_err(db)?;
         }
+        // Older serial runtimes left failed goals at their last resumable step.
+        // Keep that evidence and align the checkpoint with the terminal queue state.
+        connection.execute(
+            "UPDATE runtime_jobs SET goal_json=json_set(goal_json,'$.state','failed','$.detail',COALESCE(error,json_extract(goal_json,'$.detail')))
+             WHERE state='failed' AND goal_json IS NOT NULL AND json_extract(goal_json,'$.state') IS NOT 'failed'",
+            [],
+        ).map_err(db)?;
         scheduling::initialize(&connection)?;
         dependencies::initialize(&connection)?;
         planning::initialize(&connection)?;
@@ -208,52 +190,38 @@ impl Journal {
             _lock: lock,
         })
     }
-    pub fn pending(&self, include_failed: bool) -> Result<usize, HostError> {
-        self.connection
-            .query_row(&pending_query(include_failed), [], |row| {
-                row.get::<_, i64>(0)
-            })
-            .map(|count| count as usize)
-            .map_err(db)
-    }
-    pub fn job_is_runnable(&self, sequence: u64, include_failed: bool) -> Result<bool, HostError> {
+    pub fn pending(&self) -> Result<usize, HostError> {
         self.connection
             .query_row(
-                &format!(
-                    "SELECT {} FROM runtime_jobs j WHERE sequence=?1",
-                    runnable("j", include_failed)
-                ),
-                [sequence as i64],
-                |row| row.get(0),
+                &format!("SELECT COUNT(*) FROM runtime_jobs j WHERE {}", active("j")),
+                [],
+                |row| row.get::<_, i64>(0),
             )
+            .map(|count| count as usize)
             .map_err(db)
     }
     pub fn start(&self, sequence: u64) -> Result<(), HostError> {
         self.connection
             .execute(
-                "UPDATE runtime_jobs SET state='running',error=NULL WHERE sequence=?1",
+                "UPDATE runtime_jobs SET state='running',error=NULL WHERE sequence=?1 AND state='pending'",
                 [sequence.min(i64::MAX as u64) as i64],
             )
             .map_err(db)?;
         Ok(())
     }
-    pub fn fail(&self, sequence: u64, error: &HostError, retry: bool) -> Result<(), HostError> {
+    pub fn fail(&self, sequence: u64, error: &HostError) -> Result<(), HostError> {
         let transaction = self.connection.unchecked_transaction().map_err(db)?;
         let detail = error.to_string().chars().take(2000).collect::<String>();
-        let goal = if retry {
-            None
-        } else {
-            read_goal(&transaction, sequence)?
-                .map(|mut goal| {
-                    if goal.sequence != sequence {
-                        return Err(invalid("goal checkpoint identity changed"));
-                    }
-                    goal.state = GoalState::Failed;
-                    goal.detail.clone_from(&detail);
-                    serde_json::to_string(&goal).map_err(|error| invalid(error.to_string()))
-                })
-                .transpose()?
-        };
+        let goal = read_goal(&transaction, sequence)?
+            .map(|mut goal| {
+                if goal.sequence != sequence {
+                    return Err(invalid("goal checkpoint identity changed"));
+                }
+                goal.state = GoalState::Failed;
+                goal.detail.clone_from(&detail);
+                serde_json::to_string(&goal).map_err(|error| invalid(error.to_string()))
+            })
+            .transpose()?;
         if let Some(goal) = goal {
             transaction
                 .execute(
@@ -365,7 +333,7 @@ impl Journal {
     pub(in crate::task_runtime) fn goals_for_report(&self) -> Result<Vec<GoalTask>, HostError> {
         let mut query = self.connection.prepare(&format!(
             "SELECT j.goal_json FROM runtime_jobs j WHERE j.goal_json IS NOT NULL ORDER BY ({}) DESC,j.sequence DESC LIMIT 50",
-            active("j", true)
+            active("j")
         )).map_err(db)?;
         let rows = query
             .query_map([], |row| row.get::<_, String>(0))

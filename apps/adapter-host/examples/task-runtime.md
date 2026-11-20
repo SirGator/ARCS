@@ -6,10 +6,10 @@ expliziten Konfiguration Reasonern zugeordnet. Das Beispiel verwendet die
 bestehende JSON-Eingabe und den mathematischen Solver. Fachliche Geräte- und
 Solverlogik bleiben in den Adaptern.
 
-Mit `max_concurrent_reasoning` ab 2 laufen unabhängige Reasoning-Aufrufe
-begrenzt parallel. Standard 1 erhält den synchronen Betrieb. Der
-[Parallelitätsnachweis](parallel-runtime.md) beschreibt Ressourcenreservierung,
-Fehlerisolierung und Wiederaufnahme.
+`max_concurrent_reasoning` begrenzt laufende Reasoning-Aufrufe. Mit dem
+Standardwert 1 kann der Scheduler während eines Modellaufrufs weitere
+Steuerbefehle, Eingaben und Beobachtungen verarbeiten. Ab 2 sind parallele
+Modellaufrufe möglich. [Parallelitätsnachweis](parallel-runtime.md)
 
 Die optionale Route-Einstellung `memory` ergänzt den Pflichtkontext aus dem
 gemeinsamen Artifact-Netz. Der [Gedächtnisnachweis](artifact-memory.md) beschreibt
@@ -54,7 +54,7 @@ cargo build --locked --workspace --bins
 ./target/debug/arcs-host \
   --config apps/adapter-host/config/roles/host.json \
   --runtime apps/adapter-host/config/roles/runtime.json \
-  --ticks 2
+  --ticks 20
 ```
 
 Dieser begrenzte Nachweis verarbeitet auch eine bereits früher empfangene und
@@ -94,15 +94,11 @@ Geordnetes Beenden:
 touch /tmp/arcs-nearest.stop
 ```
 
-Der Host prüft die Datei zwischen Runden und während der Pausen. Im synchronen
-Betrieb bleibt ein laufender Dialog durch seine Deadline begrenzt; die Stop-Datei
-unterbricht keine laufende Runde. Im parallelen Modus wartet die Runde nicht
-auf Reasoning-Antworten. Beim anschließenden Shutdown werden noch aktive lokale
-Reasoning-Dialoge abgebrochen. Andere synchrone Ports begrenzen weiterhin die
-Reaktionszeit ihrer Runde. Danach beendet er die
-Adapter und gibt seinen Bericht aus. Vor einem weiteren Dauerlauf muss die
-von dir erzeugte Stop-Datei wieder entfernt werden. Ein harter Prozessabbruch
-unterbricht den aktuellen Dialog; die gespeicherte Aufgabe bleibt wiederaufnehmbar.
+Der Host prüft die Stop-Datei zwischen Runden und während der Pausen.
+Beim Shutdown bricht er noch aktive lokale Worker-Dialoge ab und gibt
+seinen Bericht aus. Offene Aufträge bleiben für den nächsten Start
+gespeichert. Auch `--ticks` kann den Lauf mit offenen Aufträgen beenden.
+Entferne die Stop-Datei vor dem nächsten Dauerlauf.
 
 ## Steuerung im laufenden Host
 
@@ -198,8 +194,7 @@ Backpressure. Ein Programm, das den Monitor über Pipes startet, liest dessen
 Ausgabe nebenläufig zu seiner Eingabe. Beim Schließen der Standardeingabe
 werden vollständige bereits gepufferte Befehle weiter verarbeitet. Der
 Monitor arbeitet bis zur Stop-Datei oder einer gesetzten Tickgrenze weiter.
-Die Reaktionszeit richtet sich nach dem Tickintervall und den laufenden
-synchronen Adapterdialogen.
+Die Reaktionszeit richtet sich nach dem Tickintervall und der Arbeit je Runde.
 
 Die Standardeingabe des Host-Prozesses ist der lokale Betreiberkanal. Eine
 startende Anwendung entscheidet, wer darauf schreiben darf, und authentifiziert
@@ -224,7 +219,7 @@ Transform-Aufrufe des begrenzten Hosts werden dabei nicht automatisch ausgeführ
 | `interval_ms` | Pause zwischen Runden, 1–60.000 ms; Standard 100 |
 | `max_events_per_tick` | Größe einer Core-Logseite, 1–10.000; Standard 1000; höchstens zwei Seiten je Runde |
 | `max_jobs_per_tick` | Maximale bearbeitete Aufgaben/Schritte je Runde, 1–1000; Standard 100 |
-| `max_concurrent_reasoning` | 1–32; Standard 1 erhält synchronen Betrieb, ab 2 laufen Reasoning-Aufrufe begrenzt parallel |
+| `max_concurrent_reasoning` | 1–32 laufende Hintergrundaufrufe, Standard 1 |
 | `max_pending_jobs` | Offene Aufgaben, mindestens Anzahl der Routen, höchstens 100.000; Standard 1000 |
 | `routes` | 1–32 Zuordnungen mit eindeutigen IDs |
 
@@ -299,8 +294,8 @@ idempotenter Speicherung fortgeschrieben werden. Auch `no_solution` und
 `budget_exhausted` sind gespeicherte Ergebnisse mit leerer Kandidatenliste.
 
 `TaskRuntime::run` unterstützt einen Stop-Callback und optional eine Rundenzahl.
-Die Runtime hält Verbindungen offen. Unabhängiges Reasoning kann mit dem oben
-beschriebenen Worker-Limit parallel laufen; andere Ports bleiben synchron.
+Die Runtime hält Verbindungen offen. Runtime-Aufträge verwenden die oben
+beschriebenen Worker-Limits.
 Sie umfasst kein Push-Protokoll, keine automatische Modellwahl
 und keine implizite Action-/Output-Policy. Goal-Aktionen benötigen die oben
 beschriebene ausdrückliche Konfiguration. Die Host-Inputberichte enthalten

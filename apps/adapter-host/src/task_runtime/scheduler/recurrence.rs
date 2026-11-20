@@ -145,8 +145,7 @@ impl TaskRuntime {
         sequence: u64,
         limit: usize,
     ) -> Result<Vec<CheckSeries>, HostError> {
-        self.journal
-            .recurring_checks_after(sequence, limit, self.config.retry_failed_jobs())
+        self.journal.recurring_checks_after(sequence, limit)
     }
 
     pub fn check_occurrences_after(

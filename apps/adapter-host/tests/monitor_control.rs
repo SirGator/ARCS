@@ -108,6 +108,44 @@ fn series_control(revision: u64, change: &str) -> Value {
 }
 
 #[test]
+fn a_single_reasoning_worker_leaves_monitor_and_observations_available() {
+    let f = parallel::Fixture::new();
+    f.peer("slow", "gate", false);
+    f.route("slow", "slow");
+    f.peer("fast", "normal", true);
+    f.route("fast", "fast");
+    let mut config = f.read("runtime.json");
+    config
+        .as_object_mut()
+        .unwrap()
+        .remove("max_concurrent_reasoning");
+    config["interval_ms"] = json!(15);
+    f.write("runtime.json", config);
+
+    let mut monitor = Monitor::start(&f.directory);
+    let waiting = monitor.until(|event| f.started("slow") && event["runtime"]["pending_jobs"] == 2);
+    assert!(!f.started("fast"));
+    let revision = waiting["world_revision"].as_u64().unwrap();
+    let queue = monitor.command(
+        "queue-during-reasoning",
+        "queue",
+        json!({"scope":"open","limit":4}),
+    );
+    assert_eq!(queue["ok"], true);
+    monitor.until(|event| {
+        event["world_revision"]
+            .as_u64()
+            .is_some_and(|latest| latest > revision)
+    });
+    assert!(!f.started("fast"));
+    f.release("slow");
+    monitor.until(|event| event["runtime"]["ready_for_review"] == 2);
+    assert_eq!(f.count("slow", "attempts"), 1);
+    assert_eq!(f.count("fast", "attempts"), 1);
+    monitor.stop();
+}
+
+#[test]
 fn queue_pages_keep_their_sequence_bound_and_show_live_waiting_and_pause_states() {
     let f = parallel::Fixture::new();
     f.peer("a", "normal", false);

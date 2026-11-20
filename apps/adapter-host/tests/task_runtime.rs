@@ -138,6 +138,9 @@ fn acked_input_is_discovered_after_restart_and_candidates_are_handed_to_review()
     let mut runtime = fixture.runtime(&host);
     let tick = runtime.tick(&mut host).unwrap();
     assert_eq!(tick.discovered_jobs, 1);
+    let tick = tick_until(&mut host, &mut runtime, |tick| {
+        !tick.ready_for_review.is_empty()
+    });
     let done = &tick.ready_for_review[0];
     assert_eq!(done.input_version_id, input.version_id);
     let candidate = host
@@ -249,8 +252,14 @@ fn a_second_journal_recovers_a_shared_acked_input_after_its_admission_rolls_back
     let recovered = &tick.ready_for_review[0];
     assert_eq!(recovered.input_version_id, original.input_version_id);
     assert_ne!(recovered.request_version_id, original.request_version_id);
-    assert_eq!(first.completed_after(0, 2).unwrap(), [original.clone()]);
-    assert_eq!(delayed.completed_after(0, 2).unwrap(), [recovered.clone()]);
+    assert_eq!(
+        first.completed_after(0, 2).unwrap(),
+        std::slice::from_ref(original)
+    );
+    assert_eq!(
+        delayed.completed_after(0, 2).unwrap(),
+        std::slice::from_ref(recovered)
+    );
     assert_eq!(
         scalar(&fixture.db("solver"), "SELECT COUNT(*) FROM invocations"),
         2
@@ -385,11 +394,14 @@ fn fanout_and_backpressure_preserve_all_route_jobs_and_bound_the_queue() {
     host.poll_inputs().unwrap();
     let mut done = Vec::new();
     let mut pressure = false;
-    for _ in 0..10 {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while done.len() < 6 {
         let tick = runtime.tick(&mut host).unwrap();
         pressure |= tick.backpressure;
         done.extend(tick.ready_for_review);
         assert!(runtime.report(0).unwrap().pending_jobs <= 2);
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(3));
     }
     assert!(pressure);
     assert_eq!(done.len(), 6);
@@ -459,9 +471,10 @@ fn reasoning_error_is_persisted_and_does_not_advance_to_review() {
     let mut host = fixture.host();
     let mut runtime = fixture.runtime(&host);
     host.poll_inputs().unwrap();
-    assert!(runtime.tick(&mut host).is_err());
+    let tick = runtime.tick(&mut host).unwrap();
+    assert_eq!(tick.failed.len(), 1);
     let report = runtime.report(1).unwrap();
-    assert_eq!(report.pending_jobs, 1);
+    assert_eq!(report.pending_jobs, 0);
     assert_eq!(report.failed_jobs, 1);
     assert_eq!(report.ready_for_review, 0);
     let error: String = fixture
@@ -636,7 +649,10 @@ fn a_legacy_review_journal_is_migrated_without_recomputing_or_changing_completed
     let fixture = Fixture::new();
     let mut host = fixture.host();
     let mut runtime = fixture.runtime(&host);
-    let done = runtime.tick(&mut host).unwrap().ready_for_review;
+    let done = tick_until(&mut host, &mut runtime, |tick| {
+        !tick.ready_for_review.is_empty()
+    })
+    .ready_for_review;
     let artifacts = host.report().unwrap().stored_artifacts;
     host.shutdown().unwrap();
     drop(runtime);

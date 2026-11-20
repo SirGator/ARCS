@@ -138,17 +138,10 @@ impl TaskRuntime {
                 .bind_recovery(sequence, &call.definition_version_id)?;
         }
         let request = call.map_or(request, |call| call.request);
-        if self.journal.captured_reasoning(&request.request_id)?
-            && let Some(error) = host.saved_reasoning_failure(&request)?
-        {
-            return Err(invalid(error));
-        }
         self.journal.bind_reasoning(sequence, &request.request_id)?;
         let unavailable = recovery.is_some() && host.recovery_adapter_unavailable(&request)?;
         let result = if unavailable {
             host.reject_quarantined_recovery(request, inputs).map(Some)
-        } else if self.config.max_concurrent_reasoning == 1 {
-            host.reason_with_data(request, inputs).map(Some)
         } else {
             host.poll_reason_with_data(request, inputs, self.config.max_concurrent_reasoning)
         };

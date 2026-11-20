@@ -1,7 +1,7 @@
 //! Lifetime admission, clock high-water mark and cancellation form one journal.
 use rusqlite::{Connection, OptionalExtension, Row, Transaction, params};
 
-use super::{Journal, active, db, runnable};
+use super::{Journal, active, db};
 use crate::HostError;
 use crate::task_runtime::{config::invalid, deadlines::TaskDeadline};
 use arcs::core::VersionId;
@@ -17,11 +17,11 @@ pub(super) fn initialize(connection: &Connection) -> Result<(), HostError> {
         COMMIT;").map_err(db)
 }
 
-fn eligible(include_failed: bool) -> String {
+fn eligible() -> String {
     format!(
         "({} OR (d.is_plan=1 AND j.state='blocked' AND EXISTS(SELECT 1 FROM runtime_plan_steps s JOIN runtime_jobs child ON child.sequence=s.sequence WHERE s.parent_sequence=j.sequence AND {})))",
-        runnable("j", include_failed),
-        active("child", true)
+        active("j"),
+        active("child")
     )
 }
 
@@ -98,9 +98,8 @@ impl Journal {
     pub(in crate::task_runtime) fn expiring_tasks(
         &self,
         limit: usize,
-        include_failed: bool,
     ) -> Result<Vec<u64>, HostError> {
-        let mut query=self.connection.prepare(&format!("SELECT j.sequence FROM runtime_task_deadlines d JOIN runtime_jobs j ON j.sequence=d.sequence WHERE d.expired_at IS NULL AND d.expires_at<=(SELECT last_unix_ms FROM runtime_deadline_clock) AND {} ORDER BY d.expires_at,j.sequence LIMIT ?1",eligible(include_failed))).map_err(db)?;
+        let mut query=self.connection.prepare(&format!("SELECT j.sequence FROM runtime_task_deadlines d JOIN runtime_jobs j ON j.sequence=d.sequence WHERE d.expired_at IS NULL AND d.expires_at<=(SELECT last_unix_ms FROM runtime_deadline_clock) AND {} ORDER BY d.expires_at,j.sequence LIMIT ?1",eligible())).map_err(db)?;
         query
             .query_map([limit as i64], |row| row.get::<_, i64>(0).map(|n| n as u64))
             .map_err(db)?
@@ -111,10 +110,9 @@ impl Journal {
     pub(in crate::task_runtime) fn expire_task(
         &mut self,
         sequence: u64,
-        include_failed: bool,
     ) -> Result<bool, HostError> {
         let transaction = self.connection.transaction().map_err(db)?;
-        let is_plan:Option<bool>=transaction.query_row(&format!("SELECT d.is_plan FROM runtime_task_deadlines d JOIN runtime_jobs j ON j.sequence=d.sequence WHERE j.sequence=?1 AND d.expired_at IS NULL AND d.expires_at<=(SELECT last_unix_ms FROM runtime_deadline_clock) AND {}",eligible(include_failed)),[sequence as i64],|row|row.get(0)).optional().map_err(db)?;
+        let is_plan:Option<bool>=transaction.query_row(&format!("SELECT d.is_plan FROM runtime_task_deadlines d JOIN runtime_jobs j ON j.sequence=d.sequence WHERE j.sequence=?1 AND d.expired_at IS NULL AND d.expires_at<=(SELECT last_unix_ms FROM runtime_deadline_clock) AND {}",eligible()),[sequence as i64],|row|row.get(0)).optional().map_err(db)?;
         let Some(is_plan) = is_plan else {
             return Ok(false);
         };
@@ -129,7 +127,7 @@ impl Journal {
         let affected = {
             let mut query = transaction.prepare(&format!(
                 "SELECT j.sequence FROM runtime_jobs j WHERE j.sequence=?1 OR (j.sequence IN (SELECT sequence FROM runtime_plan_steps WHERE parent_sequence=?1) AND {})",
-                active("j", true)
+                active("j")
             )).map_err(db)?;
             query
                 .query_map([sequence as i64], |row| row.get::<_, i64>(0))
@@ -151,7 +149,6 @@ impl Journal {
 
     pub(in crate::task_runtime) fn deadline_summary(
         &self,
-        include_failed: bool,
     ) -> Result<(u64, Option<u64>), HostError> {
         let expired = self
             .connection
@@ -161,7 +158,7 @@ impl Journal {
                 |row| row.get::<_, i64>(0).map(|n| n as u64),
             )
             .map_err(db)?;
-        let next=self.connection.query_row(&format!("SELECT MIN(d.expires_at) FROM runtime_task_deadlines d JOIN runtime_jobs j ON j.sequence=d.sequence WHERE d.expired_at IS NULL AND {}",eligible(include_failed)),[],|row|row.get::<_,Option<i64>>(0).map(|n|n.map(|n|n as u64))).map_err(db)?;
+        let next=self.connection.query_row(&format!("SELECT MIN(d.expires_at) FROM runtime_task_deadlines d JOIN runtime_jobs j ON j.sequence=d.sequence WHERE d.expired_at IS NULL AND {}",eligible()),[],|row|row.get::<_,Option<i64>>(0).map(|n|n.map(|n|n as u64))).map_err(db)?;
         Ok((expired, next))
     }
 
@@ -196,7 +193,7 @@ impl Journal {
             .connection
             .prepare(&format!(
                 "{SELECT} ORDER BY ({}) DESC,j.sequence DESC LIMIT 50",
-                active("j", true)
+                active("j")
             ))
             .map_err(db)?;
         query

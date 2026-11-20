@@ -731,11 +731,7 @@ fn a_failed_paused_response_survives_a_lost_queue_update_and_is_not_implicitly_r
     let tick = runtime.tick(&mut host).unwrap();
     assert_eq!(tick.failed.len(), 1);
     assert_eq!(f.count("a", "attempts"), 1);
-    assert!(
-        tick.failed[0]
-            .error
-            .contains("paused reasoning invocation failed")
-    );
+    assert!(tick.failed[0].error.contains("RecordedFailure"));
     host.shutdown().unwrap();
 }
 
@@ -794,7 +790,7 @@ fn cli_commands_and_additive_migration_preserve_task_control_across_restarts() {
     host.shutdown().unwrap();
     drop(runtime);
     drop(host);
-    db(&f).execute_batch("DROP TABLE runtime_task_control_events;DROP TABLE runtime_task_controls;DROP TABLE runtime_task_resume_barriers;ALTER TABLE runtime_reasoning_requests DROP COLUMN pause_captured;ALTER TABLE runtime_reasoning_requests DROP COLUMN abandoned;").unwrap();
+    db(&f).execute_batch("DROP TABLE runtime_task_control_events;DROP TABLE runtime_task_controls;DROP TABLE runtime_task_resume_barriers;ALTER TABLE runtime_reasoning_requests DROP COLUMN abandoned;").unwrap();
     let run = |file: &str| {
         let result = std::process::Command::new(support::adapter_binary("arcs-host"))
             .args(["--config"])

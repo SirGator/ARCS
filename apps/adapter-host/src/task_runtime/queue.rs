@@ -84,7 +84,6 @@ impl TaskRuntime {
     /// reuse it while reporting the current state of each matching task.
     pub fn task_queue(&self, query: TaskQueueQuery) -> Result<TaskQueuePage, HostError> {
         query.validate()?;
-        self.journal
-            .task_queue(query, self.config.retry_failed_jobs())
+        self.journal.task_queue(query)
     }
 }

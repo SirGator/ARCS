@@ -28,16 +28,17 @@ Reasoner-Aufruf. Für neue Aufgaben kann derselbe Input-Adapter verwendet werden
 
 ## Ausführung und Grenzen
 
-`max_concurrent_reasoning: 2` erlaubt zwei externe Reasoning-Aufrufe gleichzeitig.
-Die Option akzeptiert 1–32. Der Standard 1 behält für bestehende Konfigurationen
-das synchrone Verhalten. Das Limit ist ein Arbeitsbudget und verändert weder
-Runtime-ID noch die Bedeutung bereits gespeicherter Aufträge.
+`max_concurrent_reasoning` begrenzt externe Reasoning-Aufrufe auf 1–32.
+Der Standardwert 1 erlaubt einen laufenden Modellauftrag. Der Scheduler
+verarbeitet in der Zwischenzeit Steuerbefehle, neue Eingaben, Beobachtungen
+und verfügbare Schritte anderer Manager. Größere Werte erlauben mehrere
+Reasoning-Aufrufe, sofern ihre Adapter und Ressourcen verfügbar sind.
+Das Limit verändert die Identität gespeicherter Aufträge nicht.
 
-Ab 2 kann eine spätere Runde laufende Aufträge abholen und freie Kapazität für
-andere Aufgaben verwenden. Core-Prüfungen und Artefaktänderungen bleiben im
-Host-Thread. Worker übernehmen ausschließlich externe I/O und senden Antworten
-über einen begrenzten Kanal zurück. Der vollständige Request-Kontext wird vor
-dem externen Aufruf als Artefakt persistiert.
+Der Host speichert die vollständige Invocation vor dem externen Aufruf im
+Core. Worker übertragen die Anfrage und liefern ihre Antwort über einen
+begrenzten Kanal. Der Host prüft und speichert die Antwort in einem späteren
+Tick.
 
 Jede Adapterinstallation besitzt eine exklusive Session. Zwei Aufträge an
 denselben Adapter laufen nacheinander, während unabhängige Adapter parallel
@@ -49,12 +50,12 @@ Die gleiche Ausführung wird für `checking`, `planning` und `assessing` der
 [Goal-Runtime](goal-runtime.md) verwendet. Verification, Approval und die
 separate frische Wirkungsbeobachtung bleiben erforderlich.
 
-Im parallelen Modus beendet ein Reasoner-Fehler nur den betroffenen Auftrag.
-Er bleibt als `failed` gespeichert und wird nicht automatisch erneut versucht.
-`failed_jobs` zeigt die Anzahl; `TickReport.failed` enthält die betroffenen
-Aufgaben und Fehler. Fehlgeschlagene Aufgaben zählen nicht zur aktiven
-Queue-Kapazität. Ausgefallene Sessions werden bis zum nächsten Hoststart
-ausgespart. Store- und Invocation-Konsistenzfehler werden weiterhin weitergegeben.
+Ein Modellfehler beendet den betroffenen Auftrag. `failed_jobs` zeigt die
+Anzahl, `TickReport.failed` die zugehörigen Aufgaben und Fehler. Der Auftrag
+gibt Queuekapazität frei. Ein gespeicherter Modellfehler wird nach einem
+unterbrochenen Journal-Commit aus dem Core übernommen. Für ausdrücklich
+autorisierte Alternativen gelten die gespeicherten Recovery-Regeln.
+Store- und Invocation-Konsistenzfehler werden an den Aufrufer weitergegeben.
 
 Ein Stop beendet ausstehende lokale Adapterdialoge und wartet nicht deren
 vollständiges Reasoning-Budget ab. Ein bereits extern gespeichertes Ergebnis
@@ -63,13 +64,11 @@ Der Adapter muss die entsprechende dauerhafte Deduplizierung gewährleisten.
 Ein gestoppter lokaler Prozess garantiert keine Rücknahme einer entfernten
 Berechnung oder einer bereits eingetretenen Wirkung.
 
-Dieser erste Slice ließ Request, Act, Output und das Polling synchron.
-Der spätere [Request-Ausbau](parallel-requests.md) ergänzt begrenzt parallele
-Goal-Quellenabfragen; Act, Output und das Polling bleiben weiterhin synchron.
-Geräteübergreifende Ressourcenidentitäten, GPU-/RAM-Budgets, parallele
-Planverzweigungen und automatische Wiederverbindungen sind noch offen.
-Eine gemeinsame Drohne hinter zwei verschiedenen Installationen wird noch
-nicht durch die Session-Reservierung geschützt.
+Die direkten Host-Aufrufe `reason` und `reason_with_data` sind synchrone
+Einzelaufrufe. Der Request-Pool, die Gerätesitzungen und die gemeinsamen
+Ressourcenbudgets sind in den jeweiligen Beispielen beschrieben.
+[Quellenabfragen](parallel-requests.md),
+[Ressourcenpools](resource-pools.md)
 
 ## Deterministischer Parallelitäts- und Recovery-Test
 

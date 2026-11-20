@@ -1,5 +1,5 @@
 //! Revision-checked task control and checkpoint changes commit together.
-use super::{Journal, active, db, runnable};
+use super::{Journal, active, db};
 use crate::{
     HostError,
     task_runtime::{
@@ -38,10 +38,8 @@ pub(super) fn initialize(connection: &Connection) -> Result<(), HostError> {
             .collect::<Result<Vec<_>, _>>()
             .map_err(db)?
     };
-    for column in ["pause_captured", "abandoned"] {
-        if !columns.iter().any(|name| name == column) {
-            connection.execute(&format!("ALTER TABLE runtime_reasoning_requests ADD COLUMN {column} INTEGER NOT NULL DEFAULT 0 CHECK({column} IN (0,1))"),[]).map_err(db)?;
-        }
+    if !columns.iter().any(|column| column == "abandoned") {
+        connection.execute("ALTER TABLE runtime_reasoning_requests ADD COLUMN abandoned INTEGER NOT NULL DEFAULT 0 CHECK(abandoned IN (0,1))",[]).map_err(db)?;
     }
     Ok(())
 }
@@ -104,7 +102,6 @@ impl Journal {
         core_cursor: u64,
         goals: &BTreeMap<u64, u32>,
         is_plan: bool,
-        retry_failed: bool,
     ) -> Result<TaskControlReceipt, HostError> {
         let encoded = serde_json::to_string(command).map_err(|e| invalid(e.to_string()))?;
         let tx = self
@@ -122,7 +119,7 @@ impl Journal {
         }
         let cancelled = matches!(command.change, TaskChange::Cancel);
         let active: bool = tx.query_row(&format!("SELECT EXISTS(SELECT 1 FROM runtime_jobs j
-            WHERE (j.sequence=?1 OR j.sequence IN (SELECT sequence FROM runtime_plan_steps WHERE parent_sequence=?1)) AND {})", runnable("j", !cancelled || retry_failed)),
+            WHERE (j.sequence=?1 OR j.sequence IN (SELECT sequence FROM runtime_plan_steps WHERE parent_sequence=?1)) AND {})", active("j")),
             [command.sequence as i64], |row| row.get(0)).map_err(db)?;
         if !active {
             return Err(invalid("task control requires unfinished work"));
@@ -151,9 +148,7 @@ impl Journal {
             } else {
                 Self::cancel_task_in(&tx, command.sequence, &command.reason)?;
             }
-        } else if next_paused {
-            tx.execute("UPDATE runtime_reasoning_requests SET pause_captured=1 WHERE sequence=?1 OR sequence IN (SELECT sequence FROM runtime_plan_steps WHERE parent_sequence=?1)",[command.sequence as i64]).map_err(db)?;
-        } else {
+        } else if !next_paused {
             let recover = matches!(
                 command.change,
                 TaskChange::Resume {
@@ -288,7 +283,7 @@ impl Journal {
         &self,
         requests: &[String],
     ) -> Result<Vec<(String, u64, String)>, HostError> {
-        let mut query=self.connection.prepare(&format!("SELECT j.sequence,j.route_id FROM runtime_reasoning_requests r JOIN runtime_jobs j ON j.sequence=r.sequence WHERE r.request_id=?1 AND r.abandoned=0 AND {} AND {PAUSED}", active("j", true))).map_err(db)?;
+        let mut query=self.connection.prepare(&format!("SELECT j.sequence,j.route_id FROM runtime_reasoning_requests r JOIN runtime_jobs j ON j.sequence=r.sequence WHERE r.request_id=?1 AND r.abandoned=0 AND {} AND {PAUSED}", active("j"))).map_err(db)?;
         let mut owned = Vec::new();
         for request in requests {
             if let Some((sequence, route)) = query
@@ -303,26 +298,12 @@ impl Journal {
         }
         Ok(owned)
     }
-    pub(in crate::task_runtime) fn captured_reasoning(
-        &self,
-        request: &str,
-    ) -> Result<bool, HostError> {
-        self.connection
-            .query_row(
-                "SELECT pause_captured!=0 FROM runtime_reasoning_requests WHERE request_id=?1",
-                [request],
-                |row| row.get(0),
-            )
-            .optional()
-            .map_err(db)
-            .map(|value| value.unwrap_or(false))
-    }
     pub(in crate::task_runtime) fn paused_count(&self) -> Result<u64, HostError> {
         self.connection
             .query_row(
                 &format!(
                     "SELECT COUNT(*) FROM runtime_jobs j WHERE {} AND {PAUSED}",
-                    runnable("j", true)
+                    active("j")
                 ),
                 [],
                 |row| row.get::<_, i64>(0).map(|n| n as u64),
@@ -351,7 +332,7 @@ impl Journal {
             return Err(invalid("task control page size must be 1..1000"));
         }
         let order = if report {
-            format!("({}) DESC,j.sequence DESC", active("j", true))
+            format!("({}) DESC,j.sequence DESC", active("j"))
         } else {
             "j.sequence".into()
         };

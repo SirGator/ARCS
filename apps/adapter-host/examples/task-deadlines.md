@@ -107,10 +107,10 @@ bis zu 1000 Belegen. Ein `TickReport` nennt unter `expired_tasks` die direkt in
 diesem Tick beendeten Aufträge; kaskadierte Kinder sind im Gesamtbericht sichtbar.
 
 Die Zeitgrenze wird kooperativ zwischen Runtime-Schritten durchgesetzt.
-Ein bereits begonnener synchroner Aufruf behält seine eigene Deadline; sein
-Ergebnis kann erst nach Ablauf des Aufgabenbudgets eintreffen. Im Live-Betrieb
-wird die Zeit vor jedem ausgewählten Schritt erneut gelesen, auch nach einem
-langsamen Eingabe-/Beobachtungsaufruf. `tick_at` verwendet dagegen für den
+Externe Worker behalten ihre eigenen Dialog-Deadlines. Späte Worker-Antworten
+werden nach dem dauerhaft gespeicherten Ablauf des Auftrags verworfen. Im
+Live-Betrieb liest der Scheduler die Zeit vor jedem ausgewählten Schritt
+erneut. `tick_at` verwendet dagegen für den
 gesamten simulierten Tick den ausdrücklich übergebenen Zeitstand. Die Runtime
 unterbricht keinen physischen Vorgang in Echtzeit. Bei abgeschaltetem Host
 erfolgt der Abbruch beim nächsten Tick. Manuelle Entscheidungen können im Core

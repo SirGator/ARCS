@@ -86,11 +86,8 @@ impl Journal {
         Ok(())
     }
 
-    pub(in crate::task_runtime) fn next(
-        &self,
-        include_failed: bool,
-    ) -> Result<Option<SelectedTask>, HostError> {
-        select(&self.connection, include_failed)
+    pub(in crate::task_runtime) fn next(&self) -> Result<Option<SelectedTask>, HostError> {
+        select(&self.connection)
     }
 
     pub(in crate::task_runtime) fn dispatch_report(&self) -> Result<DispatchReport, HostError> {
@@ -130,10 +127,7 @@ impl Journal {
     }
 }
 
-fn select(
-    connection: &Connection,
-    include_failed: bool,
-) -> Result<Option<SelectedTask>, HostError> {
+fn select(connection: &Connection) -> Result<Option<SelectedTask>, HostError> {
     // Only operational scheduling metadata is locked; commit precedes any Core
     // access or external I/O. A crash may consume one turn, never an extra action.
     let transaction = connection.unchecked_transaction().map_err(db)?;
@@ -144,7 +138,7 @@ fn select(
             |row| row.get::<_, i64>(0).map(|n| n as usize),
         )
         .map_err(db)?;
-    let runnable = super::runnable("j", include_failed);
+    let runnable = super::active("j");
     let sql = format!("SELECT j.sequence,j.route_id,j.input_version FROM runtime_job_priorities p JOIN runtime_jobs j ON j.sequence=p.sequence WHERE p.priority=?1 AND {runnable}
         AND NOT EXISTS(SELECT 1 FROM runtime_dispatch_visited v WHERE v.sequence=j.sequence)
         AND NOT EXISTS(SELECT 1 FROM runtime_job_schedules s WHERE s.sequence=j.sequence AND s.released_at IS NULL)

@@ -2,6 +2,24 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::OnceLock;
 
+#[allow(dead_code)]
+pub fn wait_for_interrupted_checkpoint(
+    mut tick: impl FnMut() -> Result<arcs_host::task_runtime::TickReport, arcs_host::HostError>,
+) {
+    use std::time::{Duration, Instant};
+
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        match tick() {
+            Err(arcs_host::HostError::Store(_)) => return,
+            Err(error) => panic!("unexpected failure before checkpoint: {error}"),
+            Ok(_) => {}
+        }
+        assert!(Instant::now() < deadline, "checkpoint was not reached");
+        std::thread::sleep(Duration::from_millis(3));
+    }
+}
+
 /// Cargo setzt CARGO_BIN_EXE nur für Binaries des eigenen Pakets. Die
 /// Prozess-Tests bauen die separaten Adapter einmal je Testsuite und führen
 /// anschließend deren echte Programme direkt aus, ohne Cargo als Transport.

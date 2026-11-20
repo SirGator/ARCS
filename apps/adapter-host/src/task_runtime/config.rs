@@ -38,7 +38,7 @@ pub struct RuntimeConfig {
     pub max_events_per_tick: usize,
     #[serde(default = "batch")]
     pub max_jobs_per_tick: usize,
-    /// 1 erhält den synchronen Betrieb; 2..32 aktivieren begrenzte Worker.
+    /// Maximale Zahl laufender Reasoning-Worker pro Host-Zulassung.
     #[serde(default = "concurrency")]
     pub max_concurrent_reasoning: usize,
     /// Host-wide admission limit for nonblocking goal-source queries.
@@ -108,11 +108,6 @@ pub(super) fn identifier(value: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(&byte))
 }
 impl RuntimeConfig {
-    /// Legacy retry behavior for remaining synchronous job steps.
-    pub(super) fn retry_failed_jobs(&self) -> bool {
-        self.max_concurrent_reasoning == 1 && self.max_concurrent_requests == 1
-    }
-
     pub fn load(path: impl AsRef<Path>) -> Result<Self, HostError> {
         let path = path
             .as_ref()
@@ -157,13 +152,6 @@ impl RuntimeConfig {
         for route in &self.routes {
             if !ids.insert(&route.id) {
                 return Err(invalid("duplicate route ID"));
-            }
-            if self.retry_failed_jobs()
-                && route.plan.as_ref().is_some_and(|p| p.replanning.is_some())
-            {
-                return Err(invalid(
-                    "replanning requires parallel task failure isolation",
-                ));
             }
             validate_route_contract(host, route, &mut manifests)?;
             if let Some(recurrence) = &route.recurrence {

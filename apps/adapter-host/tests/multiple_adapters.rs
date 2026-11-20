@@ -521,7 +521,7 @@ fn runtime_monitor_reports_durable_review_counts_and_replays_after_restart() {
         let output = Command::new(env!("CARGO_BIN_EXE_arcs-host"))
             .arg("--config")
             .arg(fixture.directory.join("host.json"))
-            .args(["--monitor", "--ticks", "2", "--stop-file"])
+            .args(["--monitor", "--ticks", "12", "--stop-file"])
             .arg(fixture.directory.join("stop"))
             .arg("--runtime")
             .arg(fixture.directory.join("runtime.json"))

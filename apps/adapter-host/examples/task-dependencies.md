@@ -120,15 +120,10 @@ zusätzlich Platz für ihre Quellen und Wirkungsbewertung. Die tatsächlichen
 Byte- und Ressourcenbudgets setzt weiterhin der Core durch. Fehlende
 ausgewählte Ergebnisfelder blockieren den Nachfolger vor einem Modellaufruf.
 
-Im parallelen Modus führen fehlgeschlagene Voraussetzungen zu `blocked` für
-ihre Nachfolger. Das wird auch entlang weiterer Abhängigkeiten fortgesetzt;
-andere Zweige können unabhängig fertig werden. Abgelehnte, abgebrochene,
-blockierte oder budgetbeendete Goals erfüllen keine Voraussetzung.
-Im synchronen Modus bleibt der vorhandene Fehler-/Restart-Vertrag erhalten:
-Ein Fehler stoppt den Lauf sichtbar. Ein `failed`-Vorgänger bleibt für seine
-Nachfolger zunächst offen, damit seine ausdrücklich gestartete Wiederaufnahme
-nicht durch eine voreilige endgültige Blockierung abgeschnitten wird.
-Ein `no_solution`-Ergebnis bleibt auch dort eine unerfüllbare Voraussetzung.
+Fehlgeschlagene Voraussetzungen blockieren ihre Nachfolger. Das wird
+entlang weiterer Abhängigkeiten fortgesetzt. Unabhängige Zweige bleiben
+ausführbar. Auch abgelehnte, abgebrochene oder budgetbeendete Goals und
+`no_solution` erfüllen keine Voraussetzung.
 
 Geblockte Nachfolger belegen keine weitere Queuekapazität. Sie werden nicht
 automatisch erneut geplant oder bei einem später geänderten Ablauf wieder

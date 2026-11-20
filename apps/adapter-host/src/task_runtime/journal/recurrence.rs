@@ -45,8 +45,8 @@ pub(super) fn initialize(connection: &Connection) -> Result<(), HostError> {
 
 const SERIES_ENABLED: &str = "s.control_state='active'";
 
-fn series_select(include_failed: bool) -> String {
-    let last_active = active("last", include_failed);
+fn series_select() -> String {
+    let last_active = active("last");
     format!(
         "SELECT s.sequence, origin.route_id, origin.input_version,
         s.anchor_at,s.every_ms,s.max_occurrences,s.next_due,s.skipped,s.last_job,last.state,
@@ -121,7 +121,7 @@ impl Journal {
         &self,
         config: &RuntimeConfig,
     ) -> Result<bool, HostError> {
-        if self.capacity(config.retry_failed_jobs())? >= config.max_pending_jobs {
+        if self.capacity()? >= config.max_pending_jobs {
             return Ok(false);
         }
         self.connection.query_row(
@@ -135,10 +135,9 @@ impl Journal {
         config: &RuntimeConfig,
         now: u64,
     ) -> Result<Vec<u64>, HostError> {
-        let include_failed = config.retry_failed_jobs();
         let tx = self.connection.transaction().map_err(db)?;
         let used: usize = tx
-            .query_row(&capacity_query(include_failed), [], |row| {
+            .query_row(&capacity_query(), [], |row| {
                 row.get::<_, i64>(0).map(|used| used as usize)
             })
             .map_err(db)?;
@@ -150,7 +149,7 @@ impl Journal {
             return Ok(Vec::new());
         }
         let due = {
-            let active_last = active("last", include_failed);
+            let active_last = active("last");
             let mut query = tx
                 .prepare(&format!(
                     "SELECT s.sequence,origin.route_id,origin.input_version,origin.source_sequence,
@@ -253,11 +252,10 @@ impl Journal {
 
     pub(in crate::task_runtime) fn recurring_checks_for_report(
         &self,
-        include_failed: bool,
     ) -> Result<Vec<CheckSeries>, HostError> {
         let mut query = self.connection.prepare(&format!(
             "{} ORDER BY (s.next_due IS NULL OR NOT ({SERIES_ENABLED})), s.next_due, s.sequence DESC LIMIT 50",
-            series_select(include_failed)
+            series_select()
         )).map_err(db)?;
         let rows = query.query_map([], read_series).map_err(db)?;
         rows.map(|row| row.map_err(db)).collect()
@@ -267,14 +265,13 @@ impl Journal {
         &self,
         sequence: u64,
         limit: usize,
-        include_failed: bool,
     ) -> Result<Vec<CheckSeries>, HostError> {
         validate_page(limit)?;
         let mut query = self
             .connection
             .prepare(&format!(
                 "{} WHERE s.sequence>?1 ORDER BY s.sequence LIMIT ?2",
-                series_select(include_failed)
+                series_select()
             ))
             .map_err(db)?;
         let rows = query

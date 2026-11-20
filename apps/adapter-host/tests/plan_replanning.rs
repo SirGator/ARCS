@@ -254,7 +254,11 @@ fn a_published_replacement_survives_a_rolled_back_queue_commit_without_another_m
     }
     assert_eq!(artifacts(&host, "arcs.plan.v2").len(), 2);
     assert_eq!(runtime.plans_after(0, 1).unwrap()[0].revisions.len(), 1);
-    assert_eq!(runtime.report(0).unwrap().failed_jobs, 0); // original failed leaf was cancelled; no invented root failure
+    assert_eq!(runtime.report(0).unwrap().failed_jobs, 1);
+    assert_eq!(
+        runtime.plans_after(0, 1).unwrap()[0].steps[0].state,
+        "failed"
+    );
     assert!(!f.started("b"));
     host.shutdown().unwrap();
     drop(runtime);
@@ -273,15 +277,14 @@ fn a_published_replacement_survives_a_rolled_back_queue_commit_without_another_m
     host.shutdown().unwrap();
 }
 #[test]
-fn replanning_configuration_requires_bounded_revisions_context_and_failure_isolation() {
-    for case in ["zero", "many", "context", "serial", "constraint"] {
+fn replanning_configuration_requires_bounded_revisions_and_valid_context() {
+    for case in ["zero", "many", "context", "constraint"] {
         let f = fixture();
         let mut config = f.read("runtime.json");
         match case {
             "zero" => config["routes"][0]["plan"]["replanning"]["max_revisions"] = json!(0),
             "many" => config["routes"][0]["plan"]["replanning"]["max_revisions"] = json!(8),
             "context" => config["routes"][0]["budget"]["max_context_items"] = json!(2),
-            "serial" => config["max_concurrent_reasoning"] = json!(1),
             "constraint" => {
                 config["routes"][0]["constraints"] = json!({"task_replanning":{"revision":1}})
             }
@@ -419,7 +422,8 @@ fn a_bad_replacement_payload_stops_replanning_without_inventing_an_accepted_revi
     let plan = runtime.plans_after(0, 1).unwrap().remove(0);
     assert_eq!(plan.state, PlanState::Blocked);
     assert_eq!(plan.revisions.len(), 1);
-    assert_eq!(runtime.report(0).unwrap().failed_jobs, 1);
+    assert_eq!(runtime.report(0).unwrap().failed_jobs, 2);
+    assert_eq!(plan.steps[0].state, "failed");
     assert_eq!(runtime.report(0).unwrap().capacity_used, 0);
     assert!(!f.started("b"));
     assert_eq!(f.count("planner", "attempts"), 2);
@@ -442,7 +446,16 @@ fn old_unfinished_branches_are_cancelled_and_late_answers_do_not_satisfy_new_dep
         f.directory.join("planner.r1.started").exists()
     });
     let plan = runtime.plans_after(0, 1).unwrap().remove(0);
-    assert!(plan.steps.iter().all(|s| s.state == "cancelled"));
+    assert!(
+        plan.steps
+            .iter()
+            .any(|s| s.id == "fails" && s.state == "failed")
+    );
+    assert!(
+        plan.steps
+            .iter()
+            .any(|s| s.id == "old" && s.state == "cancelled")
+    );
     assert!(f.started("b"));
     f.release("b");
     release_revision(&f, 1);
@@ -465,7 +478,10 @@ fn goal_fixture(actions: usize) -> goals::Fixture {
         json!({"device_id":"fan-01","enabled":false,"minimum_actuations":2});
     f.write("input-profile.json", input);
     let mut config = f.read("runtime.json");
-    config["max_concurrent_requests"] = json!(2);
+    config
+        .as_object_mut()
+        .unwrap()
+        .remove("max_concurrent_reasoning");
     let plan = &mut config["routes"][0]["plan"];
     plan["replanning"] = json!({"max_revisions":1});
     plan["max_total_runtime_ms"] = json!(200000);
@@ -852,7 +868,11 @@ fn a_failed_context_publication_does_not_turn_a_committed_intent_into_a_business
         runtime.plans_after(0, 1).unwrap()[0].state,
         PlanState::Replanning
     );
-    assert_eq!(runtime.report(0).unwrap().failed_jobs, 0);
+    assert_eq!(runtime.report(0).unwrap().failed_jobs, 1);
+    assert_eq!(
+        runtime.plans_after(0, 1).unwrap()[0].steps[0].state,
+        "failed"
+    );
     assert_eq!(f.count("planner", "attempts"), 1);
     assert!(artifacts(&host, "arcs.plan_replanning.v1").is_empty());
     host.shutdown().unwrap();

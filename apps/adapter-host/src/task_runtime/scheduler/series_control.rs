@@ -79,11 +79,9 @@ impl TaskRuntime {
         {
             return Err(invalid("runtime topology changed"));
         }
-        let receipt = self.journal.change_series_control(
-            &command,
-            now_unix_ms()?,
-            self.config.retry_failed_jobs(),
-        )?;
+        let receipt = self
+            .journal
+            .change_series_control(&command, now_unix_ms()?)?;
         if receipt.cancelled_occurrence.is_some() {
             self.reap_abandoned_task_work(host)?;
         }

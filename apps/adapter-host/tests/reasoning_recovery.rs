@@ -633,7 +633,7 @@ fn recovery_planners_need_their_own_binary_input_receiver_grants() {
 }
 
 #[test]
-fn synchronous_recovery_delay_starts_after_the_failed_call_finishes() {
+fn single_worker_recovery_delay_starts_after_the_failed_call_finishes() {
     let f = simple("fail", "normal");
     let mut config = f.read("runtime.json");
     config["max_concurrent_reasoning"] = json!(1);
@@ -644,7 +644,7 @@ fn synchronous_recovery_delay_starts_after_the_failed_call_finishes() {
     std::fs::write(path,script.replace("  if c.get('mode')=='fail':","  if c.get('mode')=='fail':\n   time.sleep(.2)\n   (root/'failure-clock').write_text(str(time.time_ns()//1000000))")).unwrap();
     let (mut host, mut runtime) = f.open();
     host.poll_inputs().unwrap();
-    runtime.tick(&mut host).unwrap();
+    until(&mut host, &mut runtime, None, |h, _| failures(h) == 1);
     assert_eq!(failures(&host), 1);
     let failed_at = std::fs::read_to_string(f.directory.join("failure-clock"))
         .unwrap()

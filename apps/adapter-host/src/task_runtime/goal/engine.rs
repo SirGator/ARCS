@@ -159,7 +159,7 @@ impl TaskRuntime {
                     now_unix_ms,
                 )?
                 else {
-                    return self.save_goal(&task);
+                    return Ok(());
                 };
                 if result.status != ReasoningStatus::Solved || result.candidates.len() != 1 {
                     task.state = GoalState::Blocked;
@@ -218,7 +218,7 @@ impl TaskRuntime {
                     now_unix_ms,
                 )?
                 else {
-                    return self.save_goal(&task);
+                    return Ok(());
                 };
                 if result.status != ReasoningStatus::Solved || result.candidates.len() != 1 {
                     task.state = GoalState::Blocked;
@@ -332,7 +332,7 @@ impl TaskRuntime {
                     now_unix_ms,
                 )?
                 else {
-                    return self.save_goal(&task);
+                    return Ok(());
                 };
                 if result.status != ReasoningStatus::Solved || result.candidates.len() != 1 {
                     task.state = GoalState::Blocked;

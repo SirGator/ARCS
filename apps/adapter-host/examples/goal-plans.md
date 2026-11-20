@@ -142,9 +142,7 @@ Request-Publisher werden für jede Betreiber-Vorlage vorregistriert. Die
 Instanz verwendet dieselbe eingefrorene Query-Konfiguration mit eigenem
 Auftrags-/Rundenbezug. So entstehen durch einen Neustart keine neuen
 Query- oder Action-Identitäten. Bei verlorenen Ausführungs-Checkpoints wird
-derselbe bereits belegte Dispatch wiedergefunden. Der bestehende Unterschied
-zwischen synchronem Fehler-Replay und isolierten parallelen Fehlern bleibt
-erhalten; fehlgeschlagene Schritte werden nicht pauschal automatisch wiederholt.
+derselbe bereits belegte Dispatch wiedergefunden. Bereits verbuchte Fehler bleiben terminal.
 
 Termin-/Ereignisaktivierung und `between_rounds` bleiben auch in erzeugten Goals
 nutzbar. Nach einer Monatswartephase folgen frische Belege und eine neue

@@ -31,7 +31,7 @@ fn tick(connection: &Connection) -> SelectedTask {
     connection
         .execute("DELETE FROM runtime_dispatch_visited", [])
         .unwrap();
-    select(connection, false).unwrap().unwrap()
+    select(connection).unwrap().unwrap()
 }
 
 #[test]
@@ -84,11 +84,9 @@ fn one_visit_per_tick_and_ineligible_classes_do_not_spend_the_budget() {
         .unwrap();
     // Review checkpoints must still reconcile decisions already committed to
     // the Core, even when their queue checkpoint was lost in a crash.
-    assert_eq!(select(&connection, false).unwrap().unwrap().0, 1);
-    assert_eq!(select(&connection, false).unwrap().unwrap().0, 4);
-    assert!(select(&connection, false).unwrap().is_none());
-    // Only synchronous compatibility mode retries failed tasks.
-    assert_eq!(select(&connection, true).unwrap().unwrap().0, 6);
+    assert_eq!(select(&connection).unwrap().unwrap().0, 1);
+    assert_eq!(select(&connection).unwrap().unwrap().0, 4);
+    assert!(select(&connection).unwrap().is_none());
     connection
         .execute("UPDATE runtime_job_schedules SET released_at=1", [])
         .unwrap();
@@ -96,12 +94,12 @@ fn one_visit_per_tick_and_ineligible_classes_do_not_spend_the_budget() {
         .execute("UPDATE runtime_job_joins SET state='ready'", [])
         .unwrap();
     let mut ids = vec![
-        select(&connection, false).unwrap().unwrap().0,
-        select(&connection, false).unwrap().unwrap().0,
+        select(&connection).unwrap().unwrap().0,
+        select(&connection).unwrap().unwrap().0,
     ];
     ids.sort();
     assert_eq!(ids, [2, 3]);
-    assert!(select(&connection, false).unwrap().is_none());
+    assert!(select(&connection).unwrap().is_none());
 }
 
 #[test]
@@ -129,7 +127,7 @@ fn a_failed_cursor_commit_rolls_back_the_whole_turn() {
     let connection = setup();
     add(&connection, 1, 3, "pending");
     connection.execute_batch("CREATE TEMP TRIGGER fail_selection BEFORE INSERT ON runtime_dispatch_visited BEGIN SELECT RAISE(ABORT,'injected commit failure'); END;").unwrap();
-    assert!(select(&connection, false).is_err());
+    assert!(select(&connection).is_err());
     assert_eq!(
         connection
             .query_row("SELECT next_slot FROM runtime_dispatch_state", [], |r| r
@@ -150,5 +148,5 @@ fn a_failed_cursor_commit_rolls_back_the_whole_turn() {
     connection
         .execute_batch("DROP TRIGGER fail_selection;")
         .unwrap();
-    assert_eq!(select(&connection, false).unwrap().unwrap().0, 1);
+    assert_eq!(select(&connection).unwrap().unwrap().0, 1);
 }

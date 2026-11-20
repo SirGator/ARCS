@@ -49,7 +49,6 @@ impl Journal {
         &mut self,
         command: &SeriesControlCommand,
         now: u64,
-        include_failed: bool,
     ) -> Result<SeriesControlReceipt, HostError> {
         let tx = self
             .connection
@@ -69,7 +68,7 @@ impl Journal {
         }
         let series = tx
             .query_row(
-                &format!("{} WHERE s.sequence=?1", series_select(include_failed)),
+                &format!("{} WHERE s.sequence=?1", series_select()),
                 [command.sequence as i64],
                 read_series,
             )
@@ -93,29 +92,20 @@ impl Journal {
             params![series.sequence as i64, revision as i64, state_text, command.reason],
         ).map_err(db)?;
 
-        let active_occurrence = active("runtime_jobs", include_failed);
-        let mut cancelled_occurrence = None;
-        match command.change {
-            SeriesChange::Pause => {
-                tx.execute(&format!("UPDATE runtime_reasoning_requests SET pause_captured=1
-                    WHERE sequence=(SELECT sequence FROM runtime_jobs WHERE sequence=?1 AND {active_occurrence})"),
-                    [series.last_sequence as i64],
-                ).map_err(db)?;
-            }
-            SeriesChange::Resume => {}
-            SeriesChange::Cancel => {
-                let changed = tx
-                    .execute(
-                        &format!(
-                            "UPDATE runtime_jobs SET state='cancelled',error=?2
-                    WHERE sequence=?1 AND {active_occurrence}"
-                        ),
-                        params![series.last_sequence as i64, command.reason],
-                    )
-                    .map_err(db)?;
-                cancelled_occurrence = (changed == 1).then_some(series.last_sequence);
-            }
-        }
+        let cancelled_occurrence = if matches!(command.change, SeriesChange::Cancel) {
+            let changed = tx
+                .execute(
+                    &format!(
+                        "UPDATE runtime_jobs SET state='cancelled',error=?2 WHERE sequence=?1 AND {}",
+                        active("runtime_jobs")
+                    ),
+                    params![series.last_sequence as i64, command.reason],
+                )
+                .map_err(db)?;
+            (changed == 1).then_some(series.last_sequence)
+        } else {
+            None
+        };
         let receipt = SeriesControlReceipt {
             sequence: series.sequence,
             revision,

@@ -38,21 +38,6 @@ impl Host {
         arcs::reasoning::attempts::history(&self.registry, &self.schemas, &self.store, query)
             .map_err(HostError::Reasoning)
     }
-    pub(crate) fn saved_reasoning_failure(
-        &self,
-        request: &arcs::reasoning::ReasoningRequestV2,
-    ) -> Result<Option<String>, HostError> {
-        arcs::runtime::InvocationService::new(&self.store, &self.schemas, &SystemClock)
-            .lookup(&Self::reasoning_key(request))
-            .map(|state| {
-                state
-                    .filter(|state| state.status == arcs::runtime::InvocationStatus::Failed)
-                    .map(|state| format!("paused reasoning invocation failed: {:?}", state.error))
-            })
-            .map_err(|error| {
-                HostError::Reasoning(arcs::reasoning::ReasoningError::Invocation(error))
-            })
-    }
     pub(crate) fn reasoner_choice_availability(
         &self,
         choice: &arcs::reasoning::selection::ReasonerChoice,
@@ -137,16 +122,20 @@ impl Host {
         arcs::reasoning::general::reasoning_invocation_id(request)
     }
 
-    fn has_reasoning_result(&self, key: &str) -> Result<bool, HostError> {
+    fn reasoning_status(
+        &self,
+        key: &str,
+    ) -> Result<Option<arcs::runtime::InvocationStatus>, HostError> {
         // Admission hint only. The Core still validates the complete request,
-        // current grants, input fingerprint and cached artifacts before reuse.
+        // grants, and persisted input fingerprint before replay.
         arcs::runtime::InvocationService::new(&self.store, &self.schemas, &SystemClock)
             .lookup(key)
-            .map(|state| {
-                state
-                    .is_some_and(|state| state.status == arcs::runtime::InvocationStatus::Succeeded)
-            })
+            .map(|state| state.map(|state| state.status))
             .map_err(|e| HostError::Reasoning(arcs::reasoning::ReasoningError::Invocation(e)))
+    }
+
+    fn has_reasoning_result(&self, key: &str) -> Result<bool, HostError> {
+        Ok(self.reasoning_status(key)? == Some(arcs::runtime::InvocationStatus::Succeeded))
     }
     pub fn reason(
         &mut self,

@@ -15,8 +15,8 @@ einen neuen Vorschlag anfordern. Die optionale Betreiberpolicy lautet:
 
 Dies ist ein Ausschnitt; Vorlagen und die übrigen Routenfelder bleiben nötig.
 `max_revisions` akzeptiert 1–7 zusätzliche Planungen. Ohne die Policy bleibt
-es bei der bisherigen einmaligen Planung. Neuplanung verlangt die parallele
-Fehlerisolation der Runtime, beispielsweise `max_concurrent_reasoning: 2`.
+es bei der bisherigen einmaligen Planung. Neuplanung nutzt dieselbe Fehlerisolation und dieselben Worker-Limits wie
+die übrige Runtime.
 Goal-Vorlagen müssen manuelle Freigaben und ausdrückliche exklusive Ressourcen
 besitzen. Ein Plan erhält dadurch keine Action-Rechte.
 

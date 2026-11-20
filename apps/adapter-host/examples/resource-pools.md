@@ -103,8 +103,7 @@ unabhängige Adapter dürfen die anschließend freien Einheiten nutzen.
 
 Synchrone Reasoning-Aufrufe berücksichtigen laufende asynchrone Belegungen.
 Bei fehlender Kapazität liefert der direkte Host-Port `HostError::ResourceBusy`.
-Die Task-Runtime behandelt dies als vorübergehendes Warten, auch im synchronen
-Modus. Der exklusive veränderliche Host-Zugriff verhindert während des
+Die Task-Runtime behandelt belegte Ressourcen als vorübergehendes Warten. Der exklusive veränderliche Host-Zugriff verhindert während des
 synchronen Aufrufs weitere neue Dispatches desselben Hosts.
 
 ## Wiederverwendung und Monitoring
@@ -152,4 +151,4 @@ cargo test --locked --offline -p arcs-host --test resource_pools
 Die neun Prozess-Tests prüfen gemeinsam genutzte und mengenbasierte Kapazität,
 Zulassung ohne Teilreservierung, unzulässige Anforderungen, Fehler, ungültige
 Antworten, Timeouts, Abbruch, Wiederaufnahme, Cache-Replay bei belegten Pools
-und die gemeinsame Nutzung durch eine parallele und eine synchrone Runtime.
+und die gemeinsame Nutzung durch zwei Runtimes mit verschiedenen Worker-Limits.

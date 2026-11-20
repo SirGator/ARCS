@@ -196,6 +196,11 @@ fn every_phase_resumes_after_restart_and_manual_approval_is_separate_for_each_ro
         let mut runtime = fixture.runtime(&host);
         host.poll_inputs().unwrap();
         host.poll_round().unwrap();
+        let previous = runtime
+            .goals_after(0, 1)
+            .unwrap()
+            .first()
+            .map(|goal| goal.state);
         runtime.tick(&mut host).unwrap();
         let mut current = task(&runtime);
         if !host.request_workers().is_empty()
@@ -203,6 +208,15 @@ fn every_phase_resumes_after_restart_and_manual_approval_is_separate_for_each_ro
         {
             let source_phase = current.state;
             current = until(&mut host, &mut runtime, |state| state != source_phase);
+        }
+        if previous == Some(current.state)
+            && matches!(
+                current.state,
+                GoalState::Checking | GoalState::Planning | GoalState::Assessing
+            )
+        {
+            let reasoning_phase = current.state;
+            current = until(&mut host, &mut runtime, |state| state != reasoning_phase);
         }
         if !host.execution_workers().is_empty() {
             // Let the external reply reach its next checkpoint before this
@@ -340,8 +354,11 @@ fn a_waiting_manual_goal_does_not_starve_other_jobs_or_observations_at_queue_cap
     fixture.write("runtime.json", config);
     let mut host = fixture.host();
     let mut runtime = fixture.runtime(&host);
-    for _ in 0..20 {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while runtime.report(0).unwrap().awaiting_approval < 2 {
         runtime.tick(&mut host).unwrap();
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(3));
     }
     let goals = runtime.goals_after(0, 10).unwrap();
     assert_eq!(goals.len(), 2);
@@ -357,10 +374,9 @@ fn a_waiting_manual_goal_does_not_starve_other_jobs_or_observations_at_queue_cap
             "run first only".into(),
         )
         .unwrap();
-    for _ in 0..15 {
-        runtime.tick(&mut host).unwrap();
-    }
-    let first = runtime.goals_after(0, 1).unwrap().remove(0);
+    let first = until(&mut host, &mut runtime, |state| {
+        state == GoalState::AwaitingApproval
+    });
     assert_eq!(first.round, 2);
     assert_eq!(first.state, GoalState::AwaitingApproval);
     assert_eq!(actuations(&fixture), 1);
@@ -398,15 +414,25 @@ fn stale_or_invented_assessment_evidence_is_rejected_and_cannot_repeat_an_action
         let mut host = fixture.host();
         let mut runtime = fixture.runtime(&host);
         until(&mut host, &mut runtime, |s| s == GoalState::Assessing);
-        assert!(runtime.tick(&mut host).is_err());
+        until(&mut host, &mut runtime, |s| s == GoalState::Failed);
         assert_eq!(runtime.report(0).unwrap().failed_jobs, 1);
         assert_eq!(count(&host, "outcome"), 0);
         host.shutdown().unwrap();
         drop(runtime);
         drop(host);
         let mut host = fixture.host();
+        // The old synchronous scheduler left the failed job's goal resumable.
+        fixture.db("runtime").execute(
+            "UPDATE runtime_jobs SET goal_json=json_set(goal_json,'$.state','assessing') WHERE state='failed'",
+            [],
+        ).unwrap();
         let mut runtime = fixture.runtime(&host);
-        assert!(runtime.tick(&mut host).is_err());
+        assert!(runtime.tick(&mut host).unwrap().failed.is_empty());
+        assert_eq!(
+            runtime.goals_after(0, 1).unwrap()[0].state,
+            GoalState::Failed
+        );
+        assert_eq!(runtime.report(0).unwrap().pending_jobs, 0);
         assert_eq!(actuations(&fixture), 1);
         assert_eq!(runtime.report(0).unwrap().completed_goals, 0);
         host.shutdown().unwrap();
@@ -434,14 +460,14 @@ fn cli_can_review_a_stopped_goal_and_resume_execution_then_cancel_the_next_step(
         );
         serde_json::from_slice::<Value>(&output.stdout).unwrap()
     };
-    let report = run(&["--ticks", "6"]);
+    let report = run(&["--ticks", "20"]);
     let goal = &report["goals"][0];
     assert_eq!(goal["state"], "awaiting_approval");
     fixture.write("review.json",json!({"command":"review","sequence":goal["sequence"],"candidate_version_id":goal["candidate"],"decision":"approved","operator_id":"simon","reason":"reviewed this concrete step"}));
     let report = run(&["--goal-command", "review.json"]);
     assert_eq!(report["goals"][0]["state"], "executing");
     assert_eq!(actuations(&fixture), 0);
-    let report = run(&["--ticks", "12"]);
+    let report = run(&["--ticks", "25"]);
     assert_eq!(report["goals"][0]["state"], "awaiting_approval");
     assert_eq!(actuations(&fixture), 1);
     fixture.write(

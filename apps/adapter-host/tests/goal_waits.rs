@@ -337,7 +337,7 @@ fn a_failed_wait_checkpoint_replays_the_assessment_without_repeating_the_action(
     let mut runtime = f.runtime(&host);
     until_at(&mut host, &mut runtime, NOW, |s| s == GoalState::Assessing);
     f.db("runtime").execute_batch("CREATE TRIGGER reject_wait BEFORE INSERT ON runtime_job_schedules WHEN NEW.revision=1 BEGIN SELECT RAISE(ABORT,'injected checkpoint failure'); END;").unwrap();
-    assert!(runtime.tick_at(&mut host, NOW).is_err());
+    support::wait_for_interrupted_checkpoint(|| runtime.tick_at(&mut host, NOW));
     assert_eq!(task(&runtime).state, GoalState::Assessing);
     assert_eq!(runtime.scheduled_history(1, None, 10).unwrap().len(), 1);
     assert_eq!(actuations(&f), 1);

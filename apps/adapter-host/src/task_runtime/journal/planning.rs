@@ -1,7 +1,7 @@
 //! Atomare Aufnahme begrenzter Teilpläne und reservierte Queuekapazität.
 mod cancellation;
 mod revisions;
-use super::{Journal, db, runnable};
+use super::{Journal, active, db};
 use crate::HostError;
 use crate::task_runtime::planning::{AcceptedPlan, PlanReceipt, PlanState, PlanStepReport};
 use crate::task_runtime::{CompletedTask, config::invalid};
@@ -19,11 +19,11 @@ pub(super) fn initialize(connection: &Connection) -> Result<(), HostError> {
     revisions::initialize(connection)
 }
 
-pub(in crate::task_runtime) fn capacity_query(include_failed: bool) -> String {
+pub(in crate::task_runtime) fn capacity_query() -> String {
     format!(
         "SELECT COALESCE(SUM(COALESCE(r.units,1)),0) FROM runtime_jobs j LEFT JOIN runtime_job_reservations r ON r.sequence=j.sequence WHERE {} AND NOT EXISTS(SELECT 1 FROM runtime_plan_steps s JOIN runtime_jobs p ON p.sequence=s.parent_sequence JOIN runtime_job_reservations held ON held.sequence=p.sequence WHERE s.sequence=j.sequence AND held.units>1 AND {})",
-        runnable("j", include_failed),
-        runnable("p", include_failed)
+        active("j"),
+        active("p")
     )
 }
 
@@ -34,12 +34,9 @@ pub(in crate::task_runtime) struct SavedPlan {
 }
 
 impl Journal {
-    pub(in crate::task_runtime) fn capacity(
-        &self,
-        include_failed: bool,
-    ) -> Result<usize, HostError> {
+    pub(in crate::task_runtime) fn capacity(&self) -> Result<usize, HostError> {
         self.connection
-            .query_row(&capacity_query(include_failed), [], |row| {
+            .query_row(&capacity_query(), [], |row| {
                 row.get::<_, i64>(0).map(|n| n as usize)
             })
             .map_err(db)

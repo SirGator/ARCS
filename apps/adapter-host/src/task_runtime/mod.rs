@@ -237,8 +237,7 @@ impl TaskRuntime {
         self.advance_dependencies(host)?;
         self.journal.begin_dispatch_tick()?;
         for _ in 0..self.config.max_jobs_per_tick {
-            let Some((sequence, route_id, input_version_id, priority)) =
-                self.journal.next(self.config.retry_failed_jobs())?
+            let Some((sequence, route_id, input_version_id, priority)) = self.journal.next()?
             else {
                 break;
             };
@@ -285,10 +284,8 @@ impl TaskRuntime {
         caught_up: bool,
         backpressure: bool,
     ) -> Result<IngressSelection, HostError> {
-        let all_inputs = caught_up
-            && !backpressure
-            && self.journal.capacity(self.config.retry_failed_jobs())?
-                < self.config.max_pending_jobs;
+        let all_inputs =
+            caught_up && !backpressure && self.journal.capacity()? < self.config.max_pending_jobs;
         let wake_inputs = if all_inputs {
             Default::default()
         } else {
@@ -335,11 +332,7 @@ impl TaskRuntime {
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(db)?;
         let mut pending: usize = transaction
-            .query_row(
-                &journal::capacity_query(self.config.retry_failed_jobs()),
-                [],
-                |row| row.get::<_, i64>(0),
-            )
+            .query_row(&journal::capacity_query(), [], |row| row.get::<_, i64>(0))
             .map(|value| value as usize)
             .map_err(db)?;
         for event in &page {
@@ -427,8 +420,7 @@ impl TaskRuntime {
         let (waiting_time, waiting_event, next_wake_unix_ms) = self.journal.schedule_summary()?;
         let (recurring_checks, next_check) = if self.has_recurrence {
             (
-                self.journal
-                    .recurring_checks_for_report(self.config.retry_failed_jobs())?,
+                self.journal.recurring_checks_for_report()?,
                 self.journal.next_check()?,
             )
         } else {
@@ -437,9 +429,7 @@ impl TaskRuntime {
         let next_wake_unix_ms = next_wake_unix_ms.into_iter().chain(next_check).min();
         let (waiting_dependency, blocked_dependencies) = self.journal.dependency_summary()?;
         let (running_plans, stopped_plans, review_plans) = self.journal.plan_summary()?;
-        let (expired_jobs, next_deadline_unix_ms) = self
-            .journal
-            .deadline_summary(self.config.retry_failed_jobs())?;
+        let (expired_jobs, next_deadline_unix_ms) = self.journal.deadline_summary()?;
         let count = |state: &str| {
             self.journal
                 .connection
@@ -460,7 +450,7 @@ impl TaskRuntime {
             control_release_waits: self.journal.control_release_waits()?,
             runtime_id: self.config.runtime_id.clone(),
             ticks,
-            pending_jobs: self.journal.pending(self.config.retry_failed_jobs())?,
+            pending_jobs: self.journal.pending()?,
             latest_task_sequence: Journal::latest_task_sequence(&self.journal.connection)?,
             ready_for_review: count("ready_for_review")?,
             failed_jobs: count("failed")?,
@@ -484,7 +474,7 @@ impl TaskRuntime {
             recurring_checks,
             waiting_dependency,
             blocked_dependencies,
-            capacity_used: self.journal.capacity(self.config.retry_failed_jobs())?,
+            capacity_used: self.journal.capacity()?,
             plans: self.journal.plans_for_report()?,
             planning_jobs: self.journal.planning_jobs_after(0, 50)?,
             running_plans,

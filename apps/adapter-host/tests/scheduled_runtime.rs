@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use arcs_host::Host;
 use arcs_host::task_runtime::scheduler::{ScheduleState, SeriesState};
-use arcs_host::task_runtime::{RuntimeConfig, TaskRuntime, TickReport};
+use arcs_host::task_runtime::{CompletedTask, RuntimeConfig, TaskRuntime, TickReport};
 use serde_json::{Value, json};
 
 const NOW: u64 = 1_800_000_000_000;
@@ -157,6 +157,14 @@ fn tick_until(
     }
 }
 
+fn review_at(host: &mut Host, runtime: &mut TaskRuntime, now: u64) -> CompletedTask {
+    let mut tick = tick_until(host, runtime, now, |_, tick| {
+        !tick.ready_for_review.is_empty()
+    });
+    assert_eq!(tick.ready_for_review.len(), 1);
+    tick.ready_for_review.remove(0)
+}
+
 #[test]
 fn three_month_timer_survives_restart_and_does_not_block_an_independent_task() {
     let due = NOW + 3 * MONTH;
@@ -170,9 +178,8 @@ fn three_month_timer_survives_restart_and_does_not_block_an_independent_task() {
     f.write("runtime.json", config);
     let (mut host, mut runtime) = f.open();
     host.poll_inputs().unwrap();
-    let tick = runtime.tick_at(&mut host, NOW).unwrap();
-    assert_eq!(tick.ready_for_review.len(), 1);
-    assert_eq!(tick.ready_for_review[0].route_id, "immediate");
+    let immediate = review_at(&mut host, &mut runtime, NOW);
+    assert_eq!(immediate.route_id, "immediate");
     assert_eq!(runtime.report(0).unwrap().waiting_time, 1);
     assert_eq!(runtime.report(0).unwrap().next_wake_unix_ms, Some(due));
     assert_eq!(f.invocations(), 1);
@@ -189,10 +196,9 @@ fn three_month_timer_survives_restart_and_does_not_block_an_independent_task() {
             .is_empty()
     );
     assert_eq!(f.invocations(), 1);
-    let done = runtime.tick_at(&mut host, due).unwrap().ready_for_review;
-    assert_eq!(done.len(), 1);
+    let done = review_at(&mut host, &mut runtime, due);
     let schedule = runtime.scheduled_after(0, 10).unwrap().remove(0);
-    assert_eq!(schedule.input_version_id, done[0].input_version_id);
+    assert_eq!(schedule.input_version_id, done.input_version_id);
     assert_eq!(schedule.state, ScheduleState::Ready);
     assert_eq!(schedule.released_at_unix_ms, Some(due));
     assert_eq!(runtime.report(0).unwrap().waiting_time, 0);
@@ -230,11 +236,7 @@ fn relative_deadline_is_frozen_at_acceptance_and_overdue_work_runs_once() {
     drop(runtime);
     drop(host);
     let (mut host, mut runtime) = f.open();
-    let done = runtime
-        .tick_at(&mut host, NOW + 4 * MONTH)
-        .unwrap()
-        .ready_for_review;
-    assert_eq!(done.len(), 1);
+    let done = review_at(&mut host, &mut runtime, NOW + 4 * MONTH);
     assert_eq!(
         runtime.scheduled_after(0, 1).unwrap()[0].accepted_at_unix_ms,
         NOW
@@ -255,7 +257,7 @@ fn relative_deadline_is_frozen_at_acceptance_and_overdue_work_runs_once() {
             .tick_at(&mut host, NOW + 5 * MONTH)
             .unwrap()
             .ready_for_review,
-        done
+        [done]
     );
     assert_eq!(f.invocations(), 1);
     assert_eq!(
@@ -346,14 +348,7 @@ fn event_wait_replays_acked_events_after_restart_and_ignores_events_before_the_t
     host.shutdown().unwrap();
     drop(host);
     let (mut host, mut runtime) = f.open();
-    assert_eq!(
-        runtime
-            .tick_at(&mut host, NOW + 2 * MONTH)
-            .unwrap()
-            .ready_for_review
-            .len(),
-        1
-    );
+    review_at(&mut host, &mut runtime, NOW + 2 * MONTH);
     assert_eq!(
         runtime.scheduled_after(0, 1).unwrap()[0]
             .wake_event_version_id
@@ -408,8 +403,11 @@ fn bounded_event_scans_are_fair_across_restarts_and_do_not_lose_full_queue_backl
     let old = runtime.scheduled_after(0, 10).unwrap()[other].event_cursor;
     runtime.tick_at(&mut host, NOW + MONTH).unwrap();
     assert!(runtime.scheduled_after(0, 10).unwrap()[other].event_cursor > old);
-    for _ in 0..80 {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while runtime.report(0).unwrap().ready_for_review < 4 {
         runtime.tick_at(&mut host, NOW + MONTH).unwrap();
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(3));
     }
     // Two inputs × two routes. The retained signal wakes tasks admitted later too.
     assert_eq!(runtime.report(0).unwrap().ready_for_review, 4);
@@ -460,8 +458,7 @@ fn existing_journals_upgrade_without_changing_identity_or_replaying_completed_wo
     let f = Fixture::new(Value::Null);
     let (mut host, mut runtime) = f.open();
     host.poll_inputs().unwrap();
-    let done = runtime.tick_at(&mut host, NOW).unwrap().ready_for_review;
-    assert_eq!(done.len(), 1);
+    let done = review_at(&mut host, &mut runtime, NOW);
     host.shutdown().unwrap();
     drop(runtime);
     drop(host);
@@ -476,7 +473,7 @@ fn existing_journals_upgrade_without_changing_identity_or_replaying_completed_wo
         .remove("activation");
     f.write("runtime.json", config);
     let (mut host, mut runtime) = f.open();
-    assert_eq!(runtime.completed_after(0, 10).unwrap(), done);
+    assert_eq!(runtime.completed_after(0, 10).unwrap(), [done]);
     assert!(
         runtime
             .tick_at(&mut host, NOW + MONTH)
@@ -556,14 +553,7 @@ fn a_legacy_single_activation_journal_keeps_its_due_date_and_receipt_when_upgrad
             .ready_for_review
             .is_empty()
     );
-    assert_eq!(
-        runtime
-            .tick_at(&mut host, NOW + MONTH)
-            .unwrap()
-            .ready_for_review
-            .len(),
-        1
-    );
+    review_at(&mut host, &mut runtime, NOW + MONTH);
     assert_eq!(f.invocations(), 1);
     assert!(runtime.scheduled_history(1, None, 0).is_err());
     assert!(runtime.scheduled_history(1, Some(0), 1).unwrap().is_empty());
@@ -576,11 +566,7 @@ fn recurring_checks_resume_on_the_original_grid_and_coalesce_missed_dates() {
     f.recurring(5);
     let (mut host, mut runtime) = f.open();
     host.poll_inputs().unwrap();
-    let first = runtime
-        .tick_at(&mut host, NOW)
-        .unwrap()
-        .ready_for_review
-        .remove(0);
+    let first = review_at(&mut host, &mut runtime, NOW);
     assert_eq!(runtime.report(0).unwrap().capacity_used, 0);
     assert_eq!(
         runtime.report(0).unwrap().next_wake_unix_ms,
@@ -591,11 +577,7 @@ fn recurring_checks_resume_on_the_original_grid_and_coalesce_missed_dates() {
 
     let (mut host, mut runtime) = f.open();
     let late = NOW + 3 * MONTH + 11;
-    let third = runtime
-        .tick_at(&mut host, late)
-        .unwrap()
-        .ready_for_review
-        .remove(0);
+    let third = review_at(&mut host, &mut runtime, late);
     assert_eq!(third.input_version_id, first.input_version_id);
     assert_ne!(third.request_version_id, first.request_version_id);
     let receipt = runtime
@@ -626,11 +608,7 @@ fn recurring_checks_resume_on_the_original_grid_and_coalesce_missed_dates() {
         );
     }
     assert_eq!(f.invocations(), 2);
-    let last = runtime
-        .tick_at(&mut host, NOW + 4 * MONTH)
-        .unwrap()
-        .ready_for_review
-        .remove(0);
+    let last = review_at(&mut host, &mut runtime, NOW + 4 * MONTH);
     let summary = runtime.report(0).unwrap();
     assert_eq!(summary.next_wake_unix_ms, None);
     assert_eq!(summary.recurring_checks[0].state, SeriesState::Exhausted);
@@ -678,11 +656,7 @@ fn recurring_admission_rolls_back_and_an_open_occurrence_blocks_the_next() {
     f.write("runtime.json", config);
     let (mut host, mut runtime) = f.open();
     host.poll_inputs().unwrap();
-    let first = runtime
-        .tick_at(&mut host, NOW)
-        .unwrap()
-        .ready_for_review
-        .remove(0);
+    let first = review_at(&mut host, &mut runtime, NOW);
     let db = f.db("runtime");
     db.execute_batch(
         "CREATE TRIGGER fail_occurrence BEFORE INSERT ON runtime_check_occurrences
@@ -707,7 +681,7 @@ fn recurring_admission_rolls_back_and_an_open_occurrence_blocks_the_next() {
     drop((runtime, host));
 
     let (mut host, mut runtime) = f.open();
-    assert!(runtime.tick_at(&mut host, NOW + MONTH).is_err());
+    support::wait_for_interrupted_checkpoint(|| runtime.tick_at(&mut host, NOW + MONTH));
     let admitted = runtime
         .check_occurrences_after(first.sequence, first.sequence, 10)
         .unwrap();
@@ -723,8 +697,7 @@ fn recurring_admission_rolls_back_and_an_open_occurrence_blocks_the_next() {
     assert!(recovered.recurring_jobs.is_empty());
     assert_eq!(recovered.ready_for_review[0].sequence, admitted[0].sequence);
     assert_eq!(f.invocations(), 2);
-    let next = runtime.tick_at(&mut host, NOW + 3 * MONTH).unwrap();
-    assert_eq!(next.ready_for_review.len(), 1);
+    review_at(&mut host, &mut runtime, NOW + 3 * MONTH);
     let history = runtime
         .check_occurrences_after(first.sequence, 0, 10)
         .unwrap();
@@ -743,11 +716,7 @@ fn new_tasks_and_recurring_checks_share_a_single_queue_slot_across_restart() {
     f.recurring(5);
     let (mut host, mut runtime) = f.open();
     host.poll_inputs().unwrap();
-    let first = runtime
-        .tick_at(&mut host, NOW)
-        .unwrap()
-        .ready_for_review
-        .remove(0);
+    let first = review_at(&mut host, &mut runtime, NOW);
     host.shutdown().unwrap();
     drop((runtime, host));
     f.enqueue("input", "second", "project:second");
@@ -755,11 +724,8 @@ fn new_tasks_and_recurring_checks_share_a_single_queue_slot_across_restart() {
     host.poll_inputs().unwrap();
     let second = runtime.tick_at(&mut host, NOW + MONTH).unwrap();
     assert!(second.recurring_jobs.is_empty());
-    assert_eq!(second.ready_for_review.len(), 1);
-    assert_ne!(
-        second.ready_for_review[0].input_version_id,
-        first.input_version_id
-    );
+    let second = review_at(&mut host, &mut runtime, NOW + MONTH);
+    assert_ne!(second.input_version_id, first.input_version_id);
     host.shutdown().unwrap();
     drop((runtime, host));
 
@@ -768,15 +734,12 @@ fn new_tasks_and_recurring_checks_share_a_single_queue_slot_across_restart() {
     host.poll_inputs().unwrap();
     let recurrence = runtime.tick_at(&mut host, NOW + 2 * MONTH).unwrap();
     assert_eq!(recurrence.recurring_jobs.len(), 1);
-    assert_eq!(recurrence.ready_for_review.len(), 1);
-    assert_eq!(
-        recurrence.ready_for_review[0].input_version_id,
-        first.input_version_id
-    );
+    let recurrence = review_at(&mut host, &mut runtime, NOW + 2 * MONTH);
+    assert_eq!(recurrence.input_version_id, first.input_version_id);
     let third = runtime.tick_at(&mut host, NOW + 2 * MONTH).unwrap();
     assert_eq!(third.discovered_jobs, 1);
     assert!(third.recurring_jobs.is_empty());
-    assert_eq!(third.ready_for_review.len(), 1);
+    review_at(&mut host, &mut runtime, NOW + 2 * MONTH);
     assert_eq!(runtime.recurring_checks_after(0, 10).unwrap().len(), 3);
     assert_eq!(f.invocations(), 4);
     host.shutdown().unwrap();

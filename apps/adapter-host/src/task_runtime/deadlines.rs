@@ -23,10 +23,7 @@ impl TaskRuntime {
         host: &mut Host,
         report: &mut TickReport,
     ) -> Result<(), HostError> {
-        let due = self.journal.expiring_tasks(
-            self.config.max_jobs_per_tick,
-            self.config.retry_failed_jobs(),
-        )?;
+        let due = self.journal.expiring_tasks(self.config.max_jobs_per_tick)?;
         for sequence in due {
             self.expire_task(host, sequence, report)?;
         }
@@ -39,10 +36,7 @@ impl TaskRuntime {
         sequence: u64,
         report: &mut TickReport,
     ) -> Result<bool, HostError> {
-        if !self
-            .journal
-            .expire_task(sequence, self.config.retry_failed_jobs())?
-        {
+        if !self.journal.expire_task(sequence)? {
             return Ok(false);
         }
         report.expired_tasks.push(sequence);
