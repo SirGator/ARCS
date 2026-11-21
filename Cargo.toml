@@ -9,6 +9,7 @@ members = [
     "adapters/file-data",
     "adapters/normalize-number",
     "adapters/file-output",
+    "adapters/workspace-check",
     "adapters/json-report",
     "adapters/json-input",
     "adapters/example-reasoner",

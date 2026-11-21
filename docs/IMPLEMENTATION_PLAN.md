@@ -497,6 +497,12 @@
 > bestehende Abhängigkeitsverwaltung und führt die neuen Schritte nach
 > ihren normalen Budgets aus.
 
+> Fünfundvierzigster Schritt gemäß v3 §4 Act, §7.2 PAR-10 und §8.2
+> LNG-09. Der Workspace-Check-Adapter startet freigegebene, in seinem Profil
+> benannte Softwareprüfungen. Er speichert die Startabsicht vor der Ausführung
+> und bringt Status, Exitcode und Auftragsbezug als Ausführungsartefakt in
+> den Core. Der Schritt stellt einen Werkzeugpfad für TEST-02 bereit.
+
 **Leitbild:** ARCS ist ein universeller Agent. Es soll sich einfach bedienen lassen, beliebige kompatible Systeme verbinden, eigenständig Probleme lösen und langfristige Aufgaben über Monate verfolgen.
 
 ## 1. Verbindliche Architekturregeln

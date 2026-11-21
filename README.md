@@ -63,7 +63,8 @@ dokumentiert Slice 40. Der [Bericht zur geprüften Aufgabenausgabe](docs/ZWISCHE
 dokumentiert Slice 41. Der [Bericht zu Entwürfen aus Arbeitsplänen](docs/ZWISCHENBERICHT_2026-11-21_PLAN_OUTPUT.md)
 dokumentiert Slice 42. Der [Bericht zum Reasoning-Kontingent](docs/ZWISCHENBERICHT_2026-11-21_REASONING_BUDGET.md)
 dokumentiert Slice 43. Der [Bericht zur Übernahme fertiger Teilergebnisse](docs/ZWISCHENBERICHT_2026-11-21_PLAN_REUSE.md)
-dokumentiert Slice 44. Die Berichte vom
+dokumentiert Slice 44. Der [Bericht zu lokalen Softwareprüfungen](docs/ZWISCHENBERICHT_2026-11-21_WORKSPACE_CHECK.md)
+dokumentiert Slice 45. Die Berichte vom
 [17. November](docs/ZWISCHENBERICHT_2026-11-17.md) und
 [16. November](docs/ZWISCHENBERICHT_2026-11-16.md) dokumentieren frühere
 Umsetzungsstände, Prüfergebnisse und offene Grenzen.

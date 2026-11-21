@@ -1,0 +1,15 @@
+[package]
+name = "arcs-workspace-check"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+arcs-adapter-sdk.workspace = true
+arcs-adapter-protocol.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+rusqlite.workspace = true
+
+[dev-dependencies]
+arcs.workspace = true
+arcs-host.workspace = true

@@ -37,4 +37,8 @@ mit derselben Request-ID und Kontextversion fortgesetzt. In einem zweiten
 Lauf hat der native Summenadapter den gespeicherten Kandidaten des
 Vorgängerschritts als Eingabe verarbeitet.
 
+Der Workspace-Lauf bestand 680 Rust-Tests. Der zusätzliche Test zur
+Übernahme aus einem `arcs.plan.v3`-Vorgänger bestand im gezielten Lauf.
+Auch die 48 GTK-Tests bestanden.
+
 Der Zugriff umfasst den direkten Vorgänger derselben Aufgabe.
