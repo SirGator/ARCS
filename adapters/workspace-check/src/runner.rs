@@ -1,5 +1,5 @@
 //! Run only named operator-defined checks. The journal commits intent before spawning.
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -19,6 +19,10 @@ use serde_json::{Value, json};
 const CAPABILITY: &str = "check.run";
 const CANDIDATE: &str = "arcs.workspace_check_candidate.v1";
 const RESULT: &str = "arcs.execution_result.workspace_check.v1";
+const REVISION_CAPABILITY: &str = "check.revision";
+const REVISION_CANDIDATE: &str = "arcs.workspace_revision_check_candidate.v1";
+const REVISION_RESULT: &str = "arcs.execution_result.workspace_revision_check.v1";
+const REVISION_PERMISSION: &str = "workspace.check_revision";
 const SUPERVISOR: &str = "/usr/bin/timeout";
 
 #[derive(Serialize, Deserialize)]
@@ -29,6 +33,8 @@ struct Profile {
     checks: BTreeMap<String, Check>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     edit: Option<EditProfile>,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    revision_checks: BTreeSet<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -44,6 +50,13 @@ struct Check {
 #[serde(deny_unknown_fields)]
 struct CommandSelection {
     check: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RevisionSelection {
+    check: String,
+    revision: String,
 }
 
 #[derive(Deserialize)]
@@ -84,6 +97,17 @@ impl Runner {
         }
         if let Some(edit) = &profile.edit {
             edit.validate(&profile.workspace)?;
+        }
+        if !profile.revision_checks.is_empty()
+            && (profile.edit.is_none()
+                || profile
+                    .revision_checks
+                    .iter()
+                    .any(|name| !profile.checks.contains_key(name)))
+        {
+            return Err(
+                "revision checks require a configured Git edit ref and named checks".into(),
+            );
         }
         for (name, check) in &mut profile.checks {
             // Keep aliases such as rustup's cargo proxy as the executable name.
@@ -185,7 +209,32 @@ impl Runner {
     fn execute_named(&self, invocation: &ActInvocation) -> Result<ActResponse, AdapterError> {
         let action: CommandSelection =
             self.materialized(invocation, CAPABILITY, CANDIDATE, RESULT)?;
-        let name = &action.check;
+        self.execute_check(invocation, &action.check, None)
+    }
+
+    fn execute_revision(&self, invocation: &ActInvocation) -> Result<ActResponse, AdapterError> {
+        let action: RevisionSelection = self.materialized(
+            invocation,
+            REVISION_CAPABILITY,
+            REVISION_CANDIDATE,
+            REVISION_RESULT,
+        )?;
+        if !self.profile.revision_checks.contains(&action.check)
+            || !git_edit::object_id(&action.revision)
+        {
+            return Err(AdapterError::rejected(
+                "workspace revision check requires a configured check and a full commit ID",
+            ));
+        }
+        self.execute_check(invocation, &action.check, Some(&action.revision))
+    }
+
+    fn execute_check(
+        &self,
+        invocation: &ActInvocation,
+        name: &str,
+        revision: Option<&str>,
+    ) -> Result<ActResponse, AdapterError> {
         let check = self
             .profile
             .checks
@@ -211,16 +260,29 @@ impl Runner {
             }
             match result {
                 Some(result) => serde_json::from_str(&result).map_err(unavailable)?,
-                None => self.save_result(id, json!({"check":name,"status":"interrupted"}))?,
+                None => self.save_result(id, check_result(name, "interrupted", revision))?,
             }
         } else {
+            let snapshot = revision
+                .map(|commit| {
+                    self.profile
+                        .edit
+                        .as_ref()
+                        .expect("revision checks require an edit profile")
+                        .snapshot(&self.profile.workspace, commit)
+                })
+                .transpose()?;
+            let working_dir = snapshot.as_ref().map_or(
+                self.profile.workspace.as_path(),
+                git_edit::TemporaryDirectory::path,
+            );
             self.db
                 .execute(
                     "INSERT INTO checks(invocation_id,input) VALUES (?1,?2)",
                     params![id, input],
                 )
                 .map_err(unavailable)?;
-            self.save_result(id, execute_check(&self.profile.workspace, name, check))?
+            self.save_result(id, run_check(working_dir, name, check, revision))?
         };
         Ok(ActResponse {
             invocation_id: id.clone(),
@@ -266,6 +328,14 @@ impl Adapter for Runner {
                 "workspace.edit",
             ));
         }
+        if !self.profile.revision_checks.is_empty() {
+            capabilities.push(act_capability(
+                REVISION_CAPABILITY,
+                REVISION_CANDIDATE,
+                REVISION_RESULT,
+                REVISION_PERMISSION,
+            ));
+        }
         AdapterManifest {
             protocol_version: 1,
             adapter_id: self.profile.adapter_id.clone(),
@@ -275,8 +345,11 @@ impl Adapter for Runner {
     }
 
     fn execute(&mut self, invocation: ActInvocation) -> Result<ActResponse, AdapterError> {
-        if invocation.capability.capability_id.0 != git_edit::CAPABILITY {
-            return self.execute_named(&invocation);
+        match invocation.capability.capability_id.0.as_str() {
+            CAPABILITY => return self.execute_named(&invocation),
+            REVISION_CAPABILITY => return self.execute_revision(&invocation),
+            git_edit::CAPABILITY => {}
+            _ => return Err(AdapterError::rejected("unknown workspace capability")),
         }
         let edit = self
             .profile
@@ -317,7 +390,7 @@ fn act_capability(id: &str, accepts: &str, emits: &str, permission: &str) -> Cap
     }
 }
 
-fn execute_check(workspace: &Path, name: &str, check: &Check) -> Value {
+fn run_check(workspace: &Path, name: &str, check: &Check, revision: Option<&str>) -> Value {
     let started = Instant::now();
     // The supervisor maintains the deadline even if the adapter process is lost.
     let timeout = format!(
@@ -325,7 +398,19 @@ fn execute_check(workspace: &Path, name: &str, check: &Check) -> Value {
         check.timeout_ms / 1000,
         check.timeout_ms % 1000
     );
-    let process = Command::new(SUPERVISOR)
+    let mut command = Command::new(SUPERVISOR);
+    if revision.is_some() {
+        for (name, _) in
+            std::env::vars_os().filter(|(name, _)| name.as_encoded_bytes().starts_with(b"GIT_"))
+        {
+            command.env_remove(name);
+        }
+        command.env(
+            "GIT_CEILING_DIRECTORIES",
+            workspace.parent().expect("snapshot directory has a parent"),
+        );
+    }
+    let process = command
         .args(["--signal=KILL", "--", &timeout])
         .arg(&check.program)
         .args(&check.args)
@@ -343,10 +428,18 @@ fn execute_check(workspace: &Path, name: &str, check: &Check) -> Value {
         Ok(exit) => ("failed", exit.code()),
         Err(_) => ("runner_error", None),
     };
-    let mut result =
-        json!({"check":name,"status":status,"duration_ms":started.elapsed().as_millis() as u64});
+    let mut result = check_result(name, status, revision);
+    result["duration_ms"] = json!(started.elapsed().as_millis() as u64);
     if let Some(code) = exit_code {
         result["exit_code"] = json!(code);
+    }
+    result
+}
+
+fn check_result(name: &str, status: &str, revision: Option<&str>) -> Value {
+    let mut result = json!({"check":name,"status":status});
+    if let Some(commit) = revision {
+        result["revision"] = json!(commit);
     }
     result
 }

@@ -1,10 +1,13 @@
 use super::*;
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::Command;
 
 const EDIT_REF: &str = "refs/arcs/test";
 const EDIT_SCHEMA: &str = "arcs.workspace_edit_candidate.v1";
 const EDIT_RECEIPT: &str = "arcs.execution_result.workspace_edit.v1";
+const REVISION_SCHEMA: &str = "arcs.workspace_revision_check_candidate.v1";
+const REVISION_RECEIPT: &str = "arcs.execution_result.workspace_revision_check.v1";
 const ORIGINAL: &str = "def add(a, b):\n    return a - b\n";
 const FIXED: &str = "def add(a, b):\n    return a + b\n";
 
@@ -36,8 +39,9 @@ fn enable_edits(f: &Fixture, project: &Path) -> String {
     git(project, &["init", "-q"]);
     fs::write(project.join("calculator.py"), ORIGINAL).unwrap();
     fs::write(project.join("untouched.txt"), "same content\n").unwrap();
-    #[cfg(unix)]
-    std::os::unix::fs::symlink("calculator.py", project.join("link.py")).unwrap();
+    let executable = project.join("verify");
+    fs::write(&executable, "#!/bin/sh\nexit 0\n").unwrap();
+    fs::set_permissions(executable, fs::Permissions::from_mode(0o755)).unwrap();
     git(project, &["add", "."]);
     git(project, &["commit", "-q", "-m", "Starting project"]);
     let base = git(project, &["rev-parse", "HEAD"]).trim().to_owned();
@@ -52,21 +56,55 @@ fn enable_edits(f: &Fixture, project: &Path) -> String {
     f.write("host.json", host);
     let mut profile = f.read("profile.json");
     profile["edit"] = json!({"reference":EDIT_REF,"files":["calculator.py","link.py"]});
-    profile["checks"]["unit"] = json!({"program":"/usr/bin/python3","args":["-I","-c",r#"
-import pathlib, subprocess, sys, tempfile
-revision = subprocess.check_output(['/usr/bin/git','rev-parse','refs/arcs/test'], text=True).strip()
-blob = subprocess.check_output(['/usr/bin/git','show',revision+':calculator.py'])
-with tempfile.TemporaryDirectory() as name:
-    pathlib.Path(name,'calculator.py').write_bytes(blob)
-    result = subprocess.run([sys.executable,'-B','-c','from calculator import add; assert add(2,3)==5'],cwd=name)
-    sys.exit(result.returncode)
-"#],"timeout_ms":3000});
     f.write("profile.json", profile);
     let mut grant = f.read("grant.json");
     grant["enabled_capabilities"] = json!(["check.run", "edit.apply"]);
     grant["granted_permissions"] = json!(["workspace.check", "workspace.edit"]);
     f.write("grant.json", grant);
     base
+}
+
+fn enable_revision_checks(f: &Fixture) {
+    let schemas = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("schemas");
+    let mut host = f.read("host.json");
+    host["schemas"].as_array_mut().unwrap().extend([
+        json!(schemas.join("revision-candidate.schema.json")),
+        json!(schemas.join("revision-execution.schema.json")),
+    ]);
+    f.write("host.json", host);
+    let mut profile = f.read("profile.json");
+    profile["revision_checks"] = json!(["unit"]);
+    profile["checks"]["unit"] = json!({
+        "program":"/usr/bin/python3",
+        "args":["-B","-c",r#"
+from pathlib import Path
+from calculator import add
+import sys
+with Path(sys.argv[1]).open('a') as runs:
+    runs.write('unit\n')
+assert Path('untouched.txt').read_bytes() == b'same content\n'
+assert b'\r' not in Path('calculator.py').read_bytes()
+assert not Path('untracked.txt').exists()
+assert Path('verify').stat().st_mode & 0o100
+assert add(2, 3) == 5
+"#, f.0.join("revision-attempts")],
+        "timeout_ms":3000
+    });
+    f.write("profile.json", profile);
+    let mut grant = f.read("grant.json");
+    grant["enabled_capabilities"] = json!(["edit.apply", "check.revision"]);
+    grant["granted_permissions"] = json!(["workspace.edit", "workspace.check_revision"]);
+    f.write("grant.json", grant);
+}
+
+fn revision_check(host: &Host, id: &str, check: &str, revision: &str) -> Artifact {
+    propose(
+        host,
+        id,
+        REVISION_SCHEMA,
+        "check.revision",
+        json!({"check":check,"revision":revision}),
+    )
 }
 
 fn revision(project: &Path) -> String {
@@ -89,14 +127,16 @@ fn edit_candidate(host: &Host, id: &str, base: &str, path: &str, replacement: &s
 fn an_approved_edit_recovers_the_published_commit_and_a_real_check_passes_on_its_tree() {
     let f = Fixture::new();
     let project = f.0.join("project");
+    fs::write(
+        project.join(".gitattributes"),
+        "untouched.txt export-ignore\ncalculator.py text eol=crlf\n",
+    )
+    .unwrap();
     let base = enable_edits(&f, &project);
+    fs::write(project.join("untracked.txt"), "mutable worktree").unwrap();
+    enable_revision_checks(&f);
     let adapter = AdapterId(ADAPTER.into());
     let mut host = f.open();
-    let before = approve(&host, &candidate(&host, "unit-before", "unit"));
-    assert_eq!(
-        host.execute_approved(&adapter, &before).unwrap().payload["result"]["status"],
-        "failed"
-    );
 
     let proposed = edit_candidate(&host, "addition-fix", &base, "calculator.py", FIXED);
     assert!(
@@ -163,10 +203,21 @@ fn an_approved_edit_recovers_the_published_commit_and_a_real_check_passes_on_its
         .trim(),
         "1"
     );
-    let verified = approve(&host, &candidate(&host, "unit-after", "unit"));
+    for (label, commit, status) in [
+        ("unit-before", &base, "failed"),
+        ("unit-after", &published, "passed"),
+    ] {
+        let candidate = revision_check(&host, label, "unit", commit);
+        let action = approve_for(&host, &candidate, "check.revision");
+        let result = host.execute_approved(&adapter, &action).unwrap();
+        assert_eq!(result.schema_id.0, REVISION_RECEIPT);
+        assert_eq!(result.payload["action_version"], json!(action));
+        assert_eq!(result.payload["result"]["revision"], commit.as_str());
+        assert_eq!(result.payload["result"]["status"], status);
+    }
     assert_eq!(
-        host.execute_approved(&adapter, &verified).unwrap().payload["result"]["status"],
-        "passed"
+        fs::read_to_string(f.0.join("revision-attempts")).unwrap(),
+        "unit\nunit\n"
     );
     host.shutdown().unwrap();
 }
@@ -206,6 +257,7 @@ fn edits_refuse_unconfigured_paths_and_symlinks_even_with_an_approved_candidate(
     for path in ["untouched.txt", "link.py"] {
         let f = Fixture::new();
         let project = f.0.join("project");
+        std::os::unix::fs::symlink("calculator.py", project.join("link.py")).unwrap();
         let base = enable_edits(&f, &project);
         let mut host = f.open();
         let candidate = edit_candidate(&host, "rejected-file", &base, path, FIXED);
@@ -343,4 +395,110 @@ fn a_competing_git_transaction_keeps_its_commit_when_a_prepared_edit_reaches_the
         git(&project, &["show", &format!("{newer}:calculator.py")]),
         ORIGINAL
     );
+}
+
+#[test]
+fn revision_checks_reject_unapproved_tree_scope_and_unlisted_checks_before_starting() {
+    let f = Fixture::new();
+    let project = f.0.join("project");
+    let base = enable_edits(&f, &project);
+    fs::write(project.join("calculator.py"), FIXED).unwrap();
+    git(&project, &["commit", "-qam", "Unrelated fixed version"]);
+    let unrelated = git(&project, &["rev-parse", "HEAD"]);
+    let blob = git(&project, &["rev-parse", "HEAD:calculator.py"]);
+
+    std::os::unix::fs::symlink("calculator.py", project.join("link.py")).unwrap();
+    git(&project, &["add", "link.py"]);
+    git(&project, &["commit", "-qm", "Link in candidate tree"]);
+    let symlink = git(&project, &["rev-parse", "HEAD"]);
+
+    enable_revision_checks(&f);
+    let adapter = AdapterId(ADAPTER.into());
+    for (label, check, commit, expected) in [
+        (
+            "unlisted-command",
+            "pass",
+            base.as_str(),
+            "configured check",
+        ),
+        (
+            "unrelated-commit",
+            "unit",
+            unrelated.trim(),
+            "reachable from the configured ref",
+        ),
+        (
+            "not-a-commit",
+            "unit",
+            blob.trim(),
+            "reachable from the configured ref",
+        ),
+        ("symlink-tree", "unit", symlink.trim(), "only regular files"),
+    ] {
+        if label == "symlink-tree" {
+            git(&project, &["update-ref", EDIT_REF, commit, &base]);
+        }
+        // The host discards the session after a remote Act rejection.
+        let mut host = f.open();
+        let candidate = revision_check(&host, label, check, commit);
+        let action = approve_for(&host, &candidate, "check.revision");
+        let error = host.execute_approved(&adapter, &action).unwrap_err();
+        assert!(
+            matches!(
+                error,
+                arcs_host::HostError::Execution {
+                    source: arcs::execution::ExecutionError::AdapterCall(
+                        arcs::adapters::AdapterCallError::Rejected(ref detail)
+                    ),
+                    ..
+                } if detail.contains(expected)
+            ),
+            "{label}: {error:?}"
+        );
+    }
+    assert!(!f.0.join("revision-attempts").exists());
+    assert_eq!(f.attempts(), 0);
+}
+
+#[test]
+fn a_revision_receipt_replays_after_restart_even_when_the_ref_moves() {
+    let f = Fixture::new();
+    let project = f.0.join("project");
+    let base = enable_edits(&f, &project);
+    enable_revision_checks(&f);
+    let adapter = AdapterId(ADAPTER.into());
+    let mut host = f.open();
+    let edit = edit_candidate(
+        &host,
+        "edit-before-verification",
+        &base,
+        "calculator.py",
+        FIXED,
+    );
+    let action = approve_for(&host, &edit, "edit.apply");
+    host.execute_approved(&adapter, &action).unwrap();
+    let commit = revision(&project);
+    let candidate = revision_check(&host, "repeat-receipt", "unit", &commit);
+    let action = approve_for(&host, &candidate, "check.revision");
+    let core = Connection::open(f.0.join("core.sqlite")).unwrap();
+    core.execute_batch(&format!(
+        "CREATE TRIGGER lose_revision_receipt BEFORE INSERT ON artifact_versions
+         WHEN NEW.schema_id='{REVISION_RECEIPT}' BEGIN SELECT RAISE(ABORT,'simulated Core receipt rollback'); END;"
+    )).unwrap();
+    assert!(host.execute_approved(&adapter, &action).is_err());
+    let count_file = f.0.join("revision-attempts");
+    assert_eq!(fs::read_to_string(&count_file).unwrap(), "unit\n");
+    host.shutdown().unwrap();
+    drop(host);
+    core.execute_batch("DROP TRIGGER lose_revision_receipt")
+        .unwrap();
+    git(&project, &["update-ref", EDIT_REF, &base, &commit]);
+
+    let mut host = f.open();
+    let result = host.execute_approved(&adapter, &action).unwrap();
+    assert_eq!(result.schema_id.0, REVISION_RECEIPT);
+    assert_eq!(result.payload["result"]["status"], "passed");
+    assert_eq!(result.payload["result"]["revision"], commit);
+    assert_eq!(fs::read_to_string(&count_file).unwrap(), "unit\n");
+    host.shutdown().unwrap();
 }

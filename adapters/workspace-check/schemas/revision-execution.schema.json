@@ -1,0 +1,24 @@
+{
+  "$id": "arcs.execution_result.workspace_revision_check.v1",
+  "type": "object",
+  "required": ["action_version", "result"],
+  "properties": {
+    "action_version": { "type": "string", "minLength": 1 },
+    "result": {
+      "type": "object",
+      "required": ["check", "revision", "status"],
+      "properties": {
+        "check": { "type": "string", "minLength": 1 },
+        "revision": { "type": "string", "minLength": 40 },
+        "status": {
+          "type": "string",
+          "enum": ["passed", "failed", "timed_out_or_killed", "runner_error", "interrupted"]
+        },
+        "duration_ms": { "type": "integer", "minimum": 0 },
+        "exit_code": { "type": "integer", "minimum": 0, "maximum": 255 }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

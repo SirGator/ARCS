@@ -1,0 +1,10 @@
+{
+  "$id": "arcs.workspace_revision_check_candidate.v1",
+  "type": "object",
+  "required": ["check", "revision"],
+  "properties": {
+    "check": { "type": "string", "minLength": 1 },
+    "revision": { "type": "string", "minLength": 40 }
+  },
+  "additionalProperties": false
+}

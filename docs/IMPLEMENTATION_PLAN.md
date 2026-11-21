@@ -517,6 +517,15 @@
 > Das Adapterjournal erhält die Vorbereitungsdaten und die Quittung
 > über Neustarts. Ein konfigurierter Test prüft den neuen Git-Stand.
 
+> Achtundvierzigster Schritt gemäß v3 §4 Act, §7.2 PAR-10, §8.2
+> LNG-09 und TEST-02. Freigegebene Prüfaufträge binden ein benanntes
+> Prüfprogramm an einen vollständigen Commit der lokalen ARCS-Referenz.
+> Der Workspace-Adapter führt das Programm mit den Dateien dieses
+> Git-Baums aus und quittiert die geprüfte Revision im Artifact-Netz.
+> Wiederaufnahme verwendet die gespeicherte Quittung. Die
+> automatische Übergabe der Edit-Quittung an einen Prüfschritt
+> desselben Plans bleibt offen.
+>
 **Leitbild:** ARCS ist ein universeller Agent. Es soll sich einfach bedienen lassen, beliebige kompatible Systeme verbinden, eigenständig Probleme lösen und langfristige Aufgaben über Monate verfolgen.
 
 ## 1. Verbindliche Architekturregeln

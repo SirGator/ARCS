@@ -1,6 +1,7 @@
 //! Git object construction uses an isolated index and local plumbing commands.
 use std::fs;
-use std::io::Write;
+use std::io::{self, Write};
+use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -14,7 +15,7 @@ pub(super) struct Git<'a> {
 }
 
 impl Git<'_> {
-    fn command(&self, index: Option<&Path>) -> Command {
+    pub(super) fn command(&self, index: Option<&Path>) -> Command {
         let mut command = Command::new("/usr/bin/git");
         command
             .current_dir(self.workspace)
@@ -177,8 +178,12 @@ impl Git<'_> {
             "hash-object",
         )
         .map_err(unavailable)?;
-        let temp = TemporaryIndex::create(journal).map_err(unavailable)?;
-        let index = temp.0.join("index");
+        let temp = TemporaryDirectory::create(
+            journal.parent().expect("canonical journal has a parent"),
+            "edit-index",
+        )
+        .map_err(unavailable)?;
+        let index = temp.path().join("index");
         self.text(&["read-tree", &edit.base_commit], Some(&index))
             .map_err(unavailable)?;
         let cache = format!("{mode},{blob},{}", edit.path);
@@ -221,20 +226,31 @@ fn output_text(output: Output, operation: &str) -> Result<String, String> {
         .map_err(|error| error.to_string())
 }
 
-struct TemporaryIndex(PathBuf);
-impl TemporaryIndex {
-    fn create(journal: &Path) -> std::io::Result<Self> {
+pub(crate) struct TemporaryDirectory(PathBuf);
+
+impl TemporaryDirectory {
+    pub(super) fn create(parent: &Path, purpose: &str) -> io::Result<Self> {
         static NEXT: AtomicU64 = AtomicU64::new(0);
-        let path = journal.with_file_name(format!(
-            ".arcs-edit-index-{}-{}",
-            std::process::id(),
-            NEXT.fetch_add(1, Ordering::Relaxed)
-        ));
-        fs::create_dir(&path)?;
-        Ok(Self(path))
+        loop {
+            let path = parent.join(format!(
+                ".arcs-{purpose}-{}-{}",
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
+            match fs::DirBuilder::new().mode(0o700).create(&path) {
+                Ok(()) => return Ok(Self(path)),
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+                Err(error) => return Err(error),
+            }
+        }
+    }
+
+    pub(crate) fn path(&self) -> &Path {
+        &self.0
     }
 }
-impl Drop for TemporaryIndex {
+
+impl Drop for TemporaryDirectory {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.0);
     }

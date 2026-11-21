@@ -58,12 +58,11 @@ Anwendung kann eine bereits freigegebene Action mit
 - `interrupted` bedeutet, dass der Journalzustand nur die Startabsicht
   belegt. Die Runtime kann daraus keinen Testerfolg ableiten.
 
-Die Quittung beschreibt die Ausführung im Arbeitsverzeichnis zum Zeitpunkt
-des Laufs. Für eine revisionsgenaue Prüfung konfiguriert der Betreiber
-einen eigenen Checkout oder einen Testbefehl, der die gewünschte Revision
-prüft. Das Tool läuft unter dem Benutzer des Adapters. Standardausgaben
-werden verworfen. Eine konfigurierte Prüfung kann detaillierte Testberichte
-als Dateien im Projekt ablegen.
+Bei `check.run` beschreibt die Quittung die Ausführung im
+Arbeitsverzeichnis zum Zeitpunkt des Laufs. Das Tool läuft unter dem
+Benutzer des Adapters. Standardausgaben werden verworfen. Eine
+konfigurierte Prüfung kann detaillierte Testberichte als Dateien im
+Projekt ablegen.
 
 Die Ausführungs-ID wird vor dem Prozessstart im Adapterjournal gebunden.
 Bei einem Wiederholungsaufruf verwendet der Adapter die gespeicherte
@@ -111,13 +110,42 @@ bei `unchanged` war der Text bereits identisch. Bei `conflict` enthält
 `commit` den beobachteten neueren Stand. Eine Korrektur dafür benötigt
 einen neuen Kandidaten mit passender Basis und eigener Freigabe.
 
-Der Prüfadapter `check.run` führt sein konfiguriertes Programm im
-Arbeitsverzeichnis aus. Für Git-basierte Prüfungen kann dieses Programm
-die Arbeitsreferenz auf einen vollständigen Hash auflösen und die
-Prüfung aus einem Checkout dieses Commits starten. Der Integrationstest
-zeigt denselben Ablauf mit einer fehlerhaften und der korrigierten
-Version eines Rechners.
+## Einen bestimmten Git-Commit prüfen
 
+Ergänze das Profil mit `"revision_checks": ["unit"]`. Die Liste wählt
+Prüfprogramme aus `checks` aus und benötigt eine konfigurierte
+`edit.reference`. Lade `revision-candidate.schema.json` und
+`revision-execution.schema.json` in den Host. Gib `check.revision` mit
+`workspace.check_revision` im Grant frei. Eine Installation, die
+ausschließlich revisionsgenau prüfen soll, kann den Grant für
+`check.run` weglassen. Verwende für die Erweiterung einer bereits
+gebundenen Installation eine neue Adapter-ID und ein neues Journal,
+damit die bisherigen Quittungen über die alte Installation verfügbar
+bleiben.
+
+Der Kandidat verwendet `arcs.workspace_revision_check_candidate.v1`
+mit `check` und `revision`. Übernimm als `revision` den vollständigen
+Commit-Hash aus `result.commit` einer Edit-Quittung mit Status
+`applied` oder `unchanged`. Die Prüfung braucht eine eigene Freigabe.
+Der Commit muss beim Start von der konfigurierten ARCS-Referenz aus
+erreichbar sein. Damit lassen sich auch frühere Commits prüfen,
+während die Arbeitsreferenz weiterläuft.
+
+Der Adapter kopiert die versionierten regulären Dateien direkt aus
+Git-Blobs in ein temporäres Verzeichnis. Er erhält den Inhalt und das
+Ausführbarkeitsbit der Dateien. Git-Filter und Exportattribute werden
+dabei umgangen. Bäume mit Symlinks oder Submodulen werden abgewiesen.
+Das Limit beträgt 50.000 Dateien, 64 MiB je Datei, 512 MiB insgesamt
+und 8 MiB für die Baumliste. Das Prüfprogramm arbeitet als Benutzer
+des Adapters in der temporären Kopie. Eine Betriebssystem-Sandbox
+ist dafür weiterhin offen. Das Host-Zeitlimit muss den Kopiervorgang
+und das Prüfzeitlimit abdecken.
+
+`arcs.execution_result.workspace_revision_check.v1` hält den Commit
+unter `result.revision` neben Prüfstatus und Exitcode fest. Bei
+`interrupted` belegt der Commit die Zielrevision des Auftrags.
+Ein gespeichertes Ergebnis bleibt bei einer Wiederaufnahme erhalten,
+auch wenn sich die Referenz inzwischen verschoben hat.
 ## Dauerhaftes Prüfziel starten
 
 Das [mitgelieferte Beispiel](../config/workspace-goal/runtime.json)

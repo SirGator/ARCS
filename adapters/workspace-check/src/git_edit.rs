@@ -1,5 +1,8 @@
 //! Version a named file replacement and publish it through an atomic local Git ref update.
 mod repository;
+mod snapshot;
+
+pub(crate) use repository::TemporaryDirectory;
 
 use repository::Git;
 use std::path::Path;
@@ -73,6 +76,26 @@ impl EditProfile {
             return Err("workspace edit reference must point to a commit".into());
         }
         Ok(())
+    }
+
+    pub(crate) fn snapshot(
+        &self,
+        workspace: &Path,
+        revision: &str,
+    ) -> Result<TemporaryDirectory, AdapterError> {
+        let git = Git { workspace };
+        let tip = git.revision(&self.reference).map_err(unavailable)?;
+        if revision.len() != tip.len()
+            || !git
+                .text(&["cat-file", "-t", revision], None)
+                .is_ok_and(|kind| kind == "commit")
+            || !git.contains(&tip, revision).map_err(unavailable)?
+        {
+            return Err(AdapterError::rejected(
+                "workspace check revision must be a commit reachable from the configured ref",
+            ));
+        }
+        snapshot::export(&git, revision)
     }
 
     pub(crate) fn execute(
@@ -274,7 +297,7 @@ fn segment(value: &str) -> bool {
 fn editable_path(path: &str) -> bool {
     path.len() <= 256 && path.split('/').all(segment)
 }
-fn object_id(value: &str) -> bool {
+pub(crate) fn object_id(value: &str) -> bool {
     matches!(value.len(), 40 | 64)
         && value
             .bytes()
