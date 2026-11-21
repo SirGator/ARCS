@@ -1,0 +1,18 @@
+{
+  "adapter_id": "workspace.repair.model",
+  "provider": "ollama",
+  "model": {
+    "env": "ARCS_REPAIR_MODEL",
+    "default": "qwen2.5:14b"
+  },
+  "endpoint": {
+    "env": "ARCS_REPAIR_ENDPOINT",
+    "default": "http://127.0.0.1:11434/api/chat"
+  },
+  "api_key_env": null,
+  "target_schemas": {
+    "arcs.workspace_edit_candidate.v1": "../../../../adapters/workspace-check/schemas/edit-candidate.schema.json"
+  },
+  "instructions_file": "repair-model-instructions.md",
+  "reference_policy": "context"
+}

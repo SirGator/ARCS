@@ -182,6 +182,17 @@ impl TaskRuntime {
                     "previous_revision": true,
                 });
             }
+            if config
+                .replanning
+                .as_ref()
+                .is_some_and(|policy| policy.reuse_failure_exports)
+            {
+                constraints["task_replanning"]["previous_failure_dependency"] = serde_json::json!({
+                    "step_id": "<blocked predecessor step with a failure receipt>",
+                    "payload_fields": ["<field visible in the predecessor failure receipt>"],
+                    "previous_failure": true,
+                });
+            }
             let inputs =
                 Self::replanning_inputs(input, route, &pending.context, &artifact.version_id);
             (

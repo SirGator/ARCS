@@ -29,6 +29,8 @@ pub struct DependencyBinding {
     pub sequence: u64,
     pub route_id: String,
     pub result_version_id: VersionId,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub failure_evidence: bool,
     pub context: Vec<ContextSelection>,
 }
 
@@ -209,6 +211,7 @@ fn bind_parent(
         sequence: parent.sequence,
         route_id: parent.route_id.clone(),
         result_version_id,
+        failure_evidence: false,
         context,
     }))
 }
@@ -233,8 +236,8 @@ fn parent_goal(parent: &ParentTask) -> Result<Option<GoalTask>, HostError> {
     Ok(Some(task))
 }
 
-/// Only the replacement planner can use failed receipts. A blocked parent
-/// remains blocked for both live and previous-revision dependencies.
+/// Collect evidence for replanning. The failed parent stays blocked
+/// for ordinary dependencies and completed-result reuse.
 pub(super) fn failed_goal_receipt(
     host: &Host,
     parent: &ParentTask,

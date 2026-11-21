@@ -554,6 +554,13 @@
 > Im Prozess-Test entsteht die neue Korrektur aus dem gelesenen
 > Quelltext und wird nach Freigabe auf einem neuen Commit geprüft.
 >
+> Dreiundfünfzigster Schritt gemäß v3 §4 Reason/Act, §5.2 HET-04/HET-06
+> und TEST-02. Ein Ersatzplan kann eine gebundene Fehlerquittung an
+> einen neuen Reparaturschritt weitergeben. Der Modelladapter erhält
+> den revisionsgenauen Quelltext und die Prüfdiagnose. Die Korrektur
+> und der Test des neu veröffentlichten Commits behalten ihre
+> getrennten Freigaben.
+>
 **Leitbild:** ARCS ist ein universeller Agent. Es soll sich einfach bedienen lassen, beliebige kompatible Systeme verbinden, eigenständig Probleme lösen und langfristige Aufgaben über Monate verfolgen.
 
 ## 1. Verbindliche Architekturregeln

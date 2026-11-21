@@ -20,7 +20,8 @@ impl PlanningConfig {
             || self.max_total_output_tokens == Some(0)
             || self.max_total_actions.is_some_and(|n| n > 31_000)
             || owner.goal.is_some()
-            || ![PLAN_CANDIDATE, REUSE_PLAN_CANDIDATE].contains(&owner.target_schema_id.0.as_str())
+            || ![PLAN_CANDIDATE, REUSE_PLAN_CANDIDATE, FAILURE_PLAN_CANDIDATE]
+                .contains(&owner.target_schema_id.0.as_str())
             || owner
                 .permitted_reasoner_choices()
                 .iter()
@@ -33,9 +34,17 @@ impl PlanningConfig {
             ));
         }
         if let Some(policy) = &self.replanning {
-            if policy.reuse_completed_exports && owner.target_schema_id.0 != REUSE_PLAN_CANDIDATE {
+            if policy.reuse_completed_exports
+                && ![REUSE_PLAN_CANDIDATE, FAILURE_PLAN_CANDIDATE]
+                    .contains(&owner.target_schema_id.0.as_str())
+            {
                 return Err(invalid(
-                    "reuse_completed_exports requires arcs.plan_candidate.v2",
+                    "reuse_completed_exports requires arcs.plan_candidate.v2 or v3",
+                ));
+            }
+            if policy.reuse_failure_exports && owner.target_schema_id.0 != FAILURE_PLAN_CANDIDATE {
+                return Err(invalid(
+                    "reuse_failure_exports requires arcs.plan_candidate.v3",
                 ));
             }
             let mut budget = super::budgets::PlanBudget::default();
@@ -292,18 +301,32 @@ impl PlanningConfig {
             let mut previous_dependencies = Vec::new();
             let mut previous_edges = Vec::new();
             for edge in &step.dependencies {
-                if edge.previous_revision {
-                    if !self
-                        .replanning
-                        .as_ref()
-                        .is_some_and(|policy| policy.reuse_completed_exports)
-                    {
-                        return Err(invalid(
-                            "previous_revision dependencies are not enabled for this plan",
-                        ));
+                if edge.previous_revision && edge.previous_failure {
+                    return Err(invalid(
+                        "a predecessor dependency must choose a single evidence kind",
+                    ));
+                }
+                if edge.previous_revision || edge.previous_failure {
+                    let allowed = self.replanning.as_ref().is_some_and(|policy| {
+                        if edge.previous_failure {
+                            policy.reuse_failure_exports
+                        } else {
+                            policy.reuse_completed_exports
+                        }
+                    });
+                    if !allowed {
+                        return Err(invalid(if edge.previous_failure {
+                            "previous_failure dependencies are not enabled for this plan"
+                        } else {
+                            "previous_revision dependencies are not enabled for this plan"
+                        }));
                     }
                     let previous = previous.ok_or_else(|| {
-                        invalid("previous_revision dependencies require a replacement plan")
+                        invalid(if edge.previous_failure {
+                            "previous_failure dependencies require a replacement plan"
+                        } else {
+                            "previous_revision dependencies require a replacement plan"
+                        })
                     })?;
                     let (binding, source_route) = previous_dependency(edge, previous, &templates)?;
                     previous_edges.push(TaskDependency {
@@ -365,30 +388,58 @@ fn previous_dependency(
     context: &ReplanningContext,
     templates: &HashMap<&str, &StepTemplate>,
 ) -> Result<(DependencyBinding, ReasoningRoute), HostError> {
+    let expected = if edge.previous_failure {
+        "blocked"
+    } else {
+        "ready"
+    };
     let step = context
         .steps
         .iter()
-        .find(|step| step.id == edge.step_id && step.resolution == "ready")
-        .ok_or_else(|| invalid("previous_revision must name a completed predecessor step"))?;
+        .find(|step| step.id == edge.step_id && step.resolution == expected)
+        .ok_or_else(|| {
+            invalid(if edge.previous_failure {
+                "previous_failure must name a blocked predecessor with exported failure evidence"
+            } else {
+                "previous_revision must name a completed predecessor step"
+            })
+        })?;
     let template = templates
         .get(step.template_id.as_str())
-        .ok_or_else(|| invalid("completed predecessor has no authorized template"))?;
-    let result_version_id = step
-        .result_version_id
-        .clone()
-        .ok_or_else(|| invalid("completed predecessor result reference is missing"))?;
-    if step.output_version_ids.is_empty()
+        .ok_or_else(|| invalid("predecessor has no authorized template"))?;
+    let (result_version_id, versions, fields) = if edge.previous_failure {
+        let receipt = step
+            .failure_receipt_version_id
+            .as_ref()
+            .ok_or_else(|| invalid("predecessor failure evidence was not exported"))?;
+        (
+            receipt,
+            std::slice::from_ref(receipt),
+            &template.replanning_failure_receipt_fields,
+        )
+    } else {
+        let result = step
+            .result_version_id
+            .as_ref()
+            .ok_or_else(|| invalid("completed predecessor result reference is missing"))?;
+        (
+            result,
+            step.output_version_ids.as_slice(),
+            &template.export_fields,
+        )
+    };
+    if versions.is_empty()
         || edge
             .payload_fields
             .iter()
-            .any(|field| !template.export_fields.contains(field))
+            .any(|field| !fields.contains(field))
     {
         return Err(invalid(
-            "previous_revision dependency exceeds the predecessor exports",
+            "predecessor dependency exceeds the predecessor exports",
         ));
     }
     let mut results = Vec::new();
-    for version in &step.output_version_ids {
+    for version in versions {
         let selected = context.context.iter().any(|item| {
             &item.version_id == version
                 && edge
@@ -398,7 +449,7 @@ fn previous_dependency(
         });
         if !selected {
             return Err(invalid(
-                "previous_revision dependency uses an export omitted from the replanning context",
+                "predecessor dependency uses an export omitted from the replanning context",
             ));
         }
         results.push(ContextSelection {
@@ -419,7 +470,8 @@ fn previous_dependency(
         DependencyBinding {
             sequence: step.sequence,
             route_id: source_route.id.clone(),
-            result_version_id,
+            result_version_id: result_version_id.clone(),
+            failure_evidence: edge.previous_failure,
             context: results,
         },
         source_route,

@@ -8,6 +8,7 @@ const CHECK_CANDIDATE: &str = "arcs.workspace_revision_check_candidate.v1";
 const CHECK_RECEIPT: &str = "arcs.execution_result.workspace_revision_check.v1";
 const DIAGNOSTIC_CAPABILITY: &str = "check.revision.diagnostic";
 const DIAGNOSTIC_RECEIPT: &str = "arcs.execution_result.workspace_revision_check.v2";
+const MODEL: &str = "workspace.repair.model";
 const SOURCE: &str = "arcs.workspace_source.v1";
 const TASK: &str = "arcs.task.workspace_repair.v1";
 const REF: &str = "refs/arcs/repair";
@@ -182,7 +183,17 @@ fn advance<T>(
     now: u64,
     ready: impl Fn(&TaskRuntime) -> Option<T>,
 ) -> T {
-    let deadline = Instant::now() + Duration::from_secs(25);
+    advance_within(host, runtime, now, Duration::from_secs(25), ready)
+}
+
+fn advance_within<T>(
+    host: &mut Host,
+    runtime: &mut TaskRuntime,
+    now: u64,
+    timeout: Duration,
+    ready: impl Fn(&TaskRuntime) -> Option<T>,
+) -> T {
+    let deadline = Instant::now() + timeout;
     loop {
         runtime.tick_at(host, now).unwrap();
         if let Some(value) = ready(runtime) {
@@ -390,12 +401,13 @@ fn configure_retry(f: &Fixture, failure_fields: &[&str]) {
     let capability = json!({"adapter_id":"workspace.replanner","capability_id":"solution.propose"});
     let mut runtime = f.read("runtime.json");
     let entry = &mut runtime["routes"][0];
-    entry["target_schema_id"] = json!("arcs.plan_candidate.v2");
+    entry["target_schema_id"] = json!("arcs.plan_candidate.v3");
     entry["reasoner"] = capability.clone();
     entry["max_reasoning_requests"] = json!(10);
     entry["plan"]["max_total_runtime_ms"] = json!(12_000);
     entry["plan"]["max_total_actions"] = json!(4);
-    entry["plan"]["replanning"] = json!({"max_revisions":1,"reuse_completed_exports":true});
+    entry["plan"]["replanning"] =
+        json!({"max_revisions":1,"reuse_completed_exports":true,"reuse_failure_exports":true});
     let templates = entry["plan"]["templates"].as_array_mut().unwrap();
     for template in templates.iter_mut() {
         template["route"]["goal"]["exclusive_resources"] = json!(["workspace-repair"]);
@@ -419,7 +431,7 @@ fn configure_retry(f: &Fixture, failure_fields: &[&str]) {
         "query":{
             "schema_id":"arcs.workspace_source_request.v1",
             "payload":{"revision":base,"path":"calculator.py"},
-            "from_dependencies":{"revision":{"schema_id":EDIT_RECEIPT,"pointer":"/result/commit"}}
+            "from_dependencies":{"revision":{"schema_id":DIAGNOSTIC_RECEIPT,"pointer":"/result/revision"}}
         }
     }]);
     templates.extend(retries);
@@ -455,6 +467,46 @@ fn run_failed_revision(host: &mut Host, runtime: &mut TaskRuntime) -> GoalTask {
 fn a_failed_revision_and_its_frozen_source_drive_the_repair_and_recheck() {
     let f = Fixture::new();
     configure_retry(&f, &["result", "diagnostics"]);
+    verify_repair(&f, false);
+}
+
+#[test]
+#[ignore = "requires the sibling llm-api and an available local Ollama model"]
+fn an_external_model_repairs_the_pinned_source_using_the_failed_check() {
+    let f = Fixture::new();
+    configure_retry(&f, &["result", "diagnostics"]);
+    configure_repair_model(&f);
+    verify_repair(&f, true);
+}
+
+fn configure_repair_model(f: &Fixture) {
+    let project = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let config = project.join("config/workspace-goal");
+    let program = project.join("../../../llm-api/arcs-llm-api");
+    let mut host = f.read("host.json");
+    host["adapters"].as_array_mut().unwrap().push(json!({
+        "program":program,"profile":config.join("repair-model-profile.json"),
+        "args":[{"path":"model.sqlite"}],"grant_file":config.join("repair-model-grant.json"),
+        "inherit_env":["ARCS_REPAIR_MODEL","ARCS_REPAIR_ENDPOINT"],"timeout_ms":245_000
+    }));
+    f.write("host.json", host);
+
+    let mut runtime = f.read("runtime.json");
+    let plan = &mut runtime["routes"][0]["plan"];
+    plan["max_total_runtime_ms"] = json!(260_000);
+    let edit = &mut plan["templates"][2]["route"];
+    edit["reasoner"] = json!({"adapter_id":MODEL,"capability_id":"solution.propose"});
+    edit["method"] = json!("llm");
+    edit["payload_fields"] = json!(["check", "path"]);
+    edit["budget"]["max_iterations"] = Value::Null;
+    edit["budget"]["max_output_tokens"] = json!(384);
+    edit["budget"]["max_runtime_ms"] = json!(240_000);
+    edit["objective"] =
+        json!("Correct the failed named test using the supplied file revision and test receipt.");
+    f.write("runtime.json", runtime);
+}
+
+fn verify_repair(f: &Fixture, live_model: bool) {
     let (mut host, mut runtime) = f.open();
     let failed = run_failed_revision(&mut host, &mut runtime);
     let failed_receipt = failed.execution.as_ref().unwrap();
@@ -466,7 +518,27 @@ fn a_failed_revision_and_its_frozen_source_drive_the_repair_and_recheck() {
     drop((host, runtime));
 
     let (mut host, mut runtime) = f.open();
-    let retry = awaiting_action(&mut host, &mut runtime, NOW + MONTH, "p1.r1.edit");
+    let retry = advance_within(
+        &mut host,
+        &mut runtime,
+        NOW + MONTH,
+        Duration::from_secs(if live_model { 255 } else { 25 }),
+        |runtime| {
+            let report = runtime.report(0).unwrap();
+            assert_eq!(
+                report.stopped_plans, 0,
+                "repair stopped before approval: {:?}",
+                report.goals
+            );
+            runtime
+                .goals_after(0, 10)
+                .unwrap()
+                .into_iter()
+                .find(|goal| {
+                    goal.route_id == "p1.r1.edit" && goal.state == GoalState::AwaitingApproval
+                })
+        },
+    );
     let source = host.store().get(&retry.before[0]).unwrap().unwrap();
     assert_eq!(source.schema_id.0, SOURCE);
     assert_eq!(source.payload["revision"], bad_commit);
@@ -481,19 +553,58 @@ fn a_failed_revision_and_its_frozen_source_drive_the_repair_and_recheck() {
         .into_iter()
         .find(|receipt| receipt.route_id == "p1.r1.edit")
         .unwrap();
-    let edit_receipt = &binding.bindings[0].context[0].version_id;
+    let failure = binding
+        .bindings
+        .iter()
+        .find(|binding| binding.failure_evidence)
+        .unwrap();
+    assert_eq!(failure.result_version_id, *failed_receipt);
+    assert_eq!(failure.context[0].version_id, *failed_receipt);
+    assert_eq!(failure.context[0].payload_fields, ["result", "diagnostics"]);
+    let proposed = host
+        .store()
+        .get(retry.candidate.as_ref().unwrap())
+        .unwrap()
+        .unwrap();
+    let parents = &proposed.provenance.as_ref().unwrap().parents;
+    assert!(parents.contains(&failed_receipt.0) && parents.contains(&source.version_id.0));
     assert!(
         ArtifactRelations::new(host.store())
             .outgoing(&query)
             .unwrap()
             .iter()
-            .any(|edge| &edge.to == edit_receipt && edge.kind == relation_kinds::based_on())
+            .any(|edge| &edge.to == failed_receipt && edge.kind == relation_kinds::based_on())
     );
-    assert_eq!(
-        result(&host, retry.candidate.as_ref())["replacement"],
-        FIXED
-    );
+    let replacement = proposed.payload["replacement"].as_str().unwrap();
+    if live_model {
+        assert_eq!(proposed.created_by.id, MODEL);
+        assert_eq!(proposed.created_by.actor_type, ActorType::Model);
+        // Automatic fixture approval is restricted to the expected calculator code.
+        let compact: String = replacement.split_whitespace().collect();
+        assert_eq!(compact, "defadd(left,right):returnleft+right");
+        let model = rusqlite::Connection::open(f.path("model.sqlite")).unwrap();
+        let recorded: String = model
+            .query_row(
+                "SELECT response FROM invocations WHERE state='complete'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let response: Value = serde_json::from_str(&recorded).unwrap();
+        let trace = &response["trace"];
+        let tokens = trace["output_tokens"].as_u64().unwrap();
+        assert!(tokens > 0 && tokens <= 384);
+        println!("Model correction generated with {tokens} output tokens");
+    } else {
+        assert_eq!(replacement, FIXED);
+    }
     let plan = runtime.plans_after(0, 1).unwrap().remove(0);
+    let snapshot = host
+        .store()
+        .get(plan.plan_version_id.as_ref().unwrap())
+        .unwrap()
+        .unwrap();
+    assert_eq!(snapshot.schema_id.0, "arcs.plan.v4");
     let context_id = plan.revisions[1].context_version_id.as_ref().unwrap();
     let context = host.store().get(context_id).unwrap().unwrap();
     assert_eq!(context.schema_id.0, "arcs.plan_replanning.v2");
@@ -686,6 +797,46 @@ fn a_source_query_cannot_read_fields_outside_the_dependency_export() {
         "SELECT count(*) FROM artifact_versions WHERE schema_id='arcs.workspace_source_request.v1'",
         [], |row| row.get::<_, i64>(0)
     ).unwrap(), 0);
+    assert_eq!(f.checks(), 1);
+    assert_eq!(
+        git(&f, &["rev-parse", REF]).trim(),
+        result(&host, failed.execution.as_ref())["result"]["revision"]
+            .as_str()
+            .unwrap()
+    );
+    host.shutdown().unwrap();
+}
+
+#[test]
+fn failure_evidence_needs_separate_authorization_for_the_replacement_step() {
+    let f = Fixture::new();
+    configure_retry(&f, &["result", "diagnostics"]);
+    let mut config = f.read("runtime.json");
+    config["routes"][0]["plan"]["replanning"]["reuse_failure_exports"] = json!(false);
+    f.write("runtime.json", config);
+    let (mut host, mut runtime) = f.open();
+    let failed = run_failed_revision(&mut host, &mut runtime);
+    let stopped = advance(&mut host, &mut runtime, NOW, |runtime| {
+        runtime
+            .plans_after(0, 1)
+            .unwrap()
+            .pop()
+            .filter(|plan| matches!(plan.state, PlanState::Blocked | PlanState::Rejected))
+    });
+    assert!(
+        stopped
+            .detail
+            .unwrap()
+            .contains("previous_failure dependencies are not enabled")
+    );
+    assert_eq!(stopped.revisions.len(), 1);
+    assert!(
+        runtime
+            .goals_after(0, 10)
+            .unwrap()
+            .iter()
+            .all(|goal| !goal.route_id.starts_with("p1.r1."))
+    );
     assert_eq!(f.checks(), 1);
     assert_eq!(
         git(&f, &["rev-parse", REF]).trim(),

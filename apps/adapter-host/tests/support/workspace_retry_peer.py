@@ -4,7 +4,7 @@ import json
 import sqlite3
 import sys
 
-PLAN = "arcs.plan_candidate.v2"
+PLAN = "arcs.plan_candidate.v3"
 EDIT = "arcs.workspace_edit_candidate.v1"
 CHECK = "arcs.workspace_revision_check_candidate.v1"
 EDIT_RECEIPT = "arcs.execution_result.workspace_edit.v1"
@@ -22,7 +22,8 @@ def context(inv, version, schema):
 
 
 def dependency(inv):
-    binding, = inv["constraints"]["task_dependencies"]
+    binding, = (item for item in inv["constraints"]["task_dependencies"]
+                if not item.get("failure_evidence"))
     selection, = binding["context"]
     return context(inv, selection["version_id"], EDIT_RECEIPT)
 
@@ -59,21 +60,25 @@ def propose(inv):
             assert result["revision"] == applied["commit"]
             payload = {"steps": [
                 {"id": "edit", "template": "retry-edit", "dependencies": [
-                    {"step_id": "edit", "previous_revision": True, "payload_fields": ["result"]}
+                    {"step_id": "check", "previous_failure": True, "payload_fields": ["result", "diagnostics"]},
                 ]},
                 {"id": "check", "template": "retry-check",
                  "dependencies": [{"step_id": "edit", "payload_fields": ["result"]}]},
             ]}
     else:
         required = inv["allowed_capabilities"]
-        result = dependency(inv)["payload"]["result"]
-        assert result["status"] == "applied"
         task_id = inv["constraints"]["goal_runtime"]["task_version_id"]
         task = context(inv, task_id, "arcs.task.workspace_repair.v1")["payload"]
         if target == EDIT:
+            binding, = (item for item in inv["constraints"]["task_dependencies"]
+                        if item.get("failure_evidence"))
+            failure, = binding["context"]
+            receipt = context(inv, failure["version_id"], CHECK_RECEIPT)["payload"]
+            assert "AssertionError: 6 != 5" in receipt["diagnostics"]["stderr"]["text"]
             source_id = inv["constraints"]["goal_runtime"]["before"]["failed-source"]
             source = context(inv, source_id, "arcs.workspace_source.v1")["payload"]
-            assert source["revision"] == result["commit"] and source["path"] == result["path"]
+            assert source["revision"] == receipt["result"]["revision"]
+            assert source["path"] == task["path"]
             tree = ast.parse(source["text"])
             operation = tree.body[0].body[0].value
             assert tree.body[0].name == "add" and isinstance(operation.op, ast.Mult)
@@ -81,6 +86,8 @@ def propose(inv):
             payload = {"path": source["path"], "base_commit": source["revision"],
                        "replacement": ast.unparse(tree) + "\n"}
         elif target == CHECK:
+            result = dependency(inv)["payload"]["result"]
+            assert result["status"] == "applied"
             payload = {"check": task["check"], "revision": result["commit"]}
         else:
             raise AssertionError(target)

@@ -251,6 +251,33 @@ cargo test -p arcs-host --locked --offline --test workspace_goal repair::
 
 [Integrationstest und Beispielkonfiguration](../tests/workspace_goal/repair.rs)
 
+## Einen lokalen Modellvorschlag für die Reparatur prüfen
+
+Die Dateien `repair-model-profile.json`, `repair-model-grant.json`
+und `repair-model-instructions.md` unter
+`apps/adapter-host/config/workspace-goal/` beschreiben einen
+Modelladapter für `arcs.workspace_edit_candidate.v1`.
+Die reparierende Goal-Vorlage verwendet `method: "llm"`.
+Sie erhält den Quelltext über `source.read` sowie die fehlgeschlagene
+Testquittung über eine autorisierte `previous_failure`-Kante.
+Das Modell schlägt die Textänderung vor. Der Host prüft den
+Kandidaten und wartet auf die Freigabe.
+
+Der Prozess-Test verwendet die bereits installierte lokale
+Ollama-Instanz und den externen Adapter aus dem Nachbarprojekt
+`llm-api`. Setze bei Bedarf `ARCS_REPAIR_ENDPOINT` und
+`ARCS_REPAIR_MODEL`. Der Test erstellt ein isoliertes Rechnerprojekt,
+simuliert 30 Tage und begrenzt seine Testfreigaben auf die erwartete
+Rechnerkorrektur. Die Prüfung startet über denselben Act-Pfad wie
+ein normaler freigegebener Auftrag.
+
+```bash
+cargo test -p arcs-host --locked --offline --test workspace_goal \
+  an_external_model_repairs -- --ignored --nocapture
+```
+
+[Konfiguration für gespeicherte Fehlerbelege](plan-replanning.md#fehlerbelege-an-einen-schritt-des-ersatzplans-weitergeben)
+
 ## Dauerhaftes Prüfziel starten
 
 Das [mitgelieferte Beispiel](../config/workspace-goal/runtime.json)

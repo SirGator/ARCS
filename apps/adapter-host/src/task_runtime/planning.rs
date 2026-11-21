@@ -18,9 +18,11 @@ use serde::{Deserialize, Serialize};
 
 pub const PLAN_CANDIDATE: &str = "arcs.plan_candidate.v1";
 pub const REUSE_PLAN_CANDIDATE: &str = "arcs.plan_candidate.v2";
+pub const FAILURE_PLAN_CANDIDATE: &str = "arcs.plan_candidate.v3";
 pub const ACCEPTED_PLAN: &str = "arcs.plan.v1";
 pub const VERSIONED_PLAN: &str = "arcs.plan.v2";
 pub const PLAN_WITH_PREVIOUS_DEPENDENCIES: &str = "arcs.plan.v3";
+pub const PLAN_WITH_FAILURE_DEPENDENCIES: &str = "arcs.plan.v4";
 pub const REPLANNING_CONTEXT_WITH_FAILURES: &str = "arcs.plan_replanning.v2";
 pub const REPLANNING_CONTEXT: &str = "arcs.plan_replanning.v1";
 
@@ -30,6 +32,8 @@ pub struct ReplanningPolicy {
     pub max_revisions: u8,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub reuse_completed_exports: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub reuse_failure_exports: bool,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -131,6 +135,8 @@ pub struct StepDependency {
     pub payload_fields: Vec<String>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub previous_revision: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub previous_failure: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -124,11 +124,11 @@ impl TaskRuntime {
         }
         let proposal: PlanProposal =
             serde_json::from_value(candidate.payload).map_err(|e| invalid(e.to_string()))?;
-        let previous = if proposal
-            .steps
-            .iter()
-            .any(|step| step.dependencies.iter().any(|edge| edge.previous_revision))
-        {
+        let previous = if proposal.steps.iter().any(|step| {
+            step.dependencies
+                .iter()
+                .any(|edge| edge.previous_revision || edge.previous_failure)
+        }) {
             let meta = plan
                 .revision
                 .as_ref()

@@ -87,15 +87,15 @@ Wenn mindestens eine solche Quittung aufgenommen wird, lautet das
 Rückblickschema `arcs.plan_replanning.v2`. Das Feld
 `steps[].failure_receipt_version_id` identifiziert jeweils die
 Quittung in den ausgewählten Eingaben. Der Schritt bleibt blockiert.
-Seine Fehlerquittung ist nur Kontext für den Ersatzplaner. Eine
-`previous_revision`-Kante verlangt weiterhin einen erfolgreichen
+Eine `previous_revision`-Kante verlangt weiterhin einen erfolgreichen
 Vorgängerschritt. Die Runtime prüft den gespeicherten Rückblick bei
 Wiederaufnahme vor der Veröffentlichung und Zustellung.
 
 ## Fertige Teilergebnisse übernehmen
 
 Die Eingangsroute setzt `target_schema_id` auf `arcs.plan_candidate.v2`
-und verwendet einen Reasoner, der dieses Schema ausgibt. In
+oder `arcs.plan_candidate.v3` und verwendet einen Reasoner, der dieses
+Schema ausgibt. In
 `plan.replanning` aktiviert `reuse_completed_exports: true` die Auswahl
 von Vorgängerexporten. Die Einstellung gehört zur gespeicherten
 Runtime-Definition. Die Ersatzplanung erhält in `task_replanning.previous_step_dependency` ein
@@ -124,6 +124,30 @@ ergänzt sie, sobald die aktuellen Quellen fertig sind. Das gemeinsame
 Artifact-Netz verknüpft den Ersatzplan mit den übernommenen Versionen.
 Der alte Schritt wird dabei kein zweites Mal ausgeführt. Für neue Aktionen
 gelten weiterhin deren eigene Freigaben und Ressourcenzuweisungen.
+
+## Fehlerbelege an einen Schritt des Ersatzplans weitergeben
+
+Mit dem Vorschlagsschema `arcs.plan_candidate.v3` kann der Betreiber
+zusätzlich `plan.replanning.reuse_failure_exports` aktivieren. Damit
+darf der Ersatzplaner einen bereits eingefrorenen Fehlerbeleg an
+einen neuen Schritt binden.
+
+```json
+{
+  "step_id": "check",
+  "previous_failure": true,
+  "payload_fields": ["result", "diagnostics"]
+}
+```
+
+Die Felder müssen im Fehlerexport der Vorgängervorlage und im
+eingefrorenen Rückblick enthalten sein. Die Quelle muss ein
+blockierter Schritt der direkten Vorgängergeneration mit genau
+dieser Quittung sein. Die Kante wird im Ersatzplan `arcs.plan.v4`
+als `failure_evidence` festgehalten. Ein neuer Schritt kann diesen
+Beleg zusammen mit gewöhnlichen Abhängigkeiten und erfolgreichen
+Vorgängerexporten verwenden. Die bestehenden Regeln für Freigaben,
+Provenienz und Budgets gelten auch für diesen Schritt.
 
 ## Budgets, Ressourcen und Recovery
 

@@ -32,6 +32,10 @@ impl TaskRuntime {
                 "plan.record_with_previous_dependencies",
                 PLAN_WITH_PREVIOUS_DEPENDENCIES,
             ),
+            (
+                "plan.record_with_failure_dependencies",
+                PLAN_WITH_FAILURE_DEPENDENCIES,
+            ),
             ("plan.replanning", REPLANNING_CONTEXT),
             (
                 "plan.replanning_with_failures",
@@ -107,16 +111,11 @@ impl TaskRuntime {
         );
         let artifact = self.record_plan_artifact(
             host,
-            if plan
-                .steps
-                .iter()
-                .any(|step| !step.previous_dependencies.is_empty())
-            {
-                "plan.record_with_previous_dependencies"
-            } else if plan.revision.is_some() {
-                "plan.record_versioned"
-            } else {
-                "plan.record"
+            match plan_schema(plan) {
+                PLAN_WITH_FAILURE_DEPENDENCIES => "plan.record_with_failure_dependencies",
+                PLAN_WITH_PREVIOUS_DEPENDENCIES => "plan.record_with_previous_dependencies",
+                VERSIONED_PLAN => "plan.record_versioned",
+                _ => "plan.record",
             },
             &plan.input_version_id,
             reference,
@@ -244,6 +243,7 @@ impl TaskRuntime {
             ACCEPTED_PLAN,
             VERSIONED_PLAN,
             PLAN_WITH_PREVIOUS_DEPENDENCIES,
+            PLAN_WITH_FAILURE_DEPENDENCIES,
         ]
         .contains(&artifact.schema_id.0.as_str())
             || artifact.created_by.id != PLAN_ID
@@ -251,19 +251,30 @@ impl TaskRuntime {
         {
             return Err(invalid("untrusted accepted plan artifact"));
         }
-        let versioned = artifact.schema_id.0 != ACCEPTED_PLAN;
-        let reuses_outputs = artifact.schema_id.0 == PLAN_WITH_PREVIOUS_DEPENDENCIES;
         let plan: AcceptedPlan = serde_json::from_value(artifact.payload)
             .map_err(|e| invalid(format!("invalid accepted plan snapshot: {e}")))?;
-        if versioned != plan.revision.is_some()
-            || reuses_outputs
-                != plan
-                    .steps
-                    .iter()
-                    .any(|step| !step.previous_dependencies.is_empty())
-        {
+        if artifact.schema_id.0 != plan_schema(&plan) {
             return Err(invalid("plan schema and snapshot disagree"));
         }
         Ok(plan)
+    }
+}
+
+fn plan_schema(plan: &AcceptedPlan) -> &'static str {
+    let mut bindings = plan
+        .steps
+        .iter()
+        .flat_map(|step| &step.previous_dependencies)
+        .peekable();
+    if bindings.peek().is_some() {
+        if bindings.any(|binding| binding.failure_evidence) {
+            PLAN_WITH_FAILURE_DEPENDENCIES
+        } else {
+            PLAN_WITH_PREVIOUS_DEPENDENCIES
+        }
+    } else if plan.revision.is_some() {
+        VERSIONED_PLAN
+    } else {
+        ACCEPTED_PLAN
     }
 }
