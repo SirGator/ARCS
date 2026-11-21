@@ -70,6 +70,33 @@ Bei einem Wiederholungsaufruf verwendet der Adapter die gespeicherte
 Quittung oder meldet `interrupted`. Ein neuer Prüflauf braucht einen neuen
 freigegebenen Auftrag.
 
+## Dauerhaftes Prüfziel starten
+
+Das [mitgelieferte Beispiel](../config/workspace-goal/runtime.json)
+plant einen echten Python-Unittest für einen kleinen Rechner. Sein
+Regel-Reasoner bewertet die aktuelle Quittung. Die Route verlangt eine
+menschliche Freigabe und ein Erfolgsschema, das den vorgesehenen Test,
+`passed` und Exitcode 0 voraussetzt.
+
+```bash
+cargo build --workspace --bins --locked --offline
+arcs_workspace_goal=apps/adapter-host/config/workspace-goal
+./target/debug/arcs-host --config "$arcs_workspace_goal/host.json" \
+  --runtime "$arcs_workspace_goal/runtime.json" --ticks 40
+```
+
+Ein frischer Lauf zeigt unter `goals` die Sequenz, den aktuellen
+`candidate` und den Status `awaiting_approval`. Die [Goal-Review-CLI](goal-runtime.md)
+speichert eine Freigabe für dieses Paar. Ein weiterer Start mit
+`--ticks 40` führt die Prüfung aus. Alternativ lassen sich Host und
+Runtime im Kontrollpanel laden und der Kandidat dort freigeben.
+
+Das Journal erhält die Aufgabe über Neustarts. Nach einem fehlgeschlagenen
+Test wartet die Beispielroute bis zum nächsten Versuch. Die nächste
+Runde verlangt eine neue Freigabe. Die Anwendung oder der Betreiber
+produziert die Codekorrektur zwischen den Prüfrunden.
+
 ```bash
 cargo test -p arcs-workspace-check --locked --offline
+cargo test -p arcs-host --test workspace_goal --locked --offline
 ```

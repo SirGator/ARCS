@@ -1,0 +1,15 @@
+{
+  "adapter_id": "workspace.input",
+  "capability_id": "task.submit",
+  "schema_id": "arcs.task.workspace_check.v1",
+  "events": [
+    {
+      "id": "unit-1",
+      "subject": "calculator",
+      "reference": "workspace:calculator:1",
+      "payload": {
+        "check": "unit"
+      }
+    }
+  ]
+}

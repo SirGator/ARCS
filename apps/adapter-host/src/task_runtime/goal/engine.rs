@@ -287,7 +287,11 @@ impl TaskRuntime {
                     .ok_or_else(|| invalid("missing committed execution"))?;
                 task.execution = Some(execution);
                 task.wait_ticks = 0;
-                task.state = GoalState::Observing;
+                task.state = if config.sources.is_empty() {
+                    GoalState::Assessing
+                } else {
+                    GoalState::Observing
+                };
             }
             GoalState::Assessing => {
                 let candidate = load(
@@ -355,7 +359,7 @@ impl TaskRuntime {
                     let allowed = reasoning_context_versions(host, &result)?;
                     validate_assessment_evidence(&verdict, &allowed, &task.after)?;
                     task.assessment = Some(artifact.version_id.clone());
-                    task.outcome = Some(self.record_goal_outcome(host, &task, &verdict)?);
+                    task.outcome = Some(self.record_goal_outcome(host, config, &task, &verdict)?);
                     task.detail = verdict.detail;
                     task.state = match (verdict.goal_status, verdict.effect) {
                         (GoalVerdict::Achieved, OutcomeVerdict::Success) => GoalState::Completed,

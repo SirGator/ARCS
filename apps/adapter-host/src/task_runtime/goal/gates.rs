@@ -433,6 +433,7 @@ impl TaskRuntime {
     pub(super) fn record_goal_outcome(
         &mut self,
         host: &Host,
+        config: &GoalConfig,
         task: &GoalTask,
         assessment: &GoalAssessment,
     ) -> Result<VersionId, HostError> {
@@ -440,6 +441,24 @@ impl TaskRuntime {
             .execution
             .as_ref()
             .ok_or_else(|| invalid("missing execution"))?;
+        if let Some(schema_id) = &config.execution_success_schema_id {
+            if !assessment.evidence_version_ids.contains(execution) {
+                return Err(invalid(
+                    "assessment must reference the current execution receipt",
+                ));
+            }
+            if assessment.effect == OutcomeVerdict::Success {
+                let receipt = load(host, execution)?;
+                host.schemas()
+                    .validate(schema_id, &receipt.payload)
+                    .map_err(|error| {
+                        invalid(format!(
+                            "execution receipt does not meet success schema {}: {error:?}",
+                            schema_id.0
+                        ))
+                    })?;
+            }
+        }
         let detail = format!("external assessment: {}", assessment.detail);
         let outcome = match host
             .store()

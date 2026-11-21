@@ -1,0 +1,14 @@
+{
+  "adapter_id": "workspace.checker",
+  "workspace": "project",
+  "checks": {
+    "unit": {
+      "program": "/usr/bin/python3",
+      "args": [
+        "-B",
+        "test_calculator.py"
+      ],
+      "timeout_ms": 2000
+    }
+  }
+}

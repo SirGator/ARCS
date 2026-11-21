@@ -1,0 +1,5 @@
+{
+  "adapter_id": "workspace.reasoner",
+  "method": "rules",
+  "scenario": "workspace_check"
+}

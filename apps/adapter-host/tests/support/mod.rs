@@ -48,6 +48,8 @@ pub fn adapter_binary(name: &str) -> PathBuf {
                 "-p",
                 "arcs-file-output",
                 "-p",
+                "arcs-workspace-check",
+                "-p",
                 "arcs-json-report",
                 "-p",
                 "arcs-json-input",

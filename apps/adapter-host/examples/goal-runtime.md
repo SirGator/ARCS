@@ -212,6 +212,19 @@ eine verspätete Freigabe für einen alten Kandidaten wird abgewiesen.
 beendet weitere Verarbeitung. Bereits ausgeführte oder vor einem Absturz
 dispatchte Aktionen werden dadurch nicht rückgängig gemacht.
 
+## Erfolg anhand eines Ausführungsbelegs
+
+Eine Goal-Route kann mit `goal.execution_success_schema_id` einen
+zusätzlichen Betreibervertrag für das aktuelle Ausführungsartefakt
+angeben. Das Assessment muss dessen genaue Version zitieren. Bei
+`effect: "success"` prüft der Host den gespeicherten Payload anhand
+des Schemas, bevor er das Outcome veröffentlicht.
+
+Eine Route mit `sources: []` benötigt dieses Schema und bewertet erst
+nach der Ausführung. Bestehende konfigurierte Quellen bleiben auch mit
+einem Erfolgsschema Pflichtbelege. Das [Softwareprüfungs-Beispiel](workspace-check.md#dauerhaftes-prüfziel-starten)
+verwendet diese Variante für den Exitstatus eines Testprogramms.
+
 ## Persistenz, Betrieb und Grenzen
 
 Das Runtimejournal speichert Zustand, Runde, Quellcursor und Artefaktreferenzen.

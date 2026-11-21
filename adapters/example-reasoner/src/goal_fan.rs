@@ -8,7 +8,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 pub const CANDIDATE: &str = "arcs.fan_candidate.v1";
-pub const ASSESSMENT: &str = "arcs.goal_assessment_candidate.v1";
+use crate::GOAL_ASSESSMENT as ASSESSMENT;
 const TASK: &str = "arcs.task.fan_goal.v1";
 const STATE: &str = "arcs.state.fan.v1";
 

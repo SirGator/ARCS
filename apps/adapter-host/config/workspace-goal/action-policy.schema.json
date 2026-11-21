@@ -1,0 +1,13 @@
+{
+  "$id": "arcs.policy_candidate.workspace_unit.v1",
+  "type": "object",
+  "properties": {
+    "check": {
+      "const": "unit"
+    }
+  },
+  "required": [
+    "check"
+  ],
+  "additionalProperties": false
+}

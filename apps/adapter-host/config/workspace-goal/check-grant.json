@@ -1,0 +1,13 @@
+{
+  "adapter_id": "workspace.checker",
+  "producer_class": "executor",
+  "enabled_capabilities": [
+    "check.run"
+  ],
+  "granted_permissions": [
+    "workspace.check"
+  ],
+  "assigned_trust": "medium",
+  "max_payload_bytes": 4096,
+  "max_external_reference_bytes": 256
+}

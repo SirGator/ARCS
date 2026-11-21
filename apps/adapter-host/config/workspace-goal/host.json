@@ -1,0 +1,47 @@
+{
+  "config_version": 1,
+  "database": "../../../../var/workspace-goal/core.sqlite",
+  "node_id": "workspace-goal",
+  "schemas": [
+    "task.schema.json",
+    "action-policy.schema.json",
+    "success-policy.schema.json",
+    "../../../../adapters/workspace-check/schemas/candidate.schema.json",
+    "../../../../adapters/workspace-check/schemas/execution.schema.json"
+  ],
+  "adapters": [
+    {
+      "program": "../../../../target/debug/arcs-json-input",
+      "profile": "input-profile.json",
+      "args": [
+        {
+          "path": "../../../../var/workspace-goal/input.sqlite"
+        }
+      ],
+      "grant_file": "input-grant.json",
+      "timeout_ms": 10000
+    },
+    {
+      "program": "../../../../target/debug/arcs-example-reasoner",
+      "profile": "reasoner-profile.json",
+      "args": [
+        {
+          "path": "../../../../var/workspace-goal/reasoner.sqlite"
+        }
+      ],
+      "grant_file": "reasoner-grant.json",
+      "timeout_ms": 10000
+    },
+    {
+      "program": "../../../../target/debug/arcs-workspace-check",
+      "profile": "check-profile.json",
+      "args": [
+        {
+          "path": "../../../../var/workspace-goal/check.sqlite"
+        }
+      ],
+      "grant_file": "check-grant.json",
+      "timeout_ms": 10000
+    }
+  ]
+}

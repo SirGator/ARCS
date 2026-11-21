@@ -1,0 +1,84 @@
+{
+  "config_version": 1,
+  "runtime_id": "workspace-goal",
+  "journal": "../../../../var/workspace-goal/runtime.sqlite",
+  "interval_ms": 100,
+  "routes": [
+    {
+      "id": "unit-check",
+      "source": {
+        "adapter_id": "workspace.input",
+        "capability_id": "task.submit"
+      },
+      "input_schema_id": "arcs.task.workspace_check.v1",
+      "payload_fields": [
+        "check"
+      ],
+      "reasoner": {
+        "adapter_id": "workspace.reasoner",
+        "capability_id": "solution.propose"
+      },
+      "method": "rules",
+      "objective": "Choose the requested named project check.",
+      "target_schema_id": "arcs.workspace_check_candidate.v1",
+      "allowed_capabilities": [
+        {
+          "adapter_id": "workspace.checker",
+          "capability_id": "check.run"
+        }
+      ],
+      "constraints": {},
+      "budget": {
+        "max_context_items": 8,
+        "max_context_bytes": 32768,
+        "max_output_bytes": 8192,
+        "max_candidates": 1,
+        "max_runtime_ms": 1000,
+        "max_iterations": 64
+      },
+      "max_reasoning_requests": 4,
+      "goal": {
+        "max_rounds": 2,
+        "max_wait_ticks": 10,
+        "sources": [],
+        "between_rounds": {
+          "kind": "after_delay",
+          "delay_ms": 1000
+        },
+        "actions": [
+          {
+            "capability": {
+              "adapter_id": "workspace.checker",
+              "capability_id": "check.run"
+            },
+            "verification_schema_id": "arcs.policy_candidate.workspace_unit.v1"
+          }
+        ],
+        "approval": {
+          "mode": "manual"
+        },
+        "assessment": {
+          "capability": {
+            "adapter_id": "workspace.reasoner",
+            "capability_id": "solution.propose"
+          },
+          "method": "rules",
+          "objective": "Determine whether the current check receipt proves a passed test.",
+          "constraints": {},
+          "budget": {
+            "max_context_items": 8,
+            "max_context_bytes": 32768,
+            "max_output_bytes": 8192,
+            "max_candidates": 1,
+            "max_runtime_ms": 1000,
+            "max_iterations": 64
+          }
+        },
+        "execution_payload_fields": [
+          "result"
+        ],
+        "execution_success_schema_id": "arcs.policy.workspace_check_success.v1"
+      }
+    }
+  ]
+}

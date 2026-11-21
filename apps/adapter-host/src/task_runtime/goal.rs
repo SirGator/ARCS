@@ -37,6 +37,10 @@ pub struct GoalConfig {
     pub approval: GoalApproval,
     pub assessment: AssessmentReasoner,
     pub execution_payload_fields: Vec<String>,
+    /// Operator-defined predicate over the committed execution receipt.
+    /// Required when the receipt is the sole post-action evidence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_success_schema_id: Option<SchemaId>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -232,7 +236,7 @@ impl GoalConfig {
         }
         if !(1..=1000).contains(&self.max_rounds)
             || !(1..=10_000).contains(&self.max_wait_ticks)
-            || !(1..=16).contains(&self.sources.len())
+            || self.sources.len() > 16
             || !(1..=32).contains(&self.actions.len())
             || !fields(&self.execution_payload_fields)
             || route.permitted_reasoner_choices().iter().any(|choice| {
@@ -254,6 +258,16 @@ impl GoalConfig {
             return Err(invalid(
                 "goals need bounded rounds, waits, sources, actions, sufficient context and exactly one planner candidate",
             ));
+        }
+        if self.sources.is_empty()
+            && (self.execution_success_schema_id.is_none() || self.initial_assessment)
+        {
+            return Err(invalid(
+                "goals without sources require an execution success schema and assessment after execution",
+            ));
+        }
+        if let Some(schema_id) = &self.execution_success_schema_id {
+            validate_required_object(host, schema_id, "execution success")?;
         }
         if let GoalApproval::Policy { policy_id } = &self.approval
             && !identifier(policy_id)
@@ -365,22 +379,7 @@ impl GoalConfig {
                     "goal action requires a matching fenced resource in exclusive_resources",
                 ));
             }
-            let schema = host
-                .schemas()
-                .get(&action.verification_schema_id)
-                .ok_or_else(|| invalid("missing action verification schema"))?;
-            if schema.document.get("type").and_then(Value::as_str) != Some("object")
-                || schema.document.get("additionalProperties") != Some(&Value::Bool(false))
-                || schema
-                    .document
-                    .get("required")
-                    .and_then(Value::as_array)
-                    .is_none_or(Vec::is_empty)
-            {
-                return Err(invalid(
-                    "action verification requires a closed object schema with required fields",
-                ));
-            }
+            validate_required_object(host, &action.verification_schema_id, "action verification")?;
         }
         let assessment = &self.assessment;
         if !matches!(contract(&assessment.capability)?, CapabilityContract::Reason {emits} if emits.contains(&SchemaId(ASSESSMENT_SCHEMA.into())))
@@ -410,4 +409,28 @@ impl GoalConfig {
         }
         Ok(())
     }
+}
+
+fn validate_required_object(
+    host: &Host,
+    schema_id: &SchemaId,
+    purpose: &str,
+) -> Result<(), HostError> {
+    let schema = host
+        .schemas()
+        .get(schema_id)
+        .ok_or_else(|| invalid(format!("missing {purpose} schema")))?;
+    if schema.document.get("type").and_then(Value::as_str) != Some("object")
+        || schema.document.get("additionalProperties") != Some(&Value::Bool(false))
+        || schema
+            .document
+            .get("required")
+            .and_then(Value::as_array)
+            .is_none_or(Vec::is_empty)
+    {
+        return Err(invalid(format!(
+            "{purpose} requires a closed object schema with required fields"
+        )));
+    }
+    Ok(())
 }

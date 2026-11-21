@@ -503,6 +503,13 @@
 > und bringt Status, Exitcode und Auftragsbezug als Ausführungsartefakt in
 > den Core. Der Schritt stellt einen Werkzeugpfad für TEST-02 bereit.
 
+> Sechsundvierzigster Schritt gemäß v3 §8.2 LNG-05, LNG-08, LNG-09
+> und TEST-02. Eine Goal-Route kann ihren Erfolg an ein Betreiberschema
+> für das konkrete Ausführungsartefakt binden. Ein externes Assessment
+> muss diese Quittung ausdrücklich zitieren. Das Softwarebeispiel
+> verwendet den Workspace-Check-Adapter und demonstriert einen
+> fehlgeschlagenen und einen später bestandenen Test in derselben Aufgabe.
+
 **Leitbild:** ARCS ist ein universeller Agent. Es soll sich einfach bedienen lassen, beliebige kompatible Systeme verbinden, eigenständig Probleme lösen und langfristige Aufgaben über Monate verfolgen.
 
 ## 1. Verbindliche Architekturregeln

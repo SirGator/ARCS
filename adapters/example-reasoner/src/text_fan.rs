@@ -1,6 +1,6 @@
 //! Begrenzter natürlicher Texteingang als externer Rules-Reasoner. Keine
 //! Textinterpretation im Core, Host oder GUI; kein allgemeines Sprachmodell.
-use super::goal_fan::{ASSESSMENT, CANDIDATE};
+use super::{GOAL_ASSESSMENT as ASSESSMENT, goal_fan::CANDIDATE};
 use arcs_adapter_protocol::{
     ProposalSubmission, ReasoningInvocationV2, ReasoningResponseV2, ReasoningStatus,
     ReasoningTraceV2,

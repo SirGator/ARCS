@@ -9,11 +9,13 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 const TASK: &str = "arcs.task.nearest.v1";
 const CANDIDATE: &str = "arcs.solution_candidate.nearest.v1";
+const GOAL_ASSESSMENT: &str = "arcs.goal_assessment_candidate.v1";
 mod goal_fan;
 mod plan_fan;
 mod plan_nearest;
 mod sum_candidates;
 mod text_fan;
+mod workspace_check;
 #[derive(Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum Scenario {
@@ -24,6 +26,7 @@ enum Scenario {
     SumCandidates,
     PlanNearest,
     PlanFan,
+    WorkspaceCheck,
 }
 impl Scenario {
     fn is_nearest(&self) -> bool {
@@ -73,12 +76,17 @@ impl Adapter for Reasoner {
                         vec![SchemaId(plan_nearest::CANDIDATE.into())]
                     } else if matches!(self.profile.scenario, Scenario::SumCandidates) {
                         vec![SchemaId(sum_candidates::CANDIDATE.into())]
+                    } else if matches!(self.profile.scenario, Scenario::WorkspaceCheck) {
+                        vec![
+                            SchemaId(workspace_check::CANDIDATE.into()),
+                            SchemaId(GOAL_ASSESSMENT.into()),
+                        ]
                     } else if self.profile.scenario.is_nearest() {
                         vec![SchemaId(CANDIDATE.into())]
                     } else {
                         vec![
                             SchemaId(goal_fan::CANDIDATE.into()),
-                            SchemaId(goal_fan::ASSESSMENT.into()),
+                            SchemaId(GOAL_ASSESSMENT.into()),
                         ]
                     },
                 },
@@ -118,6 +126,8 @@ impl Adapter for Reasoner {
             plan_fan::reason(&invocation)?
         } else if matches!(self.profile.scenario, Scenario::SumCandidates) {
             sum_candidates::reason(&invocation)?
+        } else if matches!(self.profile.scenario, Scenario::WorkspaceCheck) {
+            workspace_check::reason(&invocation)?
         } else if matches!(self.profile.scenario, Scenario::TextFanGoal) {
             text_fan::reason(&invocation)?
         } else if matches!(self.profile.scenario, Scenario::FanGoal) {
