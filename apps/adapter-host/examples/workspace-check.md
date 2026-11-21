@@ -181,6 +181,38 @@ für die freigegebenen Empfänger bestimmt ist.
 
 [Konfiguration der Neuplanung](plan-replanning.md#geprüfte-fehlerquittungen-für-den-ersatzplaner)
 
+## Quelltext einer Revision abrufen
+
+Ein optionaler `source`-Block im Adapterprofil gibt einen lokalen
+Git-Bereich für die Request-Capability `source.read` frei.
+
+```json
+{
+  "reference": "refs/arcs/review",
+  "files": ["calculator.py"]
+}
+```
+
+Lade `source-request.schema.json` und `source.schema.json` in den Host
+und autorisiere `source.read` mit `workspace.source_read`.
+Setze im Grant `ingress_source_kind` auf `file`. Die Fähigkeit kann allein oder zusammen mit den Prüf- und Edit-Fähigkeiten
+angeboten werden. Eine vorhandene gebundene Installation benötigt
+für das zusätzliche Profil eine neue Adapter-ID und ein neues Journal.
+
+Der Request nennt `revision` und `path`. Der vollständige Commit muss
+beim ersten Abruf über die konfigurierte lokale Referenz erreichbar
+sein. Der Pfad muss in `source.files` stehen und auf eine reguläre
+UTF-8-Textdatei mit höchstens 32 KiB zeigen. Das Ergebnis enthält
+`revision`, `path` und den exakten `text` aus dem Git-Blob. Für
+die serialisierte Antwort gilt zusätzlich der Byte-Vertrag des Hosts.
+Bei Wiederaufnahme bekommt der Core dieselbe gespeicherte
+Antwort, auch wenn die Referenz inzwischen weitergezogen ist.
+
+Ein Reparatur-Goal kann den Commit eines freigegebenen Vorgängers
+in den Request übernehmen. Der Reasoner erhält so den Quelltext
+des fehlgeschlagenen Stands als Version im Artifact-Netz.
+[Konfiguration der Request-Bindung](goal-runtime.md#request-felder-aus-gebundenen-vorgängerartefakten)
+
 ## Korrektur und Prüfung in einem Plan verbinden
 
 Der Rules-Reasoner bietet mit dem Profil `scenario: "workspace_repair"`

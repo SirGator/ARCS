@@ -8,6 +8,7 @@ const CHECK_CANDIDATE: &str = "arcs.workspace_revision_check_candidate.v1";
 const CHECK_RECEIPT: &str = "arcs.execution_result.workspace_revision_check.v1";
 const DIAGNOSTIC_CAPABILITY: &str = "check.revision.diagnostic";
 const DIAGNOSTIC_RECEIPT: &str = "arcs.execution_result.workspace_revision_check.v2";
+const SOURCE: &str = "arcs.workspace_source.v1";
 const TASK: &str = "arcs.task.workspace_repair.v1";
 const REF: &str = "refs/arcs/repair";
 const BROKEN: &str = "def add(left, right):\n    return left - right\n";
@@ -339,7 +340,7 @@ fn a_plan_cannot_request_a_receipt_field_outside_the_template_exports() {
 }
 
 fn configure_retry(f: &Fixture, failure_fields: &[&str]) {
-    configure(f, "result");
+    let base = configure(f, "result");
     let mut input = f.read("input-profile.json");
     input["events"][0]["payload"]["replacement"] =
         json!("def add(left, right):\n    return left * right\n");
@@ -350,14 +351,19 @@ fn configure_retry(f: &Fixture, failure_fields: &[&str]) {
         include_str!("../support/workspace_retry_peer.py"),
     )
     .unwrap();
-    f.write("retry.json", json!({"replacement":FIXED}));
     let mut checker = f.read("check-profile.json");
     checker["diagnostic_revision_checks"] = json!(["unit"]);
+    checker["source"] = json!({"reference":REF,"files":["calculator.py"]});
     f.write("check-profile.json", checker);
     let mut check_grant = f.read("check-grant.json");
-    check_grant["enabled_capabilities"] = json!(["edit.apply", DIAGNOSTIC_CAPABILITY]);
-    check_grant["granted_permissions"] =
-        json!(["workspace.edit", "workspace.check_revision_diagnostics"]);
+    check_grant["ingress_source_kind"] = json!("file");
+    check_grant["enabled_capabilities"] =
+        json!(["edit.apply", DIAGNOSTIC_CAPABILITY, "source.read"]);
+    check_grant["granted_permissions"] = json!([
+        "workspace.edit",
+        "workspace.check_revision_diagnostics",
+        "workspace.source_read"
+    ]);
     f.write("check-grant.json", check_grant);
     let mut grant = f.read("reasoner-grant.json");
     grant["adapter_id"] = json!("workspace.replanner");
@@ -368,8 +374,15 @@ fn configure_retry(f: &Fixture, failure_fields: &[&str]) {
             "../../adapters/workspace-check/schemas/revision-diagnostic-execution.schema.json"
         )
     ));
+    for schema in ["source-request.schema.json", "source.schema.json"] {
+        host["schemas"].as_array_mut().unwrap().push(json!(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../adapters/workspace-check/schemas")
+                .join(schema)
+        ));
+    }
     host["adapters"].as_array_mut().unwrap().push(json!({
-        "program":"/usr/bin/python3","args":[{"path":"retry.py"},{"path":"retry.json"}],
+        "program":"/usr/bin/python3","args":[{"path":"retry.py"},{"path":"retry.sqlite"}],
         "grant_file":"retry-grant.json","timeout_ms":10000
     }));
     f.write("host.json", host);
@@ -400,6 +413,15 @@ fn configure_retry(f: &Fixture, failure_fields: &[&str]) {
         template["route"]["id"] = json!(name);
         template["route"]["reasoner"] = capability.clone();
     }
+    retries[0]["route"]["goal"]["sources"] = json!([{
+        "id":"failed-source","capability":{"adapter_id":"workspace.checker","capability_id":"source.read"},
+        "schema_id":SOURCE,"payload_fields":["revision","path","text"],
+        "query":{
+            "schema_id":"arcs.workspace_source_request.v1",
+            "payload":{"revision":base,"path":"calculator.py"},
+            "from_dependencies":{"revision":{"schema_id":EDIT_RECEIPT,"pointer":"/result/commit"}}
+        }
+    }]);
     templates.extend(retries);
     f.write("runtime.json", runtime);
 }
@@ -430,7 +452,7 @@ fn run_failed_revision(host: &mut Host, runtime: &mut TaskRuntime) -> GoalTask {
 }
 
 #[test]
-fn a_failed_revision_receipt_drives_a_replacement_plan_that_repairs_and_rechecks_the_code() {
+fn a_failed_revision_and_its_frozen_source_drive_the_repair_and_recheck() {
     let f = Fixture::new();
     configure_retry(&f, &["result", "diagnostics"]);
     let (mut host, mut runtime) = f.open();
@@ -445,6 +467,32 @@ fn a_failed_revision_receipt_drives_a_replacement_plan_that_repairs_and_rechecks
 
     let (mut host, mut runtime) = f.open();
     let retry = awaiting_action(&mut host, &mut runtime, NOW + MONTH, "p1.r1.edit");
+    let source = host.store().get(&retry.before[0]).unwrap().unwrap();
+    assert_eq!(source.schema_id.0, SOURCE);
+    assert_eq!(source.payload["revision"], bad_commit);
+    assert_eq!(
+        source.payload["text"],
+        "def add(left, right):\n    return left * right\n"
+    );
+    let query = VersionId(source.provenance.unwrap().parents[0].clone());
+    let binding = runtime
+        .dependencies_after(0, 10)
+        .unwrap()
+        .into_iter()
+        .find(|receipt| receipt.route_id == "p1.r1.edit")
+        .unwrap();
+    let edit_receipt = &binding.bindings[0].context[0].version_id;
+    assert!(
+        ArtifactRelations::new(host.store())
+            .outgoing(&query)
+            .unwrap()
+            .iter()
+            .any(|edge| &edge.to == edit_receipt && edge.kind == relation_kinds::based_on())
+    );
+    assert_eq!(
+        result(&host, retry.candidate.as_ref())["replacement"],
+        FIXED
+    );
     let plan = runtime.plans_after(0, 1).unwrap().remove(0);
     let context_id = plan.revisions[1].context_version_id.as_ref().unwrap();
     let context = host.store().get(context_id).unwrap().unwrap();
@@ -597,5 +645,53 @@ fn a_restarted_replanner_rejects_receipt_fields_outside_the_frozen_scope() {
         .unwrap();
     assert_eq!(publications, 0);
     assert_eq!(f.checks(), 1);
+    host.shutdown().unwrap();
+}
+
+#[test]
+fn a_source_query_cannot_read_fields_outside_the_dependency_export() {
+    let f = Fixture::new();
+    configure_retry(&f, &["result", "diagnostics"]);
+    let mut config = f.read("runtime.json");
+    config["routes"][0]["plan"]["templates"][2]["route"]["goal"]["sources"][0]["query"]["from_dependencies"]
+        ["revision"]["pointer"] = json!("/action_version");
+    f.write("runtime.json", config);
+
+    let (mut host, mut runtime) = f.open();
+    let failed = run_failed_revision(&mut host, &mut runtime);
+    advance(&mut host, &mut runtime, NOW + MONTH, |runtime| {
+        let plan = runtime.plans_after(0, 1).unwrap().remove(0);
+        (plan.state == PlanState::Blocked).then_some(())
+    });
+    let db = rusqlite::Connection::open(f.path("check.sqlite")).unwrap();
+    assert_eq!(
+        db.query_row("SELECT count(*) FROM source_reads", [], |row| row
+            .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+    let failed_query = runtime
+        .goals_after(0, 10)
+        .unwrap()
+        .into_iter()
+        .find(|goal| goal.route_id == "p1.r1.edit")
+        .unwrap();
+    assert!(
+        failed_query
+            .detail
+            .contains("goal query dependency field is not exported")
+    );
+    let core = rusqlite::Connection::open(f.path("core.sqlite")).unwrap();
+    assert_eq!(core.query_row(
+        "SELECT count(*) FROM artifact_versions WHERE schema_id='arcs.workspace_source_request.v1'",
+        [], |row| row.get::<_, i64>(0)
+    ).unwrap(), 0);
+    assert_eq!(f.checks(), 1);
+    assert_eq!(
+        git(&f, &["rev-parse", REF]).trim(),
+        result(&host, failed.execution.as_ref())["result"]["revision"]
+            .as_str()
+            .unwrap()
+    );
     host.shutdown().unwrap();
 }

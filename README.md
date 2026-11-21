@@ -70,7 +70,8 @@ dokumentiert Slice 47. Der [Bericht zu commitgebundenen Softwareprüfungen](docs
 dokumentiert Slice 48. Der [Bericht zur Softwarekorrektur mit abhängigem Prüfschritt](docs/ZWISCHENBERICHT_2026-11-21_WORKSPACE_REPAIR_PLAN.md)
 dokumentiert Slice 49. Der [Bericht zur Neuplanung nach fehlgeschlagener Prüfung](docs/ZWISCHENBERICHT_2026-11-21_REPLANNING_FAILURE.md)
 dokumentiert Slice 50. Der [Bericht zu Diagnoseausgaben für Ersatzpläne](docs/ZWISCHENBERICHT_2026-11-21_CHECK_DIAGNOSTICS.md)
-dokumentiert Slice 51. Die Berichte vom
+dokumentiert Slice 51. Der [Bericht zum revisionsgenauen Quelltextabruf](docs/ZWISCHENBERICHT_2026-11-21_REVISION_SOURCE.md)
+dokumentiert Slice 52. Die Berichte vom
 [17. November](docs/ZWISCHENBERICHT_2026-11-17.md) und
 [16. November](docs/ZWISCHENBERICHT_2026-11-16.md) dokumentieren frühere
 Umsetzungsstände, Prüfergebnisse und offene Grenzen.

@@ -6,6 +6,7 @@ use arcs::adapters::AdapterId;
 use arcs::core::SystemClock;
 use arcs::input::{InputMessage, InputService};
 use arcs::runtime::{InvocationKind, deterministic_invocation_id};
+use arcs::store::{ArtifactRelations, relation_kinds};
 
 pub(super) enum Acquisition {
     Complete(Vec<VersionId>),
@@ -44,6 +45,7 @@ impl TaskRuntime {
                 let query_capability =
                     self.journal
                         .goal_query_capability(task.sequence, &route.id, &source.id)?;
+                let (payload, parents) = self.bind_query_payload(host, task, query)?;
                 let query = InputService::new(
                     &self.journal.operator,
                     host.schemas(),
@@ -57,13 +59,27 @@ impl TaskRuntime {
                         capability_id: query_capability,
                         external_subject: Some(task.input_version_id.0.clone()),
                         external_reference: key,
-                        payload: query.payload.clone(),
+                        payload,
                     },
                 )
                 .map_err(|source| HostError::Input {
                     request: route.id.clone(),
                     source,
                 })?;
+                let relations = ArtifactRelations::new(host.store());
+                for parent in parents {
+                    let kind = relation_kinds::based_on();
+                    if !relations
+                        .outgoing(&query.version_id)
+                        .map_err(HostError::Store)?
+                        .iter()
+                        .any(|edge| edge.to == parent && edge.kind == kind)
+                    {
+                        relations
+                            .connect(query.version_id.clone(), parent, kind)
+                            .map_err(HostError::Store)?;
+                    }
+                }
                 self.journal
                     .bind_source_request(task.sequence, task.round, &query.version_id)?;
                 let Some(artifact) = host.poll_request_version(
@@ -134,5 +150,62 @@ impl TaskRuntime {
         } else {
             Acquisition::WaitingObservations
         })
+    }
+
+    fn bind_query_payload(
+        &self,
+        host: &Host,
+        task: &GoalTask,
+        query: &GoalQuery,
+    ) -> Result<(Value, Vec<VersionId>), HostError> {
+        let mut payload = query.payload.clone();
+        let mut parents = Vec::new();
+        if query.from_dependencies.is_empty() {
+            return Ok((payload, parents));
+        }
+        let mut selections = BTreeMap::<String, HashSet<String>>::new();
+        for item in self.journal.dependency_context(task.sequence)? {
+            selections
+                .entry(item.version_id.0)
+                .or_default()
+                .extend(item.payload_fields);
+        }
+        let evidence = selections
+            .into_iter()
+            .map(|(version, fields)| {
+                let artifact = host
+                    .store()
+                    .get(&VersionId(version))
+                    .map_err(HostError::Store)?
+                    .ok_or_else(|| invalid("goal query dependency version is missing"))?;
+                Ok((artifact, fields))
+            })
+            .collect::<Result<Vec<_>, HostError>>()?;
+        for (target, binding) in &query.from_dependencies {
+            let root = binding
+                .root_field()
+                .ok_or_else(|| invalid("invalid goal query pointer"))?;
+            let mut available = evidence.iter().filter(|(artifact, fields)| {
+                artifact.schema_id == binding.schema_id && fields.contains(root)
+            });
+            let (artifact, _) = available
+                .next()
+                .ok_or_else(|| invalid("goal query dependency field is not exported"))?;
+            if available.next().is_some() {
+                return Err(invalid("goal query dependency field is ambiguous"));
+            }
+            let value = artifact
+                .payload
+                .pointer(&binding.pointer)
+                .ok_or_else(|| invalid("goal query dependency pointer is missing"))?;
+            let slot = payload
+                .get_mut(target)
+                .ok_or_else(|| invalid("goal query target field is missing"))?;
+            *slot = value.clone();
+            if !parents.contains(&artifact.version_id) {
+                parents.push(artifact.version_id.clone());
+            }
+        }
+        Ok((payload, parents))
     }
 }

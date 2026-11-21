@@ -1,0 +1,10 @@
+{
+  "$id": "arcs.workspace_source_request.v1",
+  "type": "object",
+  "required": ["revision", "path"],
+  "properties": {
+    "revision": { "type": "string", "minLength": 40 },
+    "path": { "type": "string", "minLength": 1 }
+  },
+  "additionalProperties": false
+}

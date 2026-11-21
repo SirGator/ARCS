@@ -65,6 +65,25 @@ pub struct GoalSource {
 pub struct GoalQuery {
     pub schema_id: SchemaId,
     pub payload: Value,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub from_dependencies: BTreeMap<String, QueryField>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct QueryField {
+    pub schema_id: SchemaId,
+    pub pointer: String,
+}
+
+impl QueryField {
+    fn root_field(&self) -> Option<&str> {
+        self.pointer
+            .strip_prefix('/')?
+            .split('/')
+            .next()
+            .filter(|name| !name.is_empty() && !name.contains('~'))
+    }
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -310,6 +329,16 @@ impl GoalConfig {
                     host.schemas()
                         .validate(&query.schema_id, &query.payload)
                         .map_err(|e| invalid(format!("invalid source query: {e:?}")))?;
+                    if query.from_dependencies.len() > 16
+                        || query.from_dependencies.iter().any(|(target, binding)| {
+                            query.payload.get(target).is_none()
+                                || binding.pointer.len() > 512
+                                || binding.root_field().is_none()
+                                || host.schemas().get(&binding.schema_id).is_none()
+                        })
+                    {
+                        return Err(invalid("goal query has invalid dependency bindings"));
+                    }
                     if query.payload.to_string().len() > 60_000 {
                         return Err(invalid("goal query too large"));
                     }

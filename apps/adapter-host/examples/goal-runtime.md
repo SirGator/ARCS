@@ -141,6 +141,37 @@ exakte gespeicherte Referenz, Producer-/Capability-Bindung, ausgewähltes
 Referenzfeld, getrennte `data.read`-/`data.receive`-Grants und Mengenlimits.
 Kamera und Bildauswertung müssen dafür nicht in ARCS liegen.
 
+### Request-Felder aus gebundenen Vorgängerartefakten
+
+Eine Request-Quelle kann mit `query.from_dependencies` einzelne
+Top-Level-Felder des fest konfigurierten Request-Payloads befüllen.
+Jeder Eintrag nennt das erwartete Eingabeschema und einen JSON Pointer
+in einem bereits gebundenen Abhängigkeitsartefakt.
+
+```json
+{
+  "revision": {
+    "schema_id": "arcs.execution_result.workspace_edit.v1",
+    "pointer": "/result/commit"
+  }
+}
+```
+
+Dieser Ausschnitt ersetzt das vorhandene Feld `revision` im
+`query.payload`. Der konfigurierte Payload muss bei Start den
+Request-Vertrag erfüllen. Die Runtime prüft anschließend den
+fertigen Payload bei der Aufnahme ins Artifact-Netz. Der erste
+Pointer-Abschnitt muss ein exportiertes Top-Level-Feld ohne
+Escape-Sequenz benennen. Genau eine gebundene Artefaktversion muss
+Schema und Export erfüllen. Fehlende Werte und mehrdeutige Quellen
+blockieren den Schritt vor dem Request-Aufruf.
+
+Die Frage wird an dieselben unveränderlichen Vorgängerartefakte
+gebunden, auch wenn eine Quelle vor und nach der Aktion abgefragt wird.
+Der Request erhält eine `based_on`-Relation zur verwendeten
+Artefaktversion. Abhängigkeitsexporte und Berechtigungen der
+Request-Capability gelten weiterhin.
+
 ## Externe Wirkungs- und Zielbewertung
 
 Der Bewertungs-Reasoner emittiert `arcs.goal_assessment_candidate.v1`:

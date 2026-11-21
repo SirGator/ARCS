@@ -1,6 +1,6 @@
 """External Rules peer for the revision-aware repair process test."""
+import ast
 import json
-import pathlib
 import sqlite3
 import sys
 
@@ -12,9 +12,7 @@ CHECK_RECEIPT = "arcs.execution_result.workspace_revision_check.v2"
 CONTEXT = "arcs.plan_replanning.v2"
 ID = "workspace.replanner"
 
-profile_path = pathlib.Path(sys.argv[1])
-profile = json.loads(profile_path.read_text())
-db = sqlite3.connect(profile_path.with_suffix(".sqlite"))
+db = sqlite3.connect(sys.argv[1])
 db.execute("CREATE TABLE IF NOT EXISTS calls (id TEXT PRIMARY KEY, input TEXT, response TEXT)")
 
 
@@ -73,8 +71,15 @@ def propose(inv):
         task_id = inv["constraints"]["goal_runtime"]["task_version_id"]
         task = context(inv, task_id, "arcs.task.workspace_repair.v1")["payload"]
         if target == EDIT:
-            payload = {"path": result["path"], "base_commit": result["commit"],
-                       "replacement": profile["replacement"]}
+            source_id = inv["constraints"]["goal_runtime"]["before"]["failed-source"]
+            source = context(inv, source_id, "arcs.workspace_source.v1")["payload"]
+            assert source["revision"] == result["commit"] and source["path"] == result["path"]
+            tree = ast.parse(source["text"])
+            operation = tree.body[0].body[0].value
+            assert tree.body[0].name == "add" and isinstance(operation.op, ast.Mult)
+            operation.op = ast.Add()
+            payload = {"path": source["path"], "base_commit": source["revision"],
+                       "replacement": ast.unparse(tree) + "\n"}
         elif target == CHECK:
             payload = {"check": task["check"], "revision": result["commit"]}
         else:

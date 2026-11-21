@@ -21,7 +21,7 @@ const LIMIT: usize = 32_768;
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct EditProfile {
+pub(crate) struct RepositoryScope {
     reference: String,
     files: Vec<String>,
 }
@@ -46,7 +46,7 @@ struct SavedEdit {
     result: Option<String>,
 }
 
-impl EditProfile {
+impl RepositoryScope {
     pub(crate) fn validate(&self, workspace: &Path) -> Result<(), String> {
         if !self
             .reference
@@ -62,18 +62,19 @@ impl EditProfile {
                 != self.files.len()
         {
             return Err(
-                "workspace edit needs a local refs/arcs/ reference and distinct file paths".into(),
+                "workspace Git scope needs a local refs/arcs/ reference and distinct file paths"
+                    .into(),
             );
         }
         let git = Git { workspace };
         git.text(&["check-ref-format", &self.reference], None)?;
         let root = git.text(&["rev-parse", "--show-toplevel"], None)?;
         if Path::new(&root) != workspace {
-            return Err("workspace editing requires the root of a local Git repository".into());
+            return Err("workspace Git scope requires the root of a local Git repository".into());
         }
         let commit = git.revision(&self.reference)?;
         if git.text(&["cat-file", "-t", &commit], None)? != "commit" {
-            return Err("workspace edit reference must point to a commit".into());
+            return Err("workspace reference must point to a commit".into());
         }
         Ok(())
     }
@@ -84,18 +85,40 @@ impl EditProfile {
         revision: &str,
     ) -> Result<TemporaryDirectory, AdapterError> {
         let git = Git { workspace };
+        self.validate_revision(&git, revision)?;
+        snapshot::export(&git, revision)
+    }
+
+    pub(crate) fn source(
+        &self,
+        workspace: &Path,
+        revision: &str,
+        path: &str,
+    ) -> Result<String, AdapterError> {
+        if !self.files.iter().any(|allowed| allowed == path) {
+            return Err(AdapterError::rejected(
+                "workspace source path is not configured",
+            ));
+        }
+        let git = Git { workspace };
+        self.validate_revision(&git, revision)?;
+        git.read_text(revision, path).map(|(_, text)| text)
+    }
+
+    fn validate_revision(&self, git: &Git<'_>, revision: &str) -> Result<(), AdapterError> {
         let tip = git.revision(&self.reference).map_err(unavailable)?;
-        if revision.len() != tip.len()
+        if !object_id(revision)
+            || revision.len() != tip.len()
             || !git
                 .text(&["cat-file", "-t", revision], None)
                 .is_ok_and(|kind| kind == "commit")
             || !git.contains(&tip, revision).map_err(unavailable)?
         {
             return Err(AdapterError::rejected(
-                "workspace check revision must be a commit reachable from the configured ref",
+                "workspace revision must be a commit reachable from the configured ref",
             ));
         }
-        snapshot::export(&git, revision)
+        Ok(())
     }
 
     pub(crate) fn execute(

@@ -1,6 +1,7 @@
 mod diagnostics;
 mod git_edit;
 mod runner;
+mod source_read;
 
 use std::io::{self, BufReader};
 use std::path::Path;

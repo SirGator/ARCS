@@ -647,3 +647,132 @@ fn diagnostic_checks_preserve_deadlines_and_discard_successful_output() {
     }
     host.shutdown().unwrap();
 }
+
+const SOURCE_REQUEST: &str = "arcs.workspace_source_request.v1";
+const SOURCE_RESULT: &str = "arcs.workspace_source.v1";
+
+fn configure_source(f: &Fixture, revision: &str, path: &str) {
+    let mut host = f.read("host.json");
+    let schemas = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("schemas");
+    host["schemas"].as_array_mut().unwrap().extend([
+        json!(schemas.join("source-request.schema.json")),
+        json!(schemas.join("source.schema.json")),
+    ]);
+    host["adapters"][0]["requests"] = json!([{
+        "id":"read-source","capability_id":"source.read",
+        "input_schema_id":SOURCE_REQUEST,"response_schema_id":SOURCE_RESULT,
+        "subject":"test-project","payload":{"revision":revision,"path":path}
+    }]);
+    f.write("host.json", host);
+    f.write(
+        "profile.json",
+        json!({
+            "adapter_id":ADAPTER,"workspace":"project","checks":{},
+            "source":{"reference":EDIT_REF,"files":["calculator.py","link.py"]}
+        }),
+    );
+    let mut grant = f.read("grant.json");
+    grant["producer_class"] = json!("adapter");
+    grant["ingress_source_kind"] = json!("file");
+    grant["enabled_capabilities"] = json!(["source.read"]);
+    grant["granted_permissions"] = json!(["workspace.source_read"]);
+    f.write("grant.json", grant);
+}
+
+#[test]
+fn source_request_recovers_the_exact_commit_bytes_after_the_ref_is_rewound() {
+    let f = Fixture::new();
+    let project = f.0.join("project");
+    let base = enable_edits(&f, &project);
+    fs::write(project.join("calculator.py"), FIXED).unwrap();
+    git(&project, &["commit", "-qam", "Fixed revision"]);
+    let commit = git(&project, &["rev-parse", "HEAD"]).trim().to_owned();
+    git(&project, &["update-ref", EDIT_REF, &commit, &base]);
+    fs::write(project.join("calculator.py"), ORIGINAL).unwrap();
+    configure_source(&f, &commit, "calculator.py");
+
+    let mut host = f.open();
+    let core = Connection::open(f.0.join("core.sqlite")).unwrap();
+    core.execute_batch(&format!(
+        "CREATE TRIGGER lose_source BEFORE INSERT ON artifact_versions
+         WHEN NEW.schema_id='{SOURCE_RESULT}' BEGIN SELECT RAISE(ABORT,'lost source receipt'); END;"
+    ))
+    .unwrap();
+    assert!(host.request("read-source").is_err());
+    let journal = Connection::open(f.0.join("checks.sqlite")).unwrap();
+    let payload: String = journal
+        .query_row("SELECT payload FROM source_reads", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(
+        serde_json::from_str::<Value>(&payload).unwrap(),
+        json!({
+            "revision":commit,"path":"calculator.py","text":FIXED
+        })
+    );
+    host.shutdown().unwrap();
+    drop(host);
+    core.execute_batch("DROP TRIGGER lose_source").unwrap();
+    git(&project, &["update-ref", EDIT_REF, &base, &commit]);
+
+    let mut host = f.open();
+    let receipt = host.request("read-source").unwrap();
+    assert_eq!(receipt.schema_id.0, SOURCE_RESULT);
+    assert_eq!(
+        receipt.payload,
+        serde_json::from_str::<Value>(&payload).unwrap()
+    );
+    assert_eq!(revision(&project), base);
+    assert_eq!(
+        fs::read_to_string(project.join("calculator.py")).unwrap(),
+        ORIGINAL
+    );
+    host.shutdown().unwrap();
+}
+
+#[test]
+fn source_request_rejects_files_outside_its_repository_scope_or_byte_budget() {
+    for case in ["other-path", "symlink", "unreachable", "response-limit"] {
+        let f = Fixture::new();
+        let project = f.0.join("project");
+        std::os::unix::fs::symlink("calculator.py", project.join("link.py")).unwrap();
+        let base = enable_edits(&f, &project);
+        let (wanted, path, detail) = match case {
+            "other-path" => (base.clone(), "untouched.txt", "path is not configured"),
+            "symlink" => (base.clone(), "link.py", "requires a regular file"),
+            "unreachable" => {
+                git(
+                    &project,
+                    &["commit", "--allow-empty", "-qm", "outside the ARCS ref"],
+                );
+                (
+                    git(&project, &["rev-parse", "HEAD"]).trim().to_owned(),
+                    "calculator.py",
+                    "reachable from the configured ref",
+                )
+            }
+            "response-limit" => {
+                fs::write(project.join("calculator.py"), "a".repeat(4096)).unwrap();
+                git(
+                    &project,
+                    &["commit", "-qam", "File larger than the response budget"],
+                );
+                let commit = git(&project, &["rev-parse", "HEAD"]).trim().to_owned();
+                git(&project, &["update-ref", EDIT_REF, &commit, &base]);
+                (commit, "calculator.py", "response exceeds its byte limit")
+            }
+            _ => unreachable!(),
+        };
+        configure_source(&f, &wanted, path);
+        let mut host = f.open();
+        let error = host.request("read-source").unwrap_err().to_string();
+        assert!(error.contains(detail), "{case}: {error}");
+        let journal = Connection::open(f.0.join("checks.sqlite")).unwrap();
+        assert_eq!(
+            journal
+                .query_row("SELECT count(*) FROM source_reads", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+    }
+}

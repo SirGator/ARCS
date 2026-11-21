@@ -547,6 +547,13 @@
 > auswerten. Prozess- und Integrationstests prüfen die Ausgabegrenze,
 > Wiederaufnahme und den Befund aus einer realen fehlgeschlagenen Assertion.
 >
+> Zweiundfünfzigster Schritt gemäß v3 §4 Request, §5.2 HET-04/HET-06,
+> §8.2 LNG-09 und TEST-02. Der Request-Adapter kann freigegebenen
+> Quelltext eines genauen Commits liefern. Eine Goal-Quelle kann
+> die Request-Eingabe aus einem gebundenen Vorgängerexport ableiten.
+> Im Prozess-Test entsteht die neue Korrektur aus dem gelesenen
+> Quelltext und wird nach Freigabe auf einem neuen Commit geprüft.
+>
 **Leitbild:** ARCS ist ein universeller Agent. Es soll sich einfach bedienen lassen, beliebige kompatible Systeme verbinden, eigenständig Probleme lösen und langfristige Aufgaben über Monate verfolgen.
 
 ## 1. Verbindliche Architekturregeln

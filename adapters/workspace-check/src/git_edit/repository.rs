@@ -120,28 +120,26 @@ impl Git<'_> {
         }
     }
 
-    pub(super) fn prepare_commit(
+    pub(super) fn read_text(
         &self,
-        journal: &Path,
-        invocation: &str,
-        edit: &Replacement,
-        prepared_at: i64,
-    ) -> Result<String, AdapterError> {
+        revision: &str,
+        path: &str,
+    ) -> Result<(&'static str, String), AdapterError> {
         let entry = self
-            .text(&["ls-tree", &edit.base_commit, "--", &edit.path], None)
+            .text(&["ls-tree", revision, "--", path], None)
             .map_err(unavailable)?;
-        let (header, path) = entry
+        let (header, actual_path) = entry
             .split_once('\t')
-            .ok_or_else(|| AdapterError::rejected("approved file is absent from the base tree"))?;
+            .ok_or_else(|| AdapterError::rejected("configured file is absent from the revision"))?;
         let fields: Vec<_> = header.split_ascii_whitespace().collect();
         let [mode @ ("100644" | "100755"), "blob", previous] = fields.as_slice() else {
             return Err(AdapterError::rejected(
-                "workspace edit requires an existing regular file",
+                "workspace source requires a regular file",
             ));
         };
-        if path != edit.path {
+        if actual_path != path {
             return Err(AdapterError::rejected(
-                "workspace file does not match the approved path",
+                "workspace file differs from the configured path",
             ));
         }
         let bytes = self
@@ -149,7 +147,7 @@ impl Git<'_> {
             .map_err(unavailable)?;
         if !bytes.parse::<usize>().is_ok_and(|size| size <= LIMIT) {
             return Err(AdapterError::rejected(
-                "workspace base file exceeds the edit limit",
+                "workspace file exceeds the source size limit",
             ));
         }
         let original = self
@@ -157,15 +155,35 @@ impl Git<'_> {
             .map_err(unavailable)?;
         if !original.status.success() {
             return Err(AdapterError::unavailable(
-                "workspace base blob could not be read",
+                "workspace blob could not be read",
             ));
         }
-        if original.stdout.contains(&0) || std::str::from_utf8(&original.stdout).is_err() {
+        if original.stdout.contains(&0) {
             return Err(AdapterError::rejected(
-                "workspace edit requires a UTF-8 text file",
+                "workspace source requires a UTF-8 text file",
             ));
         }
-        if original.stdout == edit.replacement.as_bytes() {
+        let text = String::from_utf8(original.stdout)
+            .map_err(|_| AdapterError::rejected("workspace source requires a UTF-8 text file"))?;
+        Ok((
+            if *mode == "100755" {
+                "100755"
+            } else {
+                "100644"
+            },
+            text,
+        ))
+    }
+
+    pub(super) fn prepare_commit(
+        &self,
+        journal: &Path,
+        invocation: &str,
+        edit: &Replacement,
+        prepared_at: i64,
+    ) -> Result<String, AdapterError> {
+        let (mode, original) = self.read_text(&edit.base_commit, &edit.path)?;
+        if original.as_bytes() == edit.replacement.as_bytes() {
             return Ok(edit.base_commit.clone());
         }
         let blob = output_text(

@@ -6,11 +6,13 @@ use std::process::{Command, Stdio};
 use std::time::Instant;
 
 use crate::diagnostics::{self, Diagnostics};
-use crate::git_edit::{self, EditProfile};
+use crate::git_edit::{self, RepositoryScope};
+use crate::source_read;
 
 use arcs_adapter_protocol::{
     ActInvocation, ActResponse, AdapterId, AdapterManifest, CapabilityContract,
-    CapabilityDescriptor, CapabilityId, CapabilityRef, SchemaId,
+    CapabilityDescriptor, CapabilityId, CapabilityRef, RequestInvocation, RequestResponse,
+    SchemaId,
 };
 use arcs_adapter_sdk::{Adapter, AdapterError};
 use rusqlite::{Connection, OptionalExtension, params};
@@ -36,7 +38,9 @@ struct Profile {
     workspace: PathBuf,
     checks: BTreeMap<String, Check>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    edit: Option<EditProfile>,
+    edit: Option<RepositoryScope>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    source: Option<RepositoryScope>,
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     revision_checks: BTreeSet<String>,
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
@@ -97,12 +101,12 @@ impl Runner {
             .map_err(message)?;
         if !profile.workspace.is_dir()
             || profile.checks.len() > 64
-            || (profile.checks.is_empty() && profile.edit.is_none())
+            || (profile.checks.is_empty() && profile.edit.is_none() && profile.source.is_none())
         {
             return Err("a workspace directory and configured capabilities are required".into());
         }
-        if let Some(edit) = &profile.edit {
-            edit.validate(&profile.workspace)?;
+        for scope in [&profile.edit, &profile.source].into_iter().flatten() {
+            scope.validate(&profile.workspace)?;
         }
         if (!profile.revision_checks.is_empty() || !profile.diagnostic_revision_checks.is_empty())
             && (profile.edit.is_none()
@@ -161,6 +165,9 @@ impl Runner {
         runner.bind_profile()?;
         if runner.profile.edit.is_some() {
             git_edit::initialize(&runner.db)?;
+        }
+        if runner.profile.source.is_some() {
+            source_read::initialize(&runner.db)?;
         }
         Ok(runner)
     }
@@ -384,12 +391,30 @@ impl Adapter for Runner {
                 DIAGNOSTIC_PERMISSION,
             ));
         }
+        if self.profile.source.is_some() {
+            capabilities.push(source_read::capability());
+        }
         AdapterManifest {
             protocol_version: 1,
             adapter_id: self.profile.adapter_id.clone(),
             adapter_version: env!("CARGO_PKG_VERSION").into(),
             capabilities,
         }
+    }
+
+    fn request(&mut self, invocation: RequestInvocation) -> Result<RequestResponse, AdapterError> {
+        let scope = self
+            .profile
+            .source
+            .as_ref()
+            .ok_or_else(|| AdapterError::rejected("workspace source is not configured"))?;
+        source_read::request(
+            &self.db,
+            &self.profile.adapter_id,
+            &self.profile.workspace,
+            scope,
+            invocation,
+        )
     }
 
     fn execute(&mut self, invocation: ActInvocation) -> Result<ActResponse, AdapterError> {

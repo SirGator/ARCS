@@ -11,6 +11,7 @@ use crate::GOAL_ASSESSMENT;
 pub const PLAN: &str = "arcs.plan_candidate.v1";
 pub const EDIT: &str = "arcs.workspace_edit_candidate.v1";
 pub const CHECK: &str = "arcs.workspace_revision_check_candidate.v1";
+const SOURCE: &str = "arcs.workspace_source.v1";
 const TASK: &str = "arcs.task.workspace_repair.v1";
 const EDIT_RECEIPT: &str = "arcs.execution_result.workspace_edit.v1";
 const CHECK_WITH_DIAGNOSTICS: &str = "arcs.execution_result.workspace_revision_check.v2";
@@ -125,12 +126,30 @@ pub fn reason(invocation: &ReasoningInvocationV2) -> Result<ReasoningResponseV2,
                     "The receipt belongs to a different check or Git revision.",
                 )
             };
-            versions.extend([candidate.version_id.clone(), receipt.version_id.clone()]);
+            let mut evidence = vec![receipt.version_id.clone()];
+            for id in metadata["after"]
+                .as_object()
+                .into_iter()
+                .flat_map(|sources| sources.values())
+            {
+                let source = bound_context(invocation, id, &[SOURCE])?;
+                if candidate.schema_id.0 != EDIT
+                    || source.payload["revision"] != candidate.payload["base_commit"]
+                    || source.payload["path"] != candidate.payload["path"]
+                {
+                    return Err(AdapterError::rejected(
+                        "source does not match the approved edit base",
+                    ));
+                }
+                evidence.push(source.version_id.clone());
+            }
+            versions.push(candidate.version_id.clone());
+            versions.extend(evidence.iter().cloned());
             json!({
                 "goal_status": if effect == "success" {"achieved"} else {"blocked"},
                 "effect": effect,
                 "detail":detail,
-                "evidence_version_ids":[receipt.version_id]
+                "evidence_version_ids":evidence
             })
         }
         _ => return Err(AdapterError::rejected("unsupported workspace repair phase")),
