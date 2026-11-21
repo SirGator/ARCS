@@ -1,14 +1,17 @@
 //! Explizite DAG-Voraussetzungen derselben Eingabe; keine zusätzliche Autorität.
 mod config;
 
-use arcs::core::{Artifact, SchemaId, VersionId};
+use arcs::core::{ActorType, Artifact, SchemaId, VersionId};
+use arcs::execution::execution_invocation_id;
+use arcs::outcome::OutcomeVerdict;
 use arcs::reasoning::{ContextSelection, ReasoningStatus};
+use arcs::store::{ArtifactRelations, relation_kinds};
 use serde::{Deserialize, Serialize};
 
 use super::{
     CompletedTask, TaskRuntime,
     config::invalid,
-    goal::{GoalState, GoalTask},
+    goal::{ASSESSMENT_SCHEMA, GoalAssessment, GoalState, GoalTask, GoalVerdict},
 };
 use crate::{Host, HostError};
 
@@ -103,14 +106,11 @@ impl TaskRuntime {
         parent: ParentTask,
     ) -> Result<ParentResult, HostError> {
         let route = self.route_for_job(host, parent.sequence, &parent.route_id)?;
-        let block = |message: &str| {
-            ParentResult::Blocked(format!("dependency {}: {message}", parent.route_id))
-        };
-        let (result_version_id, versions, producer, schema) = match parent.state.as_str() {
-            "pending" | "running" | "awaiting_approval" => return Ok(ParentResult::Waiting),
-            "failed" | "blocked" | "rejected" | "budget_exhausted" | "cancelled" => {
-                return Ok(block("prerequisite did not complete successfully"));
-            }
+        match parent.state.as_str() {
+            "pending" | "running" | "awaiting_approval" => Ok(ParentResult::Waiting),
+            "failed" | "blocked" | "rejected" | "budget_exhausted" | "cancelled" => Ok(
+                blocked_parent(&parent, "prerequisite did not complete successfully"),
+            ),
             "ready_for_review" if route.goal.is_none() => {
                 let saved: CompletedTask = serde_json::from_str(
                     parent
@@ -128,19 +128,21 @@ impl TaskRuntime {
                 if saved.reasoning_status != ReasoningStatus::Solved
                     || saved.candidate_version_ids.is_empty()
                 {
-                    return Ok(block("reasoning produced no solved candidates"));
+                    return Ok(blocked_parent(
+                        &parent,
+                        "reasoning produced no solved candidates",
+                    ));
                 }
                 let producer = self
                     .completed_reasoner(host, &route, &saved)?
                     .capability
                     .adapter_id
                     .0;
-                (
-                    saved.result_version_id,
-                    saved.candidate_version_ids,
-                    producer,
-                    route.target_schema_id.clone(),
-                )
+                let artifacts = saved
+                    .candidate_version_ids
+                    .iter()
+                    .map(|version| load_result(host, version, &producer, &route.target_schema_id));
+                bind_parent(&parent, saved.result_version_id, artifacts)
             }
             "completed" if route.goal.is_some() => {
                 let saved: GoalTask = serde_json::from_str(
@@ -157,50 +159,26 @@ impl TaskRuntime {
                 {
                     return Err(invalid("dependency goal identity changed"));
                 }
+                let goal = route.goal.as_ref().expect("goal route");
                 let assessment = saved
                     .assessment
+                    .as_ref()
                     .ok_or_else(|| invalid("completed dependency goal has no assessment"))?;
-                (
-                    assessment.clone(),
-                    vec![assessment],
-                    route
-                        .goal
-                        .as_ref()
-                        .unwrap()
-                        .assessment
-                        .capability
-                        .adapter_id
-                        .0
-                        .clone(),
-                    SchemaId(super::goal::ASSESSMENT_SCHEMA.into()),
-                )
+                let assessor = &goal.assessment.capability.adapter_id.0;
+                let artifact = if let Some(schema) = &goal.export_execution_schema_id {
+                    goal_execution_export(host, &saved, assessment, assessor, schema)
+                } else {
+                    load_result(
+                        host,
+                        assessment,
+                        assessor,
+                        &SchemaId(ASSESSMENT_SCHEMA.into()),
+                    )
+                };
+                bind_parent(&parent, assessment.clone(), std::iter::once(artifact))
             }
-            _ => return Err(invalid("invalid dependency parent state")),
-        };
-        let mut context = Vec::new();
-        for version in versions {
-            let artifact = load(host, &version)?;
-            if artifact.schema_id != schema || artifact.created_by.id != producer {
-                return Err(invalid("dependency result schema or producer changed"));
-            }
-            if parent
-                .fields
-                .iter()
-                .any(|field| artifact.payload.get(field).is_none())
-            {
-                return Ok(block("a selected result field is missing"));
-            }
-            context.push(ContextSelection {
-                version_id: version,
-                payload_fields: parent.fields.clone(),
-            });
+            _ => Err(invalid("invalid dependency parent state")),
         }
-        Ok(ParentResult::Ready(DependencyBinding {
-            sequence: parent.sequence,
-            route_id: parent.route_id,
-            result_version_id,
-            context,
-        }))
     }
 
     pub fn dependencies_after(
@@ -211,6 +189,108 @@ impl TaskRuntime {
         self.journal.dependencies_after(sequence, limit)
     }
 }
+fn bind_parent(
+    parent: &ParentTask,
+    result_version_id: VersionId,
+    artifacts: impl Iterator<Item = Result<Artifact, HostError>>,
+) -> Result<ParentResult, HostError> {
+    let mut context = Vec::new();
+    for artifact in artifacts {
+        let artifact = artifact?;
+        if parent
+            .fields
+            .iter()
+            .any(|field| artifact.payload.get(field).is_none())
+        {
+            return Ok(blocked_parent(parent, "a selected result field is missing"));
+        }
+        context.push(ContextSelection {
+            version_id: artifact.version_id,
+            payload_fields: parent.fields.clone(),
+        });
+    }
+    Ok(ParentResult::Ready(DependencyBinding {
+        sequence: parent.sequence,
+        route_id: parent.route_id.clone(),
+        result_version_id,
+        context,
+    }))
+}
+
+fn blocked_parent(parent: &ParentTask, message: &str) -> ParentResult {
+    ParentResult::Blocked(format!("dependency {}: {message}", parent.route_id))
+}
+
+fn goal_execution_export(
+    host: &Host,
+    task: &GoalTask,
+    assessment: &VersionId,
+    assessor: &str,
+    schema: &SchemaId,
+) -> Result<Artifact, HostError> {
+    let execution = task
+        .execution
+        .as_ref()
+        .ok_or_else(|| invalid("completed export goal has no execution receipt"))?;
+    let action = task
+        .action
+        .as_ref()
+        .ok_or_else(|| invalid("execution export has no action"))?;
+    let capability = task
+        .capability
+        .as_ref()
+        .ok_or_else(|| invalid("execution export has no capability"))?;
+    let assessment = load_result(
+        host,
+        assessment,
+        assessor,
+        &SchemaId(ASSESSMENT_SCHEMA.into()),
+    )?;
+    let verdict: GoalAssessment = serde_json::from_value(assessment.payload)
+        .map_err(|error| invalid(format!("invalid execution export assessment: {error}")))?;
+    if verdict.goal_status != GoalVerdict::Achieved
+        || verdict.effect != OutcomeVerdict::Success
+        || !verdict.evidence_version_ids.contains(execution)
+    {
+        return Err(invalid(
+            "execution export was not confirmed by the completed assessment",
+        ));
+    }
+    let artifact = load(host, execution)?;
+    let expected = format!(
+        "execution:{}",
+        execution_invocation_id(action, capability, schema)
+    );
+    if &artifact.schema_id != schema
+        || artifact.created_by.actor_type != ActorType::Executor
+        || artifact.created_by.id != capability.adapter_id.0
+        || artifact.stream_key != expected
+        || !ArtifactRelations::new(host.store())
+            .outgoing(execution)
+            .map_err(HostError::Store)?
+            .iter()
+            .any(|edge| &edge.to == action && edge.kind == relation_kinds::result_of())
+    {
+        return Err(invalid(
+            "execution export does not match the approved action",
+        ));
+    }
+    Ok(artifact)
+}
+
+fn load_result(
+    host: &Host,
+    version: &VersionId,
+    producer: &str,
+    schema: &SchemaId,
+) -> Result<Artifact, HostError> {
+    let artifact = load(host, version)?;
+    if &artifact.schema_id != schema || artifact.created_by.id != producer {
+        return Err(invalid("dependency result schema or producer changed"));
+    }
+    Ok(artifact)
+}
+
 fn load(host: &Host, version: &VersionId) -> Result<Artifact, HostError> {
     host.store()
         .get(version)

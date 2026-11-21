@@ -526,6 +526,13 @@
 > automatische Übergabe der Edit-Quittung an einen Prüfschritt
 > desselben Plans bleibt offen.
 >
+> Neunundvierzigster Schritt gemäß v3 §5.2 HET-04, §8.2 LNG-05/LNG-09
+> und TEST-02. Ein erfolgreich abgeschlossenes Goal kann seine geprüfte
+> Ausführungsquittung als Eingabe für nachfolgende Schritte exportieren.
+> Im Softwarebeispiel bindet ein Plan die Edit-Quittung an die
+> revisionsgenaue Prüfung. Ein Neustart zwischen Korrektur und Prüfung
+> erhält die Zuordnung und die separate Freigabe für die Prüfung.
+>
 **Leitbild:** ARCS ist ein universeller Agent. Es soll sich einfach bedienen lassen, beliebige kompatible Systeme verbinden, eigenständig Probleme lösen und langfristige Aufgaben über Monate verfolgen.
 
 ## 1. Verbindliche Architekturregeln

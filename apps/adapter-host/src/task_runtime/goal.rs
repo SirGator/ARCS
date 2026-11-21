@@ -41,6 +41,10 @@ pub struct GoalConfig {
     /// Required when the receipt is the sole post-action evidence.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub execution_success_schema_id: Option<SchemaId>,
+    /// Export the committed receipt after successful assessment. Legacy goals
+    /// export the assessment itself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub export_execution_schema_id: Option<SchemaId>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -266,6 +270,13 @@ impl GoalConfig {
                 "goals without sources require an execution success schema and assessment after execution",
             ));
         }
+        if self.export_execution_schema_id.is_some()
+            && (self.initial_assessment || self.execution_success_schema_id.is_none())
+        {
+            return Err(invalid(
+                "exporting an execution receipt requires a post-action success schema and no initial assessment",
+            ));
+        }
         if let Some(schema_id) = &self.execution_success_schema_id {
             validate_required_object(host, schema_id, "execution success")?;
         }
@@ -367,6 +378,13 @@ impl GoalConfig {
             if !act.idempotent || !act.accepts.contains(&route.target_schema_id) {
                 return Err(invalid(
                     "goal action must be idempotent and accept planner candidates",
+                ));
+            }
+            if let Some(schema) = &self.export_execution_schema_id
+                && act.emits != std::slice::from_ref(schema)
+            {
+                return Err(invalid(
+                    "each goal action must emit the configured execution export schema",
                 ));
             }
             if act.fenced_resource != action.fenced_resource.as_deref()

@@ -155,7 +155,8 @@ impl PlanningConfig {
                 "budget":template.route.budget});
                 if let Some(goal) = &template.route.goal {
                     entry["kind"] = json!("goal");
-                    entry["result_schema_id"] = json!(crate::task_runtime::goal::ASSESSMENT_SCHEMA);
+                    entry["result_schema_id"] = json!(goal.export_execution_schema_id.as_ref()
+                        .map_or(crate::task_runtime::goal::ASSESSMENT_SCHEMA, |id| id.0.as_str()));
                     entry["goal_limits"] = json!({"max_rounds":goal.max_rounds,"initial_assessment":goal.initial_assessment,
                         "approval":"manual","actions":goal.actions.iter().map(|a| &a.capability).collect::<Vec<_>>(),
                         "assessment_method":goal.assessment.method,"assessment_budget":goal.assessment.budget});

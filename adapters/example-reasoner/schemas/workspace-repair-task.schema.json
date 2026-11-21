@@ -1,0 +1,12 @@
+{
+  "$id": "arcs.task.workspace_repair.v1",
+  "type": "object",
+  "required": ["base_commit", "path", "replacement", "check"],
+  "properties": {
+    "base_commit": { "type": "string", "minLength": 40 },
+    "path": { "type": "string", "minLength": 1 },
+    "replacement": { "type": "string" },
+    "check": { "type": "string", "minLength": 1 }
+  },
+  "additionalProperties": false
+}

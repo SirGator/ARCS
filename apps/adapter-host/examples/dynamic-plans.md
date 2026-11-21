@@ -109,6 +109,11 @@ eine Teilmenge der `export_fields` der jeweiligen Elternvorlage sein.
 Die spätere Ergebnisbindung und die benannten Join-Eingänge verwenden den
 bereits vorhandenen [Abhängigkeitsvertrag](task-dependencies.md).
 
+Bei einer Goal-Vorlage beschreibt `result_schema_id` im Katalog das
+tatsächlich exportierte Artefakt. Mit `goal.export_execution_schema_id`
+ist das die geprüfte Ausführungsquittung. Die Freigabe des Nachfolgers
+bezieht sich weiterhin auf seinen eigenen Kandidaten.
+
 ## Grenzen vor der Aufnahme
 
 - 1–31 Schritte je Plan und 1–32 freigegebene Vorlagen je Planerroute.

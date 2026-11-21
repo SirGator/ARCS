@@ -16,6 +16,7 @@ mod plan_nearest;
 mod sum_candidates;
 mod text_fan;
 mod workspace_check;
+mod workspace_repair;
 #[derive(Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum Scenario {
@@ -27,6 +28,7 @@ enum Scenario {
     PlanNearest,
     PlanFan,
     WorkspaceCheck,
+    WorkspaceRepair,
 }
 impl Scenario {
     fn is_nearest(&self) -> bool {
@@ -81,6 +83,16 @@ impl Adapter for Reasoner {
                             SchemaId(workspace_check::CANDIDATE.into()),
                             SchemaId(GOAL_ASSESSMENT.into()),
                         ]
+                    } else if matches!(self.profile.scenario, Scenario::WorkspaceRepair) {
+                        [
+                            workspace_repair::PLAN,
+                            workspace_repair::EDIT,
+                            workspace_repair::CHECK,
+                            GOAL_ASSESSMENT,
+                        ]
+                        .into_iter()
+                        .map(|id| SchemaId(id.into()))
+                        .collect()
                     } else if self.profile.scenario.is_nearest() {
                         vec![SchemaId(CANDIDATE.into())]
                     } else {
@@ -128,6 +140,8 @@ impl Adapter for Reasoner {
             sum_candidates::reason(&invocation)?
         } else if matches!(self.profile.scenario, Scenario::WorkspaceCheck) {
             workspace_check::reason(&invocation)?
+        } else if matches!(self.profile.scenario, Scenario::WorkspaceRepair) {
+            workspace_repair::reason(&invocation)?
         } else if matches!(self.profile.scenario, Scenario::TextFanGoal) {
             text_fan::reason(&invocation)?
         } else if matches!(self.profile.scenario, Scenario::FanGoal) {

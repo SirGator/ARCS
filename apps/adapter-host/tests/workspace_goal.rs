@@ -1,3 +1,5 @@
+#[path = "workspace_goal/repair.rs"]
+mod repair;
 mod support;
 
 use std::fs;
@@ -149,7 +151,7 @@ fn approval(
                 actor_type: ActorType::Human,
                 id: "test.maintainer".into(),
             },
-            "Run the named project test".into(),
+            "Review the configured workspace action".into(),
         )
         .map(|_| ())
 }

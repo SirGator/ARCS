@@ -146,6 +146,44 @@ unter `result.revision` neben Prüfstatus und Exitcode fest. Bei
 `interrupted` belegt der Commit die Zielrevision des Auftrags.
 Ein gespeichertes Ergebnis bleibt bei einer Wiederaufnahme erhalten,
 auch wenn sich die Referenz inzwischen verschoben hat.
+## Korrektur und Prüfung in einem Plan verbinden
+
+Der Rules-Reasoner bietet mit dem Profil `scenario: "workspace_repair"`
+einen Beispielablauf für eine vorgegebene Textkorrektur. Die Eingabe
+`arcs.task.workspace_repair.v1` enthält `base_commit`, `path`,
+`replacement` und den Namen der Prüfung unter `check`. Der Reasoner
+verwendet eine Planerroute mit `arcs.plan_candidate.v1` sowie zwei
+Goal-Vorlagen namens `edit` und `check`. Beide brauchen manuelle Freigabe.
+
+Die Edit-Vorlage verwendet `edit.apply`, ein Erfolgsschema für
+`applied` oder `unchanged` sowie folgende Export-Einstellungen.
+
+```json
+{
+  "export_fields": ["result"],
+  "route": {
+    "goal": {
+      "export_execution_schema_id": "arcs.execution_result.workspace_edit.v1"
+    }
+  }
+}
+```
+
+Die Check-Vorlage verwendet `check.revision` und ein Erfolgsschema für
+die passende erfolgreiche Prüfquittung. Ihre Abhängigkeit vom
+Edit-Schritt erlaubt dem Reasoner, den freigegebenen Commit aus
+`result.commit` in den neuen Prüfkandidaten zu übernehmen. Die
+Projektdatei und die Git-Referenz brauchen dafür keinen manuellen
+Zwischenschritt. Bei einem Edit-Konflikt bleibt der Prüfschritt
+blockiert. Der Integrationstest lädt die echten Adapter und zeigt
+die vollständige Konfiguration.
+
+```bash
+cargo test -p arcs-host --locked --offline --test workspace_goal repair::
+```
+
+[Integrationstest und Beispielkonfiguration](../tests/workspace_goal/repair.rs)
+
 ## Dauerhaftes Prüfziel starten
 
 Das [mitgelieferte Beispiel](../config/workspace-goal/runtime.json)

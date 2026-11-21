@@ -77,6 +77,20 @@ Schritt noch eine erteilte Freigabe oder ein bloßer Ausführungsbeleg zählt
 als Zielabschluss. Ein evidenzbasiert bereits erfülltes Ziel kann wie bisher
 auch ohne eigene Geräteaktion abgeschlossen werden.
 
+Mit `goal.export_execution_schema_id` kann der Betreiber die
+Ausführungsquittung als Ergebnis eines abgeschlossenen Goals freigeben.
+Dazu gehören ein `execution_success_schema_id` und eine Bewertung nach
+der Ausführung. Jede erlaubte Aktion des Goals muss genau das angegebene
+Ausführungsschema liefern. Die Runtime prüft die Bindung an die Aktion
+und die erfolgreiche Bewertung mit Verweis auf genau diese Quittung.
+
+Im Abhängigkeitsbeleg benennt `result_version_id` weiterhin den
+abschließenden Assessment-Kandidaten. `context[].version_id` benennt
+die Quittung. Nur die gewählten Felder kommen in den Kontext des
+Nachfolgers. Planvorlagen beschränken diese Auswahl mit `export_fields`.
+Für Ergebnisberichte dieses Goals gilt die Quittung ebenfalls als
+exportiertes Ergebnis.
+
 Der Erhalt von Vorschlägen ist eine Datenvoraussetzung und keine Aussage,
 dass sie wahr oder für eine physische Handlung freigegeben sind. Herkunft,
 Trust, Versionsbindung und die bestehenden Sicherheitsprüfungen bleiben
