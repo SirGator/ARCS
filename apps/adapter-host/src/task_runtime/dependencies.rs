@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use super::{
     CompletedTask, TaskRuntime,
     config::invalid,
-    goal::{ASSESSMENT_SCHEMA, GoalAssessment, GoalState, GoalTask, GoalVerdict},
+    goal::{ASSESSMENT_SCHEMA, GoalAssessment, GoalTask, GoalVerdict},
 };
 use crate::{Host, HostError};
 
@@ -145,20 +145,8 @@ impl TaskRuntime {
                 bind_parent(&parent, saved.result_version_id, artifacts)
             }
             "completed" if route.goal.is_some() => {
-                let saved: GoalTask = serde_json::from_str(
-                    parent
-                        .goal
-                        .as_deref()
-                        .ok_or_else(|| invalid("missing dependency goal checkpoint"))?,
-                )
-                .map_err(|e| invalid(format!("invalid dependency goal: {e}")))?;
-                if saved.sequence != parent.sequence
-                    || saved.route_id != parent.route_id
-                    || saved.input_version_id != parent.input
-                    || saved.state != GoalState::Completed
-                {
-                    return Err(invalid("dependency goal identity changed"));
-                }
+                let saved = parent_goal(&parent)?
+                    .ok_or_else(|| invalid("missing dependency goal checkpoint"))?;
                 let goal = route.goal.as_ref().expect("goal route");
                 let assessment = saved
                     .assessment
@@ -166,7 +154,15 @@ impl TaskRuntime {
                     .ok_or_else(|| invalid("completed dependency goal has no assessment"))?;
                 let assessor = &goal.assessment.capability.adapter_id.0;
                 let artifact = if let Some(schema) = &goal.export_execution_schema_id {
-                    goal_execution_export(host, &saved, assessment, assessor, schema)
+                    assessed_goal_receipt(
+                        host,
+                        &saved,
+                        assessment,
+                        assessor,
+                        schema,
+                        OutcomeVerdict::Success,
+                    )?
+                    .ok_or_else(|| invalid("completed goal export lacks a successful assessment"))
                 } else {
                     load_result(
                         host,
@@ -221,13 +217,85 @@ fn blocked_parent(parent: &ParentTask, message: &str) -> ParentResult {
     ParentResult::Blocked(format!("dependency {}: {message}", parent.route_id))
 }
 
-fn goal_execution_export(
+fn parent_goal(parent: &ParentTask) -> Result<Option<GoalTask>, HostError> {
+    let Some(raw) = &parent.goal else {
+        return Ok(None);
+    };
+    let task: GoalTask = serde_json::from_str(raw)
+        .map_err(|error| invalid(format!("invalid dependency goal: {error}")))?;
+    if task.sequence != parent.sequence
+        || task.route_id != parent.route_id
+        || task.input_version_id != parent.input
+        || task.state.queue_state() != parent.state
+    {
+        return Err(invalid("dependency goal identity changed"));
+    }
+    Ok(Some(task))
+}
+
+/// Only the replacement planner can use failed receipts. A blocked parent
+/// remains blocked for both live and previous-revision dependencies.
+pub(super) fn failed_goal_receipt(
+    host: &Host,
+    parent: &ParentTask,
+    goal: &super::goal::GoalConfig,
+    fields: &[String],
+) -> Result<Option<ContextSelection>, HostError> {
+    if fields.is_empty() || !matches!(parent.state.as_str(), "blocked" | "budget_exhausted") {
+        return Ok(None);
+    }
+    let Some(schema) = &goal.export_execution_schema_id else {
+        return Err(invalid("failure export needs an execution export schema"));
+    };
+    let Some(task) = parent_goal(parent)? else {
+        return Ok(None);
+    };
+    // Only share the last assessed execution retained by this task.
+    // A later round can have failed before dispatching an action.
+    let (Some(assessment), Some(_), Some(outcome)) =
+        (&task.assessment, &task.execution, &task.outcome)
+    else {
+        return Ok(None);
+    };
+    let receipt = assessed_goal_receipt(
+        host,
+        &task,
+        assessment,
+        &goal.assessment.capability.adapter_id.0,
+        schema,
+        OutcomeVerdict::Failure,
+    )?;
+    if let Some(receipt) = receipt
+        && fields
+            .iter()
+            .all(|field| receipt.payload.get(field).is_some())
+    {
+        let outcome = load(host, outcome)?;
+        if outcome.schema_id.0 != "arcs.outcome.v1"
+            || outcome.created_by.actor_type != ActorType::System
+            || outcome.created_by.id != "arcs.outcome"
+            || outcome.stream_key != format!("outcome:{}", receipt.version_id.0)
+            || outcome.payload["execution_result_version"] != receipt.version_id.0
+            || outcome.payload["verdict"] != "failure"
+        {
+            return Err(invalid("failed receipt does not match the saved outcome"));
+        }
+        return Ok(Some(ContextSelection {
+            version_id: receipt.version_id,
+            payload_fields: fields.to_vec(),
+        }));
+    }
+    Ok(None)
+}
+
+fn assessed_goal_receipt(
     host: &Host,
     task: &GoalTask,
     assessment: &VersionId,
     assessor: &str,
     schema: &SchemaId,
-) -> Result<Artifact, HostError> {
+    expected: OutcomeVerdict,
+) -> Result<Option<Artifact>, HostError> {
     let execution = task
         .execution
         .as_ref()
@@ -248,23 +316,25 @@ fn goal_execution_export(
     )?;
     let verdict: GoalAssessment = serde_json::from_value(assessment.payload)
         .map_err(|error| invalid(format!("invalid execution export assessment: {error}")))?;
-    if verdict.goal_status != GoalVerdict::Achieved
-        || verdict.effect != OutcomeVerdict::Success
-        || !verdict.evidence_version_ids.contains(execution)
+    if verdict.effect != expected
+        || (expected == OutcomeVerdict::Success && verdict.goal_status != GoalVerdict::Achieved)
     {
+        return Ok(None);
+    }
+    if !verdict.evidence_version_ids.contains(execution) {
         return Err(invalid(
             "execution export was not confirmed by the completed assessment",
         ));
     }
     let artifact = load(host, execution)?;
-    let expected = format!(
+    let expected_stream = format!(
         "execution:{}",
         execution_invocation_id(action, capability, schema)
     );
     if &artifact.schema_id != schema
         || artifact.created_by.actor_type != ActorType::Executor
         || artifact.created_by.id != capability.adapter_id.0
-        || artifact.stream_key != expected
+        || artifact.stream_key != expected_stream
         || !ArtifactRelations::new(host.store())
             .outgoing(execution)
             .map_err(HostError::Store)?
@@ -275,7 +345,7 @@ fn goal_execution_export(
             "execution export does not match the approved action",
         ));
     }
-    Ok(artifact)
+    Ok(Some(artifact))
 }
 
 fn load_result(

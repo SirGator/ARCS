@@ -335,3 +335,233 @@ fn a_plan_cannot_request_a_receipt_field_outside_the_template_exports() {
     assert_eq!(f.checks(), 0);
     host.shutdown().unwrap();
 }
+
+fn configure_retry(f: &Fixture, share_failure: bool) {
+    configure(f, "result");
+    let mut input = f.read("input-profile.json");
+    input["events"][0]["payload"]["replacement"] =
+        json!("def add(left, right):\n    return left * right\n");
+    f.write("input-profile.json", input);
+
+    fs::write(
+        f.path("retry.py"),
+        include_str!("../support/workspace_retry_peer.py"),
+    )
+    .unwrap();
+    f.write("retry.json", json!({"replacement":FIXED}));
+    let mut grant = f.read("reasoner-grant.json");
+    grant["adapter_id"] = json!("workspace.replanner");
+    f.write("retry-grant.json", grant);
+    let mut host = f.read("host.json");
+    host["adapters"].as_array_mut().unwrap().push(json!({
+        "program":"/usr/bin/python3","args":[{"path":"retry.py"},{"path":"retry.json"}],
+        "grant_file":"retry-grant.json","timeout_ms":10000
+    }));
+    f.write("host.json", host);
+
+    let capability = json!({"adapter_id":"workspace.replanner","capability_id":"solution.propose"});
+    let mut runtime = f.read("runtime.json");
+    let entry = &mut runtime["routes"][0];
+    entry["target_schema_id"] = json!("arcs.plan_candidate.v2");
+    entry["reasoner"] = capability.clone();
+    entry["max_reasoning_requests"] = json!(10);
+    entry["plan"]["max_total_runtime_ms"] = json!(12_000);
+    entry["plan"]["max_total_actions"] = json!(4);
+    entry["plan"]["replanning"] = json!({"max_revisions":1,"reuse_completed_exports":true});
+    let templates = entry["plan"]["templates"].as_array_mut().unwrap();
+    for template in templates.iter_mut() {
+        template["route"]["goal"]["exclusive_resources"] = json!(["workspace-repair"]);
+    }
+    templates[1]["route"]["goal"]["export_execution_schema_id"] = json!(CHECK_RECEIPT);
+    templates[1]["export_fields"] = json!(["result"]);
+    if share_failure {
+        templates[1]["replanning_failure_receipt_fields"] = json!(["result"]);
+    }
+    let mut retries = templates.clone();
+    for (template, name) in retries.iter_mut().zip(["retry-edit", "retry-check"]) {
+        template["route"]["id"] = json!(name);
+        template["route"]["reasoner"] = capability.clone();
+    }
+    templates.extend(retries);
+    f.write("runtime.json", runtime);
+}
+
+fn awaiting_action(host: &mut Host, runtime: &mut TaskRuntime, now: u64, route: &str) -> GoalTask {
+    advance(host, runtime, now, |runtime| {
+        runtime
+            .goals_after(0, 10)
+            .unwrap()
+            .into_iter()
+            .find(|goal| goal.route_id == route && goal.state == GoalState::AwaitingApproval)
+    })
+}
+
+fn run_failed_revision(host: &mut Host, runtime: &mut TaskRuntime) -> GoalTask {
+    for route in ["p1.r0.edit", "p1.r0.check"] {
+        let task = awaiting_action(host, runtime, NOW, route);
+        approval(host, runtime, &task, task.candidate.as_ref().unwrap()).unwrap();
+    }
+    advance(host, runtime, NOW, |runtime| {
+        (runtime.plans_after(0, 1).unwrap()[0].state == PlanState::Replanning).then_some(())
+    });
+    let failed = runtime.goals_after(0, 10).unwrap().pop().unwrap();
+    assert_eq!(failed.route_id, "p1.r0.check");
+    assert_eq!(failed.state, GoalState::Blocked);
+    assert_eq!(result(host, failed.outcome.as_ref())["verdict"], "failure");
+    failed
+}
+
+#[test]
+fn a_failed_revision_receipt_drives_a_replacement_plan_that_repairs_and_rechecks_the_code() {
+    let f = Fixture::new();
+    configure_retry(&f, true);
+    let (mut host, mut runtime) = f.open();
+    let failed = run_failed_revision(&mut host, &mut runtime);
+    let failed_receipt = failed.execution.as_ref().unwrap();
+    let failed_result = result(&host, Some(failed_receipt));
+    let bad_commit = failed_result["result"]["revision"].as_str().unwrap();
+    assert_eq!(failed_result["result"]["status"], "failed");
+    assert_eq!(f.checks(), 1);
+    host.shutdown().unwrap();
+    drop((host, runtime));
+
+    let (mut host, mut runtime) = f.open();
+    let retry = awaiting_action(&mut host, &mut runtime, NOW + MONTH, "p1.r1.edit");
+    let plan = runtime.plans_after(0, 1).unwrap().remove(0);
+    let context_id = plan.revisions[1].context_version_id.as_ref().unwrap();
+    let context = host.store().get(context_id).unwrap().unwrap();
+    assert_eq!(context.schema_id.0, "arcs.plan_replanning.v2");
+    let summary = &context.payload["steps"][1];
+    assert_eq!(summary["resolution"], "blocked");
+    assert_eq!(summary["output_version_ids"], json!([]));
+    assert_eq!(summary["failure_receipt_version_id"], json!(failed_receipt));
+    assert_eq!(
+        context.payload["context"][0],
+        json!({"version_id":failed_receipt,"payload_fields":["result"]})
+    );
+    assert_eq!(
+        result(&host, retry.candidate.as_ref())["base_commit"],
+        bad_commit
+    );
+    assert_eq!(git(&f, &["rev-parse", REF]).trim(), bad_commit);
+    assert_eq!(f.checks(), 1);
+    assert!(
+        approval(
+            &host,
+            &mut runtime,
+            &retry,
+            failed.candidate.as_ref().unwrap()
+        )
+        .is_err()
+    );
+
+    approval(
+        &host,
+        &mut runtime,
+        &retry,
+        retry.candidate.as_ref().unwrap(),
+    )
+    .unwrap();
+    let check = awaiting_action(&mut host, &mut runtime, NOW + MONTH, "p1.r1.check");
+    let fixed_commit = git(&f, &["rev-parse", REF]).trim().to_owned();
+    assert_ne!(fixed_commit, bad_commit);
+    assert_eq!(
+        result(&host, check.candidate.as_ref())["revision"],
+        fixed_commit
+    );
+    assert_eq!(f.checks(), 1);
+    approval(
+        &host,
+        &mut runtime,
+        &check,
+        check.candidate.as_ref().unwrap(),
+    )
+    .unwrap();
+    advance(&mut host, &mut runtime, NOW + MONTH, |runtime| {
+        (runtime.plans_after(0, 1).unwrap()[0].state == PlanState::ReadyForReview).then_some(())
+    });
+    let checked = runtime.goals_after(0, 10).unwrap().pop().unwrap();
+    let receipt = result(&host, checked.execution.as_ref());
+    assert_eq!(receipt["result"]["status"], "passed");
+    assert_eq!(receipt["result"]["revision"], fixed_commit);
+    assert_eq!(f.checks(), 2);
+    assert_eq!(
+        fs::read_to_string(f.path("project/calculator.py")).unwrap(),
+        BROKEN
+    );
+    host.shutdown().unwrap();
+}
+
+#[test]
+fn a_failed_receipt_stays_private_without_a_template_export() {
+    let f = Fixture::new();
+    configure_retry(&f, false);
+    let (mut host, mut runtime) = f.open();
+    let failed = run_failed_revision(&mut host, &mut runtime);
+    advance(&mut host, &mut runtime, NOW, |runtime| {
+        let plan = runtime.plans_after(0, 1).unwrap().remove(0);
+        matches!(plan.state, PlanState::Blocked | PlanState::Rejected).then_some(())
+    });
+    let db = rusqlite::Connection::open(f.path("retry.sqlite")).unwrap();
+    let input: String = db
+        .query_row(
+            "SELECT input FROM calls ORDER BY rowid DESC LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let invocation: Value = serde_json::from_str(&input).unwrap();
+    assert_eq!(invocation["constraints"]["task_replanning"]["revision"], 1);
+    assert!(!input.contains(&failed.execution.unwrap().0));
+    assert_eq!(f.checks(), 1);
+    host.shutdown().unwrap();
+}
+
+#[test]
+fn a_restarted_replanner_rejects_receipt_fields_outside_the_frozen_scope() {
+    let f = Fixture::new();
+    configure_retry(&f, true);
+    let (mut host, mut runtime) = f.open();
+    let failed = run_failed_revision(&mut host, &mut runtime);
+    host.shutdown().unwrap();
+    drop((host, runtime));
+
+    let db = rusqlite::Connection::open(f.path("runtime.sqlite")).unwrap();
+    let raw: String = db
+        .query_row(
+            "SELECT context_json FROM runtime_plan_replanning",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let mut context: Value = serde_json::from_str(&raw).unwrap();
+    assert_eq!(context["context"][0]["version_id"], json!(failed.execution));
+    context["context"][0]["payload_fields"] = json!(["result", "action_version"]);
+    db.execute(
+        "UPDATE runtime_plan_replanning SET context_json=?1",
+        [context.to_string()],
+    )
+    .unwrap();
+
+    let (mut host, mut runtime) = f.open();
+    advance(&mut host, &mut runtime, NOW + MONTH, |runtime| {
+        let plan = runtime.plans_after(0, 1).unwrap().remove(0);
+        (plan.state == PlanState::Blocked).then_some(())
+    });
+    let planner = rusqlite::Connection::open(f.path("retry.sqlite")).unwrap();
+    let calls: i64 = planner
+        .query_row("SELECT count(*) FROM calls", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(calls, 1);
+    let core = rusqlite::Connection::open(f.path("core.sqlite")).unwrap();
+    let publications: i64 = core
+        .query_row(
+            "SELECT count(*) FROM artifact_versions WHERE schema_id='arcs.plan_replanning.v2'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(publications, 0);
+    assert_eq!(f.checks(), 1);
+    host.shutdown().unwrap();
+}

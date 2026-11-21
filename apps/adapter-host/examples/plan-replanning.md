@@ -45,11 +45,12 @@ Checkpoint hält die bisherigen Schrittzustände und erlaubten Ergebnisbezüge
 fest. In derselben Journaltransaktion werden offene alte Zweige gestoppt.
 Erst nach diesem Commit werden zugehörige laufende Antworten aufgegeben.
 
-Das gemeinsame Artifact-Netz erhält den eingefrorenen Rückblick als
-`arcs.plan_replanning.v1`. Der Planer bekommt die ursprüngliche Eingabe,
-die frühere Vorschlagsstruktur, strukturierte Schrittzustände und ausgewählte
-Ergebnisse. Die Auswahl verwendet ausschließlich die `export_fields` der
-Betreibervorlagen und prüft die tatsächlichen abgeschlossenen Produzenten.
+Ohne exportierte Fehlerquittungen erhält das gemeinsame Artifact-Netz
+den eingefrorenen Rückblick als `arcs.plan_replanning.v1`. Der Planer
+bekommt die ursprüngliche Eingabe, die frühere Vorschlagsstruktur,
+strukturierte Schrittzustände und ausgewählte Ergebnisse. Für erfolgreiche
+Ergebnisse verwendet die Runtime die `export_fields` der Betreibervorlagen
+und prüft die tatsächlichen abgeschlossenen Produzenten.
 Rohe Adapterfehler und die vollständigen privaten Vorlagenparameter werden
 nicht an den Planer weitergereicht.
 
@@ -60,6 +61,36 @@ kennzeichnet ausgelassene Ergebnisse. Abhängigkeiten und Memory behalten ihre
 bestehenden Rechte und Grenzen; auch die normale Kontext-Bytegrenze gilt.
 Nicht jeder im Rückblick genannte Versionsbezug ist damit bereits als
 Artefaktinhalt an einen Reasoner übergeben worden.
+
+## Geprüfte Fehlerquittungen für den Ersatzplaner
+
+Eine Goal-Vorlage kann zusätzlich die letzte belegte fehlgeschlagene
+Ausführung freigeben. Dazu müssen Neuplanung und
+`goal.export_execution_schema_id` konfiguriert sein. Die Vorlage legt
+die Top-Level-Felder der Quittung fest.
+
+```json
+{
+  "replanning_failure_receipt_fields": ["result"]
+}
+```
+
+Die Runtime gibt die Quittung eines blockierten Goals oder eines Goals
+mit ausgeschöpftem Rundenbudget weiter, wenn sowohl das Assessment
+als auch das Outcome den Fehlschlag genau dieser Ausführung belegen.
+Fehlende oder unklare Wirkungsbelege bleiben außerhalb dieses Exports.
+Die Quittung erhält Vorrang vor optionalen erfolgreichen Ergebnissen
+im selben Kontextbudget. Die allgemeine Bytegrenze gilt weiterhin.
+Ohne Feldauswahl verwendet die Vorlage den bisherigen Kontext.
+
+Wenn mindestens eine solche Quittung aufgenommen wird, lautet das
+Rückblickschema `arcs.plan_replanning.v2`. Das Feld
+`steps[].failure_receipt_version_id` identifiziert jeweils die
+Quittung in den ausgewählten Eingaben. Der Schritt bleibt blockiert.
+Seine Fehlerquittung ist nur Kontext für den Ersatzplaner. Eine
+`previous_revision`-Kante verlangt weiterhin einen erfolgreichen
+Vorgängerschritt. Die Runtime prüft den gespeicherten Rückblick bei
+Wiederaufnahme vor der Veröffentlichung und Zustellung.
 
 ## Fertige Teilergebnisse übernehmen
 

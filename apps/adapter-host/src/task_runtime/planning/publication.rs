@@ -33,6 +33,10 @@ impl TaskRuntime {
                 PLAN_WITH_PREVIOUS_DEPENDENCIES,
             ),
             ("plan.replanning", REPLANNING_CONTEXT),
+            (
+                "plan.replanning_with_failures",
+                REPLANNING_CONTEXT_WITH_FAILURES,
+            ),
         ];
         let manifest=serde_json::from_value(json!({"protocol_version":1,"adapter_id":PLAN_ID,"adapter_version":"1","capabilities":caps.iter().map(|(id,schema)|json!({"id":id,"contract":{"kind":"input","emits":[schema]},"required_permissions":[]})).collect::<Vec<_>>()})).map_err(|e|invalid(e.to_string()))?;
         // Recording checked topology does not turn model-derived content into truth.
@@ -165,7 +169,11 @@ impl TaskRuntime {
         );
         let artifact = self.record_plan_artifact(
             host,
-            "plan.replanning",
+            if context.has_failure_evidence() {
+                "plan.replanning_with_failures"
+            } else {
+                "plan.replanning"
+            },
             &context.input_version_id,
             reference,
             serde_json::to_value(context).map_err(|e| invalid(e.to_string()))?,
@@ -203,14 +211,23 @@ impl TaskRuntime {
             .get(version)
             .map_err(HostError::Store)?
             .ok_or_else(|| invalid("replanning context artifact is missing"))?;
-        if artifact.schema_id.0 != REPLANNING_CONTEXT
+        if ![REPLANNING_CONTEXT, REPLANNING_CONTEXT_WITH_FAILURES]
+            .contains(&artifact.schema_id.0.as_str())
             || artifact.created_by.id != PLAN_ID
             || artifact.created_by.actor_type != ActorType::System
         {
             return Err(invalid("untrusted replanning context artifact"));
         }
-        serde_json::from_value(artifact.payload)
-            .map_err(|error| invalid(format!("invalid replanning context snapshot: {error}")))
+        let context: ReplanningContext = serde_json::from_value(artifact.payload)
+            .map_err(|error| invalid(format!("invalid replanning context snapshot: {error}")))?;
+        if context.has_failure_evidence()
+            != (artifact.schema_id.0 == REPLANNING_CONTEXT_WITH_FAILURES)
+        {
+            return Err(invalid(
+                "replanning context schema does not match failure evidence",
+            ));
+        }
+        Ok(context)
     }
 
     pub(super) fn load_plan(

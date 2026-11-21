@@ -1,7 +1,9 @@
 //! Revisions retain the original input and freeze only operator-authorized exports.
 use super::*;
 use crate::task_runtime::{
-    ReasoningRoute, TaskRuntime, config::invalid, dependencies::ParentResult,
+    ReasoningRoute, TaskRuntime,
+    config::invalid,
+    dependencies::{ParentResult, ParentTask, failed_goal_receipt},
 };
 use crate::{Host, HostError};
 use arcs::core::{Artifact, VersionId};
@@ -217,19 +219,17 @@ impl TaskRuntime {
         if tasks.len() != plan.steps.len() {
             return Err(invalid("accepted plan has incomplete operational steps"));
         }
+        let mut failures = Vec::new();
+        let mut outputs = Vec::new();
         for mut task in tasks {
             let step = plan
                 .steps
                 .iter()
                 .find(|s| s.route.id == task.route_id)
                 .ok_or_else(|| invalid("unknown previous plan step"))?;
-            task.fields = config
-                .templates
-                .iter()
-                .find(|t| t.route.id == step.template_id)
-                .ok_or_else(|| invalid("missing export policy"))?
-                .export_fields
-                .clone();
+            let template = export_template(config, step)?;
+            let failure = failure_selection(host, &task, template)?;
+            task.fields = template.export_fields.clone();
             let mut summary = ReplanningStep {
                 sequence: task.sequence,
                 id: step.id.clone(),
@@ -238,6 +238,7 @@ impl TaskRuntime {
                 resolution: "waiting".into(),
                 output_version_ids: vec![],
                 result_version_id: None,
+                failure_receipt_version_id: None,
             };
             match self.resolve_parent(host, task)? {
                 ParentResult::Ready(binding) => {
@@ -248,60 +249,44 @@ impl TaskRuntime {
                         .map(|c| c.version_id.clone())
                         .collect();
                     summary.result_version_id = Some(binding.result_version_id);
-                    for item in binding.context {
-                        if result
-                            .context
-                            .iter()
-                            .any(|c| c.version_id == item.version_id)
-                        {
-                            continue;
-                        }
-                        if result.context.len() < limit {
-                            result.context.push(item);
-                        } else {
-                            result.omitted_output_items += 1;
-                        }
+                    outputs.extend(binding.context);
+                }
+                ParentResult::Blocked(_) => {
+                    summary.resolution = "blocked".into();
+                    if let Some(item) = failure {
+                        failures.push((result.steps.len(), item));
                     }
                 }
-                ParentResult::Blocked(_) => summary.resolution = "blocked".into(),
                 ParentResult::Waiting => {}
             }
             result.steps.push(summary);
         }
+        // Give assessed failures the available slots before optional
+        // completed outputs, retaining deterministic step order within each.
+        for (index, item) in failures {
+            let version = item.version_id.clone();
+            if admit_export(&mut result, item, limit) {
+                result.steps[index].failure_receipt_version_id = Some(version);
+            }
+        }
+        for item in outputs {
+            admit_export(&mut result, item, limit);
+        }
         Ok(result)
     }
-    pub(super) fn replanning_inputs(
+    pub(super) fn validate_replanning_context(
         &self,
         host: &Host,
         input: &Artifact,
         route: &ReasoningRoute,
         context: &ReplanningContext,
-        version: &VersionId,
-    ) -> Result<Vec<ContextSelection>, HostError> {
+    ) -> Result<(), HostError> {
         if context.runtime_id != self.config.runtime_id
             || context.parent_sequence == 0
             || context.input_version_id != input.version_id
         {
             return Err(invalid("replanning input identity changed"));
         }
-        let mut inputs = vec![
-            ContextSelection {
-                version_id: input.version_id.clone(),
-                payload_fields: route.payload_fields.clone(),
-            },
-            ContextSelection {
-                version_id: context.previous_proposal_version_id.clone(),
-                payload_fields: vec!["steps".into()],
-            },
-            ContextSelection {
-                version_id: version.clone(),
-                payload_fields: vec![
-                    "revision".into(),
-                    "steps".into(),
-                    "omitted_output_items".into(),
-                ],
-            },
-        ];
         let config = route
             .plan
             .as_ref()
@@ -327,19 +312,23 @@ impl TaskRuntime {
                 .iter()
                 .find(|s| s.route.id == task.route_id)
                 .ok_or_else(|| invalid("unknown previous step"))?;
-            task.fields = config
-                .templates
-                .iter()
-                .find(|t| t.route.id == step.template_id)
-                .ok_or_else(|| invalid("missing template export scope"))?
-                .export_fields
-                .clone();
+            let template = export_template(config, step)?;
+            task.fields = template.export_fields.clone();
             let snapshot = context
                 .steps
                 .iter()
                 .find(|item| item.sequence == task.sequence)
                 .filter(|item| item.id == step.id && item.template_id == step.template_id)
                 .ok_or_else(|| invalid("replanning step snapshot identity changed"))?;
+            if let Some(version) = &snapshot.failure_receipt_version_id {
+                let selection = failure_selection(host, &task, template)?
+                    .filter(|item| &item.version_id == version && context.context.contains(item))
+                    .filter(|_| snapshot.resolution == "blocked" && snapshot.state == task.state)
+                    .ok_or_else(|| {
+                        invalid("replanning failure receipt changed or exceeds its export scope")
+                    })?;
+                permitted.push(selection);
+            }
             if let ParentResult::Ready(binding) = self.resolve_parent(host, task)? {
                 if snapshot.resolution != "ready"
                     || snapshot.result_version_id.as_ref() != Some(&binding.result_version_id)
@@ -357,19 +346,40 @@ impl TaskRuntime {
                 ));
             }
         }
-        for item in &context.context {
-            if !permitted
-                .iter()
-                .any(|p| p.version_id == item.version_id && p.payload_fields == item.payload_fields)
-            {
-                return Err(invalid(
-                    "replanning export is outside the completed step scope",
-                ));
-            }
-            inputs.push(item.clone());
+        if context.context.iter().any(|item| !permitted.contains(item)) {
+            return Err(invalid(
+                "replanning export is outside the configured step scope",
+            ));
         }
-        Ok(inputs)
+        Ok(())
     }
+
+    pub(super) fn replanning_inputs(
+        input: &Artifact,
+        route: &ReasoningRoute,
+        context: &ReplanningContext,
+        version: &VersionId,
+    ) -> Vec<ContextSelection> {
+        let mut inputs = vec![
+            ContextSelection {
+                version_id: input.version_id.clone(),
+                payload_fields: route.payload_fields.clone(),
+            },
+            ContextSelection {
+                version_id: context.previous_proposal_version_id.clone(),
+                payload_fields: vec!["steps".into()],
+            },
+            ContextSelection {
+                version_id: version.clone(),
+                payload_fields: ["revision", "steps", "omitted_output_items"]
+                    .map(str::to_owned)
+                    .to_vec(),
+            },
+        ];
+        inputs.extend(context.context.iter().cloned());
+        inputs
+    }
+
     pub(super) fn revision_budget(
         &self,
         host: &Host,
@@ -399,4 +409,48 @@ impl TaskRuntime {
             Ok(None)
         }
     }
+}
+
+fn export_template<'a>(
+    config: &'a PlanningConfig,
+    step: &AcceptedStep,
+) -> Result<&'a StepTemplate, HostError> {
+    config
+        .templates
+        .iter()
+        .find(|template| template.route.id == step.template_id)
+        .ok_or_else(|| invalid("missing template export policy"))
+}
+
+fn failure_selection(
+    host: &Host,
+    task: &ParentTask,
+    template: &StepTemplate,
+) -> Result<Option<ContextSelection>, HostError> {
+    let fields = &template.replanning_failure_receipt_fields;
+    if fields.is_empty() {
+        return Ok(None);
+    }
+    let goal = template
+        .route
+        .goal
+        .as_ref()
+        .ok_or_else(|| invalid("failure receipt needs a goal template"))?;
+    failed_goal_receipt(host, task, goal, fields)
+}
+
+fn admit_export(context: &mut ReplanningContext, item: ContextSelection, limit: usize) -> bool {
+    if context
+        .context
+        .iter()
+        .any(|selected| selected.version_id == item.version_id)
+    {
+        return false;
+    }
+    if context.context.len() >= limit {
+        context.omitted_output_items += 1;
+        return false;
+    }
+    context.context.push(item);
+    true
 }

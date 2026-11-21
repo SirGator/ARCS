@@ -533,6 +533,13 @@
 > revisionsgenaue Prüfung. Ein Neustart zwischen Korrektur und Prüfung
 > erhält die Zuordnung und die separate Freigabe für die Prüfung.
 >
+> Fünfzigster Schritt gemäß v3 §5.2 HET-06, §8.2 LNG-05/LNG-09
+> und TEST-02. Der Ersatzplaner kann die gezielt freigegebene Quittung
+> einer nachweislich fehlgeschlagenen Ausführung als Kontext erhalten.
+> Der Plan hält Fehlversuch und erfolgreiche Exporte getrennt.
+> Ein Softwaretest demonstriert den Wechsel zu einer zweiten
+> Korrektur mit eigener Prüfung und erneuten Freigaben.
+>
 **Leitbild:** ARCS ist ein universeller Agent. Es soll sich einfach bedienen lassen, beliebige kompatible Systeme verbinden, eigenständig Probleme lösen und langfristige Aufgaben über Monate verfolgen.
 
 ## 1. Verbindliche Architekturregeln

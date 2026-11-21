@@ -21,6 +21,7 @@ pub const REUSE_PLAN_CANDIDATE: &str = "arcs.plan_candidate.v2";
 pub const ACCEPTED_PLAN: &str = "arcs.plan.v1";
 pub const VERSIONED_PLAN: &str = "arcs.plan.v2";
 pub const PLAN_WITH_PREVIOUS_DEPENDENCIES: &str = "arcs.plan.v3";
+pub const REPLANNING_CONTEXT_WITH_FAILURES: &str = "arcs.plan_replanning.v2";
 pub const REPLANNING_CONTEXT: &str = "arcs.plan_replanning.v1";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -52,6 +53,13 @@ pub struct ReplanningContext {
     pub context: Vec<arcs::reasoning::ContextSelection>,
     pub omitted_output_items: usize,
 }
+impl ReplanningContext {
+    fn has_failure_evidence(&self) -> bool {
+        self.steps
+            .iter()
+            .any(|step| step.failure_receipt_version_id.is_some())
+    }
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReplanningStep {
@@ -63,6 +71,8 @@ pub struct ReplanningStep {
     pub output_version_ids: Vec<VersionId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub result_version_id: Option<VersionId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure_receipt_version_id: Option<VersionId>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -83,6 +93,8 @@ pub struct PlanningConfig {
 pub struct StepTemplate {
     pub route: ReasoningRoute,
     pub export_fields: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub replanning_failure_receipt_fields: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output: Option<PlanOutputPolicy>,
 }

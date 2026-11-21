@@ -156,6 +156,7 @@ impl TaskRuntime {
             constraints = serde_json::json!({"operator_constraints":constraints,"task_planning":config.catalog(host)?});
         }
         let (revision, context, meta) = if let Some(pending) = &pending {
+            self.validate_replanning_context(host, input, route, &pending.context)?;
             let artifact = self.publish_replanning_context(host, &pending.context)?;
             if pending
                 .version
@@ -182,7 +183,7 @@ impl TaskRuntime {
                 });
             }
             let inputs =
-                self.replanning_inputs(host, input, route, &pending.context, &artifact.version_id)?;
+                Self::replanning_inputs(input, route, &pending.context, &artifact.version_id);
             (
                 pending.context.revision,
                 inputs,

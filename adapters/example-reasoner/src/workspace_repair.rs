@@ -86,24 +86,45 @@ pub fn reason(invocation: &ReasoningInvocationV2) -> Result<ReasoningResponseV2,
             };
             let receipt = bound_context(invocation, &metadata["execution_version_id"], schema)?;
             let result = &receipt.payload["result"];
-            let (success, detail) = if candidate.schema_id.0 == EDIT {
-                (
-                    successful_edit(result, &candidate.payload).is_some(),
-                    "The edit receipt must confirm publication of the requested file change.",
-                )
+            let (effect, detail) = if candidate.schema_id.0 == EDIT {
+                if successful_edit(result, &candidate.payload).is_some() {
+                    (
+                        "success",
+                        "The approved edit is present on the Git reference.",
+                    )
+                } else {
+                    (
+                        "unknown",
+                        "The receipt does not verify publication of the requested edit.",
+                    )
+                }
+            } else if result["revision"] == candidate.payload["revision"]
+                && result["check"] == candidate.payload["check"]
+            {
+                match (result["status"].as_str(), result["exit_code"].as_i64()) {
+                    (Some("passed"), Some(0)) => (
+                        "success",
+                        "The named check passed on the requested Git commit.",
+                    ),
+                    (Some("failed"), Some(code)) if code != 0 => (
+                        "failure",
+                        "The named check failed on the requested Git commit.",
+                    ),
+                    _ => (
+                        "unknown",
+                        "The receipt does not establish a completed check.",
+                    ),
+                }
             } else {
                 (
-                    result["status"] == "passed"
-                        && result["exit_code"] == 0
-                        && result["revision"] == candidate.payload["revision"]
-                        && result["check"] == candidate.payload["check"],
-                    "The named check must pass on the requested Git commit.",
+                    "unknown",
+                    "The receipt belongs to a different check or Git revision.",
                 )
             };
             versions.extend([candidate.version_id.clone(), receipt.version_id.clone()]);
             json!({
-                "goal_status": if success {"achieved"} else {"blocked"},
-                "effect": if success {"success"} else {"unknown"},
+                "goal_status": if effect == "success" {"achieved"} else {"blocked"},
+                "effect": effect,
                 "detail":detail,
                 "evidence_version_ids":[receipt.version_id]
             })

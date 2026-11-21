@@ -19,9 +19,11 @@ pub fn reason(invocation: &ReasoningInvocationV2) -> Result<ReasoningResponseV2,
         .as_array()
         .ok_or_else(|| AdapterError::rejected("missing authorized planning catalog"))?;
     let reconsideration = invocation.context.iter().find(|item| {
-        item.schema_id.0 == "arcs.plan_replanning.v1"
-            && invocation.constraints["task_replanning"]["context_version_id"].as_str()
-                == Some(item.version_id.0.as_str())
+        matches!(
+            item.schema_id.0.as_str(),
+            "arcs.plan_replanning.v1" | "arcs.plan_replanning.v2"
+        ) && invocation.constraints["task_replanning"]["context_version_id"].as_str()
+            == Some(item.version_id.0.as_str())
     });
     let rejected = reconsideration
         .and_then(|c| c.payload.get("steps"))

@@ -24,6 +24,7 @@ const BUNDLED_SCHEMAS: &[&str] = &[
     include_str!("../../../schemas/v2/plan.schema.json"),
     include_str!("../../../schemas/v3/plan.schema.json"),
     include_str!("../../../schemas/v1/plan-replanning.schema.json"),
+    include_str!("../../../schemas/v2/plan-replanning.schema.json"),
     include_str!("../../../schemas/v1/context-selection.schema.json"),
     include_str!("../../../schemas/v2/reasoning-request.schema.json"),
     include_str!("../../../schemas/v2/reasoning-result.schema.json"),

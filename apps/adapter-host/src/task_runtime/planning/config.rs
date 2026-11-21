@@ -63,18 +63,23 @@ impl PlanningConfig {
                 || !ids.insert(&route.id)
                 || route.source != owner.source
                 || route.input_schema_id != owner.input_schema_id
-                || template.export_fields.is_empty()
-                || template.export_fields.len() > 64
-                || template
-                    .export_fields
-                    .iter()
-                    .any(|field| field.trim().is_empty() || field.len() > 128)
-                || template.export_fields.iter().collect::<HashSet<_>>().len()
-                    != template.export_fields.len()
+                || !valid_export_fields(&template.export_fields)
                 || route.constraints.get("task_dependencies").is_some()
             {
                 return Err(invalid(
                     "plan templates must be distinct authorized routes for the same input, without nested plans or fixed dependencies, with explicit exports and action authority confined to goals",
+                ));
+            }
+            if !template.replanning_failure_receipt_fields.is_empty()
+                && (self.replanning.is_none()
+                    || !valid_export_fields(&template.replanning_failure_receipt_fields)
+                    || route
+                        .goal
+                        .as_ref()
+                        .is_none_or(|goal| goal.export_execution_schema_id.is_none()))
+            {
+                return Err(invalid(
+                    "failure receipt fields require goal execution export and enabled replanning",
                 ));
             }
             if self.replanning.is_some()
@@ -160,6 +165,9 @@ impl PlanningConfig {
                     entry["goal_limits"] = json!({"max_rounds":goal.max_rounds,"initial_assessment":goal.initial_assessment,
                         "approval":"manual","actions":goal.actions.iter().map(|a| &a.capability).collect::<Vec<_>>(),
                         "assessment_method":goal.assessment.method,"assessment_budget":goal.assessment.budget});
+                }
+                if !template.replanning_failure_receipt_fields.is_empty() {
+                    entry["replanning_failure_receipt_fields"] = json!(template.replanning_failure_receipt_fields);
                 }
                 entry
             }).collect::<Vec<_>>()});
@@ -341,6 +349,14 @@ impl PlanningConfig {
         crate::task_runtime::dependencies::validate_routes(&validation_routes)?;
         Ok(accepted)
     }
+}
+
+fn valid_export_fields(fields: &[String]) -> bool {
+    (1..=64).contains(&fields.len())
+        && fields
+            .iter()
+            .all(|field| !field.trim().is_empty() && field.len() <= 128)
+        && fields.iter().collect::<HashSet<_>>().len() == fields.len()
 }
 
 /// A prior step contributes only its versioned exports admitted to the replanner's context.
