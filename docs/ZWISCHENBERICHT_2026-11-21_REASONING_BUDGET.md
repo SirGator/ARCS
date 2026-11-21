@@ -17,8 +17,8 @@ erfolgreichen Wiederholung der Speicherung.
 Vor einem freigegebenen Aktorauftrag sichert die Runtime den Platz für die
 anschließende Wirkungsbewertung. Bei fehlendem Platz endet die Aufgabe
 mit dem Status `budget_exhausted`. Das Kontrollpanel zeigt den Verbrauch
-und das Limit in den Aufgabendetails. CLI und Monitor liefern dieselben
-Werte in der Aufgabenwarteschlange. Die [Konfiguration und Aufrufsemantik](../apps/adapter-host/examples/plan-replanning.md#kontingent-für-reasoning-anfragen)
+und das Limit in den Aufgabendetails. Der Host-Monitor liefert dieselben
+Werte über den Befehl `queue`. Die [Konfiguration und Aufrufsemantik](../apps/adapter-host/examples/plan-replanning.md#kontingent-für-reasoning-anfragen)
 sind im Beispiel zur Neuplanung beschrieben.
 
 ## Geprüfte Abläufe
@@ -36,6 +36,14 @@ sind im Beispiel zur Neuplanung beschrieben.
 - Ein simulierter Lüfter bleibt trotz erteilter Freigabe ohne
   Wirkungsbewertungskapazität unverändert. Mit freiem Platz für die
   Bewertung wird eine Aktion ausgeführt und ihre Wirkung belegt.
+- Der native Host startete sechs Arbeitspläne mit je drei Schritten.
+  Nach dem Stoppen des Hosts waren noch Aufgaben offen. Der Neustart
+  führte alle sechs Pläne zu Ende. Die Aufgabenwarteschlange zeigte für
+  jeden Plan ein eigenes Kontingent mit vier belegten Plätzen.
+
+Der Rust-Workspace hat 677 Tests bestanden. Dazu kommen 48 GTK-Tests
+und 33 Drohnensimulator-Tests. Die Monatstests für Arbeitspläne und
+wiederkehrende Prüfungen wurden zusätzlich gezielt ausgeführt.
 
 Auch mit dem Kontingent kann ein erneuter Versand derselben Request-ID nach
 einem Verbindungsverlust beim Anbieter weitere Kosten erzeugen. Die

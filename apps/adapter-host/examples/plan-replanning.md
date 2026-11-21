@@ -112,6 +112,14 @@ Reasoning-Anfragen zugelassen. Die Aufgabenwarteschlange zeigt unter
 `reasoning_budget` die Aufgabensequenz sowie den Verbrauch und das Limit.
 Im Kontrollpanel stehen dieselben Werte in den Aufgabendetails.
 
+Bei einem Host mit `--monitor --control-stdin --stop-file monitor.stop`
+fragt diese JSON-Zeile die ersten 25 Aufgaben einschließlich abgeschlossener
+Einträge ab.
+
+```json
+{"request_id":"plan-budgets","control":{"kind":"queue","command":{"scope":"all","limit":25}}}
+```
+
 Ein Adapter kann nach einem verlorenen Antwortpaket dieselbe Anfrage erneut
 erhalten. Je nach Anbieter kann dabei ein weiterer abrechenbarer Aufruf
 anfallen. Das Kontingent begrenzt unterschiedliche ARCS-Request-IDs.
