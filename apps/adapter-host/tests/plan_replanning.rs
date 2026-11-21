@@ -453,6 +453,231 @@ fn completed_step_exports_are_available_without_private_template_fields_or_unsel
     assert_no_authority(&host);
     host.shutdown().unwrap();
 }
+fn export_reuse_fixture() -> Fixture {
+    let f = fixture();
+    let mut config = f.read("runtime.json");
+    config["routes"][0]["plan"]["templates"][0]["route"]["budget"]["max_context_items"] = json!(2);
+    config["routes"][0]["plan"]["replanning"]["reuse_completed_exports"] = json!(true);
+    config["routes"][0]["target_schema_id"] = json!("arcs.plan_candidate.v2");
+    config["routes"][0]["max_reasoning_requests"] = json!(6);
+    f.write("runtime.json", config);
+    let mut model = f.read("planner.json");
+    model["target_schema_id"] = json!("arcs.plan_candidate.v2");
+    model["proposal"] = json!({"steps":[
+        {"id":"done","template":"b"},
+        {"id":"fails","template":"a","dependencies":[{"step_id":"done","payload_fields":["value"]}]}
+    ]});
+    model["revisions"]["1"] = json!({"steps":[
+        {"id":"reuse","template":"join","dependencies":[
+            {"step_id":"done","previous_revision":true,"payload_fields":["value"]}
+        ]},
+        {"id":"total","template":"join","dependencies":[
+            {"step_id":"done","previous_revision":true,"payload_fields":["value"]},
+            {"step_id":"reuse","payload_fields":["value"]}
+        ]}
+    ]});
+    f.write("planner.json", model);
+    f
+}
+
+#[test]
+fn previous_revision_exports_feed_pinned_and_live_dependencies_after_admission_rollback() {
+    let f = export_reuse_fixture();
+    let (mut host, mut runtime) = f.open();
+    let db = rusqlite::Connection::open(f.directory.join("runtime.sqlite")).unwrap();
+    db.execute_batch(
+        "CREATE TRIGGER lose_reused_exports BEFORE INSERT ON runtime_job_joins
+         WHEN NEW.bindings_json != '[]' AND EXISTS(
+            SELECT 1 FROM runtime_jobs WHERE sequence=NEW.sequence AND route_id='p1.r1.total'
+         )
+         BEGIN SELECT RAISE(ABORT,'simulated predecessor export checkpoint rollback'); END;",
+    )
+    .unwrap();
+    support::wait_for_interrupted_checkpoint(|| runtime.tick(&mut host));
+    let published = artifacts(&host, "arcs.plan.v3");
+    assert_eq!(published.len(), 1);
+    assert_eq!(artifacts(&host, "arcs.plan.v2").len(), 1);
+    assert_eq!(runtime.plans_after(0, 1).unwrap()[0].revisions.len(), 1);
+    assert_eq!(f.count("join", "attempts"), 0);
+    db.execute_batch("DROP TRIGGER lose_reused_exports")
+        .unwrap();
+    host.shutdown().unwrap();
+    drop((host, runtime, db));
+
+    let (mut host, mut runtime) = f.open();
+    until(&mut host, &mut runtime, terminal);
+    let plan = runtime.plans_after(0, 1).unwrap().remove(0);
+    assert_eq!(plan.state, PlanState::ReadyForReview);
+    assert_eq!(plan.plan_version_id, Some(published[0].version_id.clone()));
+    assert_eq!(plan.revisions.len(), 2);
+    assert_eq!(f.count("planner", "attempts"), 2);
+    assert_eq!(f.count("b", "attempts"), 1);
+    assert_eq!(f.count("a", "attempts"), 1);
+    assert_eq!(f.count("join", "attempts"), 2);
+    let original = plan
+        .steps
+        .iter()
+        .find(|step| step.revision == 0 && step.id == "done")
+        .unwrap();
+    let original_result = runtime
+        .completed_after(original.sequence - 1, 1)
+        .unwrap()
+        .remove(0);
+    let expected = &original_result.candidate_version_ids[0];
+    let reuse = plan.steps.iter().find(|step| step.id == "reuse").unwrap();
+    let total = plan.steps.iter().find(|step| step.id == "total").unwrap();
+    for sequence in [reuse.sequence, total.sequence] {
+        let join = runtime
+            .dependencies_after(sequence - 1, 1)
+            .unwrap()
+            .remove(0);
+        assert_eq!(join.sequence, sequence);
+        assert_eq!(join.bindings[0].sequence, original.sequence);
+        assert_eq!(&join.bindings[0].context[0].version_id, expected);
+        assert_eq!(join.bindings[0].context[0].payload_fields, ["value"]);
+        assert_eq!(
+            join.bindings.len(),
+            if sequence == total.sequence { 2 } else { 1 }
+        );
+    }
+    let total_result = runtime
+        .completed_after(total.sequence - 1, 1)
+        .unwrap()
+        .remove(0);
+    let result = host
+        .store()
+        .get(&total_result.candidate_version_ids[0])
+        .unwrap()
+        .unwrap();
+    let previous = host.store().get(expected).unwrap().unwrap();
+    assert_eq!(
+        result.payload["value"].as_f64(),
+        previous.payload["value"].as_f64().map(|v| v * 2.0)
+    );
+    assert!(
+        arcs::store::ArtifactRelations::new(host.store())
+            .outgoing(&published[0].version_id)
+            .unwrap()
+            .iter()
+            .any(
+                |edge| &edge.to == expected && edge.kind == arcs::store::relation_kinds::based_on()
+            )
+    );
+    let input = &planner_inputs(&f)[1];
+    assert_eq!(
+        input["constraints"]["task_replanning"]["previous_step_dependency"]["previous_revision"],
+        true
+    );
+    assert_no_authority(&host);
+    host.shutdown().unwrap();
+}
+
+#[test]
+fn previous_revision_exports_can_feed_a_later_revision_from_a_v3_plan() {
+    let f = export_reuse_fixture();
+    f.peer("c", "fail", false);
+    let mut config = f.read("runtime.json");
+    config["routes"][0]["max_reasoning_requests"] = json!(8);
+    config["routes"][0]["plan"]["replanning"]["max_revisions"] = json!(2);
+    let templates = config["routes"][0]["plan"]["templates"]
+        .as_array_mut()
+        .unwrap();
+    let mut failed = templates[0].clone();
+    failed["route"]["id"] = json!("c");
+    failed["route"]["reasoner"]["adapter_id"] = json!("c");
+    templates.push(failed);
+    f.write("runtime.json", config);
+    let mut model = f.read("planner.json");
+    model["revisions"]["1"]["steps"][1] = json!({
+        "id":"fails_again","template":"c","dependencies":[{"step_id":"reuse","payload_fields":["value"]}]
+    });
+    model["revisions"]["2"] = json!({"steps":[
+        {"id":"final","template":"join","dependencies":[
+            {"step_id":"reuse","previous_revision":true,"payload_fields":["value"]}
+        ]}
+    ]});
+    f.write("planner.json", model);
+    let (mut host, mut runtime) = f.open();
+    until(&mut host, &mut runtime, terminal);
+    let plan = runtime.plans_after(0, 1).unwrap().remove(0);
+    assert_eq!(plan.state, PlanState::ReadyForReview);
+    assert_eq!(plan.revisions.len(), 3);
+    assert_eq!(artifacts(&host, "arcs.plan.v3").len(), 2);
+    let predecessor = plan
+        .steps
+        .iter()
+        .find(|step| step.revision == 1 && step.id == "reuse")
+        .unwrap();
+    let current = plan.steps.iter().find(|step| step.revision == 2).unwrap();
+    let dependency = runtime
+        .dependencies_after(current.sequence - 1, 1)
+        .unwrap()
+        .remove(0);
+    assert_eq!(dependency.sequence, current.sequence);
+    assert_eq!(dependency.bindings[0].sequence, predecessor.sequence);
+    assert_eq!(f.count("b", "attempts"), 1);
+    assert_eq!(f.count("a", "attempts"), 1);
+    assert_eq!(f.count("c", "attempts"), 1);
+    assert_eq!(f.count("join", "attempts"), 2);
+    assert_eq!(f.count("planner", "attempts"), 3);
+    assert_no_authority(&host);
+    host.shutdown().unwrap();
+}
+
+#[test]
+fn previous_revision_dependencies_require_an_enabled_completed_visible_export() {
+    for (case, rejection) in [
+        ("disabled", "not enabled"),
+        ("initial", "require a replacement plan"),
+        ("failed", "completed predecessor step"),
+        ("private", "exceeds the predecessor exports"),
+        ("omitted", "omitted from the replanning context"),
+        ("capacity", "context budget must reserve room"),
+    ] {
+        let f = export_reuse_fixture();
+        let mut model = f.read("planner.json");
+        let mut config = f.read("runtime.json");
+        match case {
+            "disabled" => {
+                config["routes"][0]["plan"]["replanning"]["reuse_completed_exports"] = json!(false);
+            }
+            "initial" => {
+                model["proposal"] = model["revisions"]["1"].clone();
+            }
+            "failed" => {
+                model["revisions"]["1"]["steps"][0]["dependencies"][0]["step_id"] = json!("fails");
+            }
+            "private" => {
+                model["revisions"]["1"]["steps"][0]["dependencies"][0]["payload_fields"] =
+                    json!(["distance"]);
+            }
+            "omitted" => config["routes"][0]["budget"]["max_context_items"] = json!(3),
+            "capacity" => {
+                config["routes"][0]["plan"]["templates"][2]["route"]["budget"]["max_context_items"] =
+                    json!(2);
+            }
+            _ => unreachable!(),
+        }
+        f.write("planner.json", model);
+        f.write("runtime.json", config);
+        let (mut host, mut runtime) = f.open();
+        until(&mut host, &mut runtime, terminal);
+        let plan = runtime.plans_after(0, 1).unwrap().remove(0);
+        assert_eq!(plan.state, PlanState::Rejected, "{case}: {plan:?}");
+        assert!(
+            plan.detail
+                .as_deref()
+                .unwrap_or_default()
+                .contains(rejection),
+            "{case}: {plan:?}"
+        );
+        assert_eq!(plan.revisions.len(), usize::from(case != "initial"));
+        assert_eq!(f.count("join", "attempts"), 0);
+        assert_no_authority(&host);
+        host.shutdown().unwrap();
+    }
+}
+
 #[test]
 fn cumulative_token_budget_cannot_be_reset_by_a_new_plan() {
     let f = fixture();

@@ -66,7 +66,7 @@ impl TaskRuntime {
     pub(super) fn advance_dependencies(&mut self, host: &Host) -> Result<(), HostError> {
         let mut visited = std::collections::HashSet::new();
         for _ in 0..self.config.max_jobs_per_tick {
-            let Some(sequence) = self.journal.next_dependency_wait()? else {
+            let Some((sequence, mut bindings)) = self.journal.next_dependency_wait()? else {
                 break;
             };
             if !visited.insert(sequence) {
@@ -76,7 +76,6 @@ impl TaskRuntime {
             if parents.is_empty() {
                 return Err(invalid("dependency edges are missing"));
             }
-            let mut bindings = Vec::new();
             let mut waiting = false;
             let mut blocked = None;
             for parent in parents {

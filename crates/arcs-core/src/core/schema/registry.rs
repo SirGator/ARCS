@@ -19,8 +19,10 @@ const BUNDLED_SCHEMAS: &[&str] = &[
     include_str!("../../../schemas/v1/reasoner-selection.schema.json"),
     include_str!("../../../schemas/v1/resource-reservation.schema.json"),
     include_str!("../../../schemas/v1/plan-candidate.schema.json"),
+    include_str!("../../../schemas/v2/plan-candidate.schema.json"),
     include_str!("../../../schemas/v1/plan.schema.json"),
     include_str!("../../../schemas/v2/plan.schema.json"),
+    include_str!("../../../schemas/v3/plan.schema.json"),
     include_str!("../../../schemas/v1/plan-replanning.schema.json"),
     include_str!("../../../schemas/v1/context-selection.schema.json"),
     include_str!("../../../schemas/v2/reasoning-request.schema.json"),
@@ -754,6 +756,52 @@ mod tests {
         assert!(
             registry
                 .validate(&SchemaId("arcs.plan.v2".into()), &plan)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn predecessor_exports_use_new_plan_and_proposal_contracts() {
+        let registry = SchemaRegistry::with_bundled_schemas().unwrap();
+        let proposal = json!({"steps":[{
+            "id":"step","template":"allowed","dependencies":[
+                {"step_id":"previous","previous_revision":true,"payload_fields":["value"]}
+            ]
+        }]});
+        assert!(
+            registry
+                .validate(&SchemaId("arcs.plan_candidate.v1".into()), &proposal)
+                .is_err()
+        );
+        assert!(
+            registry
+                .validate(&SchemaId("arcs.plan_candidate.v2".into()), &proposal)
+                .is_ok()
+        );
+
+        let mut plan = json!({
+            "runtime_id":"test","parent_sequence":1,"parent_route_id":"root",
+            "input_version_id":"input:1","proposal_version_id":"proposal:1",
+            "revision":{"index":1,"previous_plan_version_id":"plan:0","context_version_id":"context:1"},
+            "steps":[{"id":"step","template_id":"allowed","route":{},"previous_dependencies":[
+                {"sequence":2,"route_id":"p1.r0.previous","result_version_id":"result:2",
+                 "context":[{"version_id":"candidate:2","payload_fields":["value"]}]}
+            ]}]
+        });
+        assert!(
+            registry
+                .validate(&SchemaId("arcs.plan.v2".into()), &plan)
+                .is_err()
+        );
+        assert!(
+            registry
+                .validate(&SchemaId("arcs.plan.v3".into()), &plan)
+                .is_ok()
+        );
+        plan["revision"]["index"] = json!(0);
+        assert!(
+            registry
+                .validate(&SchemaId("arcs.plan.v3".into()), &plan)
                 .is_err()
         );
     }

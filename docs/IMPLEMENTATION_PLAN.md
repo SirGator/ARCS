@@ -489,6 +489,14 @@
 > reserviert die Wirkungsbewertung vor der Aktorausführung. CLI und GTK zeigen
 > den Verbrauch und das Limit pro Aufgabe.
 
+> Vierundvierzigster Schritt gemäß v3 §7.2 PAR-02/PAR-10 und §8.2
+> LNG-02/LNG-05/LNG-07. Ein Ersatzplan kann die sichtbaren, freigegebenen
+> Exporte aus erfolgreichen Schritten seines direkten Vorgängers als
+> Eingaben verwenden. Das Planartefakt hält die genauen Versionen fest.
+> Die Runtime übernimmt die Bindungen mit der neuen Generation in die
+> bestehende Abhängigkeitsverwaltung und führt die neuen Schritte nach
+> ihren normalen Budgets aus.
+
 **Leitbild:** ARCS ist ein universeller Agent. Es soll sich einfach bedienen lassen, beliebige kompatible Systeme verbinden, eigenständig Probleme lösen und langfristige Aufgaben über Monate verfolgen.
 
 ## 1. Verbindliche Architekturregeln

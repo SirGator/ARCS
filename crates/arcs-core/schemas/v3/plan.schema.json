@@ -1,0 +1,115 @@
+{
+  "$id": "arcs.plan.v3",
+  "type": "object",
+  "required": [
+    "runtime_id",
+    "parent_sequence",
+    "parent_route_id",
+    "input_version_id",
+    "proposal_version_id",
+    "steps",
+    "revision"
+  ],
+  "properties": {
+    "runtime_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "parent_sequence": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "parent_route_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "input_version_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "proposal_version_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "template_id",
+          "route"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "template_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "route": {
+            "type": "object"
+          },
+          "previous_dependencies": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": ["sequence", "route_id", "result_version_id", "context"],
+              "properties": {
+                "sequence": { "type": "integer", "minimum": 1 },
+                "route_id": { "type": "string", "minLength": 1 },
+                "result_version_id": { "type": "string", "minLength": 1 },
+                "context": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "object",
+                    "required": ["version_id", "payload_fields"],
+                    "properties": {
+                      "version_id": { "type": "string", "minLength": 1 },
+                      "payload_fields": {
+                        "type": "array",
+                        "minItems": 1,
+                        "items": { "type": "string", "minLength": 1 }
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "revision": {
+      "type": "object",
+      "required": [
+        "index"
+      ],
+      "properties": {
+        "index": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 7
+        },
+        "previous_plan_version_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "context_version_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

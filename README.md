@@ -62,7 +62,8 @@ dokumentiert Slice 39. Der [Bericht zur dauerhaften Ausgabewarteschlange](docs/Z
 dokumentiert Slice 40. Der [Bericht zur geprüften Aufgabenausgabe](docs/ZWISCHENBERICHT_2026-11-21_TASK_OUTPUT.md)
 dokumentiert Slice 41. Der [Bericht zu Entwürfen aus Arbeitsplänen](docs/ZWISCHENBERICHT_2026-11-21_PLAN_OUTPUT.md)
 dokumentiert Slice 42. Der [Bericht zum Reasoning-Kontingent](docs/ZWISCHENBERICHT_2026-11-21_REASONING_BUDGET.md)
-dokumentiert Slice 43. Die Berichte vom
+dokumentiert Slice 43. Der [Bericht zur Übernahme fertiger Teilergebnisse](docs/ZWISCHENBERICHT_2026-11-21_PLAN_REUSE.md)
+dokumentiert Slice 44. Die Berichte vom
 [17. November](docs/ZWISCHENBERICHT_2026-11-17.md) und
 [16. November](docs/ZWISCHENBERICHT_2026-11-16.md) dokumentieren frühere
 Umsetzungsstände, Prüfergebnisse und offene Grenzen.

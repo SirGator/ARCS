@@ -6,7 +6,10 @@ mod engine;
 mod publication;
 mod replanning;
 
-use super::{ReasoningRoute, dependencies::TaskDependency};
+use super::{
+    ReasoningRoute,
+    dependencies::{DependencyBinding, TaskDependency},
+};
 use arcs::{
     adapters::CapabilityRef,
     core::{SchemaId, VersionId},
@@ -14,14 +17,18 @@ use arcs::{
 use serde::{Deserialize, Serialize};
 
 pub const PLAN_CANDIDATE: &str = "arcs.plan_candidate.v1";
+pub const REUSE_PLAN_CANDIDATE: &str = "arcs.plan_candidate.v2";
 pub const ACCEPTED_PLAN: &str = "arcs.plan.v1";
 pub const VERSIONED_PLAN: &str = "arcs.plan.v2";
+pub const PLAN_WITH_PREVIOUS_DEPENDENCIES: &str = "arcs.plan.v3";
 pub const REPLANNING_CONTEXT: &str = "arcs.plan_replanning.v1";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReplanningPolicy {
     pub max_revisions: u8,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub reuse_completed_exports: bool,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -110,6 +117,8 @@ pub struct ProposedStep {
 pub struct StepDependency {
     pub step_id: String,
     pub payload_fields: Vec<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub previous_revision: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -130,6 +139,8 @@ pub struct AcceptedStep {
     pub id: String,
     pub template_id: String,
     pub route: ReasoningRoute,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub previous_dependencies: Vec<DependencyBinding>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

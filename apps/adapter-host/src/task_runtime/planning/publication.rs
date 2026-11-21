@@ -28,6 +28,10 @@ impl TaskRuntime {
         let caps = [
             ("plan.record", ACCEPTED_PLAN),
             ("plan.record_versioned", VERSIONED_PLAN),
+            (
+                "plan.record_with_previous_dependencies",
+                PLAN_WITH_PREVIOUS_DEPENDENCIES,
+            ),
             ("plan.replanning", REPLANNING_CONTEXT),
         ];
         let manifest=serde_json::from_value(json!({"protocol_version":1,"adapter_id":PLAN_ID,"adapter_version":"1","capabilities":caps.iter().map(|(id,schema)|json!({"id":id,"contract":{"kind":"input","emits":[schema]},"required_permissions":[]})).collect::<Vec<_>>()})).map_err(|e|invalid(e.to_string()))?;
@@ -99,7 +103,13 @@ impl TaskRuntime {
         );
         let artifact = self.record_plan_artifact(
             host,
-            if plan.revision.is_some() {
+            if plan
+                .steps
+                .iter()
+                .any(|step| !step.previous_dependencies.is_empty())
+            {
+                "plan.record_with_previous_dependencies"
+            } else if plan.revision.is_some() {
                 "plan.record_versioned"
             } else {
                 "plan.record"
@@ -122,6 +132,17 @@ impl TaskRuntime {
             }
             if let Some(context) = &revision.context_version_id {
                 parents.push((context.clone(), relation_kinds::based_on()));
+            }
+        }
+        for item in plan
+            .steps
+            .iter()
+            .flat_map(|step| &step.previous_dependencies)
+            .flat_map(|binding| &binding.context)
+        {
+            let parent = (item.version_id.clone(), relation_kinds::based_on());
+            if !parents.contains(&parent) {
+                parents.push(parent);
             }
         }
         self.relate_plan(host, &artifact, &parents)?;
@@ -172,6 +193,26 @@ impl TaskRuntime {
         self.relate_plan(host, &artifact, &parents)?;
         Ok(artifact)
     }
+    pub(super) fn load_replanning_context(
+        &self,
+        host: &Host,
+        version: &VersionId,
+    ) -> Result<ReplanningContext, HostError> {
+        let artifact = host
+            .store()
+            .get(version)
+            .map_err(HostError::Store)?
+            .ok_or_else(|| invalid("replanning context artifact is missing"))?;
+        if artifact.schema_id.0 != REPLANNING_CONTEXT
+            || artifact.created_by.id != PLAN_ID
+            || artifact.created_by.actor_type != ActorType::System
+        {
+            return Err(invalid("untrusted replanning context artifact"));
+        }
+        serde_json::from_value(artifact.payload)
+            .map_err(|error| invalid(format!("invalid replanning context snapshot: {error}")))
+    }
+
     pub(super) fn load_plan(
         &self,
         host: &Host,
@@ -182,17 +223,29 @@ impl TaskRuntime {
             .get(version)
             .map_err(HostError::Store)?
             .ok_or_else(|| invalid("accepted plan artifact is missing"))?;
-        if ![ACCEPTED_PLAN, VERSIONED_PLAN].contains(&artifact.schema_id.0.as_str())
+        if ![
+            ACCEPTED_PLAN,
+            VERSIONED_PLAN,
+            PLAN_WITH_PREVIOUS_DEPENDENCIES,
+        ]
+        .contains(&artifact.schema_id.0.as_str())
             || artifact.created_by.id != PLAN_ID
             || artifact.created_by.actor_type != ActorType::System
         {
             return Err(invalid("untrusted accepted plan artifact"));
         }
-        let versioned = artifact.schema_id.0 == VERSIONED_PLAN;
+        let versioned = artifact.schema_id.0 != ACCEPTED_PLAN;
+        let reuses_outputs = artifact.schema_id.0 == PLAN_WITH_PREVIOUS_DEPENDENCIES;
         let plan: AcceptedPlan = serde_json::from_value(artifact.payload)
             .map_err(|e| invalid(format!("invalid accepted plan snapshot: {e}")))?;
-        if versioned != plan.revision.is_some() {
-            return Err(invalid("plan schema and revision disagree"));
+        if versioned != plan.revision.is_some()
+            || reuses_outputs
+                != plan
+                    .steps
+                    .iter()
+                    .any(|step| !step.previous_dependencies.is_empty())
+        {
+            return Err(invalid("plan schema and snapshot disagree"));
         }
         Ok(plan)
     }

@@ -23,19 +23,19 @@ besitzen. Ein Plan erhält dadurch keine Action-Rechte.
 ## Ziel, Plan und bisherige Arbeit
 
 Die originale Eingabeversion und die Root-Aufgabe bleiben identisch. Jeder
-angenommene Vorschlag wird als eigenes unveränderliches `arcs.plan.v2`-Artefakt
-mit Revisionsindex, Vorgänger und Kontextbezug gespeichert. `v2` ist die
-Schemaversion; der zusätzliche Revisionsindex beginnt bei 0. Alte Pläne und
-Ergebnisse werden erhalten. Die Relation `supersedes` verbindet die Planstände.
-Der externe Vorschlagsvertrag bleibt `arcs.plan_candidate.v1`.
+angenommene Vorschlag wird als eigenes unveränderliches Planartefakt
+mit Revisionsindex, Vorgänger und Kontextbezug gespeichert.
+Der Revisionsindex beginnt bei 0. Alte Pläne und Ergebnisse werden
+erhalten. Die Relation `supersedes` verbindet die Planstände.
+Der bisherige Vorschlagsvertrag ist `arcs.plan_candidate.v1`, sein
+versioniertes Planartefakt `arcs.plan.v2`.
 
 Neue Schritte erhalten einen Revisionsanteil in ihrer Route, etwa
 `p1.r0.device` und `p1.r1.device`. Dadurch können neue Vorschläge weder alte
 Aufträge noch Freigaben oder Reasoning-Ergebnisse durch Wiederverwendung eines
-Schrittnamens übernehmen. Abhängigkeiten müssen zur jeweiligen neuen DAG
-gehören. Erfolgreiche alte Schritte werden historisch beibehalten; ihre
-Ergebnisse können Kontext der neuen Planung sein. Neue Vorschläge erzeugen
-neue Aufträge, auch wenn sie eine bereits verwendete Vorlage auswählen.
+Schrittnamens übernehmen. Gewöhnliche Abhängigkeiten verbinden Schritte
+derselben Generation. Ein ausdrücklich ausgewählter Export aus dem
+direkten Vorgänger kann als zusätzliche Eingabe dienen.
 
 ## Übergang und Kontextgrenzen
 
@@ -60,6 +60,39 @@ kennzeichnet ausgelassene Ergebnisse. Abhängigkeiten und Memory behalten ihre
 bestehenden Rechte und Grenzen; auch die normale Kontext-Bytegrenze gilt.
 Nicht jeder im Rückblick genannte Versionsbezug ist damit bereits als
 Artefaktinhalt an einen Reasoner übergeben worden.
+
+## Fertige Teilergebnisse übernehmen
+
+Die Eingangsroute setzt `target_schema_id` auf `arcs.plan_candidate.v2`
+und verwendet einen Reasoner, der dieses Schema ausgibt. In
+`plan.replanning` aktiviert `reuse_completed_exports: true` die Auswahl
+von Vorgängerexporten. Die Einstellung gehört zur gespeicherten
+Runtime-Definition. Die Ersatzplanung erhält in `task_replanning.previous_step_dependency` ein
+Beispiel für die Form der Abhängigkeit. Ein neuer Schritt kann diese
+Abhängigkeit so angeben.
+
+```json
+{
+  "step_id": "bestand",
+  "previous_revision": true,
+  "payload_fields": ["value"]
+}
+```
+
+`bestand` bezeichnet einen erfolgreich abgeschlossenen Schritt aus der
+direkt vorherigen Generation derselben Aufgabe. Verfügbar sind
+`export_fields`, deren Werte im eingefrorenen Neuplanungskontext enthalten
+sind. Wurde ein Ergebnis des Schritts aus dem Kontextbudget ausgelassen,
+kann der Planer den Schritt nicht als Quelle angeben. Für die neue
+Aufgabe gelten die bestehenden Grenzen für Kontextplätze und Bytes.
+
+Die Runtime speichert Ersatzpläne mit Vorläuferbindungen als
+`arcs.plan.v3`. Ein reiner Vorläuferbezug ist bereits erfüllt. Bei gemischten Abhängigkeiten
+verwendet der neue Schritt zuerst die festgehaltenen Vorläuferbindungen und
+ergänzt sie, sobald die aktuellen Quellen fertig sind. Das gemeinsame
+Artifact-Netz verknüpft den Ersatzplan mit den übernommenen Versionen.
+Der alte Schritt wird dabei kein zweites Mal ausgeführt. Für neue Aktionen
+gelten weiterhin deren eigene Freigaben und Ressourcenzuweisungen.
 
 ## Budgets, Ressourcen und Recovery
 
@@ -161,7 +194,7 @@ fehlgeschlagene Commitgrenzen, verlorene Antworten, private Felder, tatsächlich
 Fallback-Produzenten, Pause, Fristen und zwei einzeln freigegebene
 Simulatorwirkungen ab. Die vollständige allgemeine Abnahme bleibt offen:
 freies Werkzeugargumentieren, selbst entwickelte Fähigkeiten, Neuplanung durch
-beliebige externe Ereignisse, Wiederverwendung fertiger Teilschritte als neue
-DAG-Knoten und die Qualität allgemeiner Modellstrategien sind weitere Arbeiten.
+beliebige externe Ereignisse, Rückgriffe auf Generationen vor dem direkten
+Vorgänger und die Qualität allgemeiner Modellstrategien sind weitere Arbeiten.
 Verteiltes Controller-Fencing und tatsächlicher Monatsbetrieb bleiben ebenfalls
 eigene Abnahmen.

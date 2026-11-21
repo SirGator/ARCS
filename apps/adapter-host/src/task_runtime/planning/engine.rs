@@ -155,7 +155,7 @@ impl TaskRuntime {
         } else {
             constraints = serde_json::json!({"operator_constraints":constraints,"task_planning":config.catalog(host)?});
         }
-        let (revision, context, meta) = if let Some(pending) = pending {
+        let (revision, context, meta) = if let Some(pending) = &pending {
             let artifact = self.publish_replanning_context(host, &pending.context)?;
             if pending
                 .version
@@ -170,6 +170,17 @@ impl TaskRuntime {
                 &artifact.version_id,
             )?;
             constraints["task_replanning"] = serde_json::json!({"revision":pending.context.revision,"previous_plan_version_id":pending.context.previous_plan_version_id,"context_version_id":artifact.version_id,"remaining_budget":self.revision_budget(host,sequence,config,route,&[])?});
+            if config
+                .replanning
+                .as_ref()
+                .is_some_and(|policy| policy.reuse_completed_exports)
+            {
+                constraints["task_replanning"]["previous_step_dependency"] = serde_json::json!({
+                    "step_id": "<completed predecessor step id>",
+                    "payload_fields": ["<field visible in a predecessor export>"],
+                    "previous_revision": true,
+                });
+            }
             let inputs =
                 self.replanning_inputs(host, input, route, &pending.context, &artifact.version_id)?;
             (
@@ -177,7 +188,9 @@ impl TaskRuntime {
                 inputs,
                 Some(PlanRevision {
                     index: pending.context.revision,
-                    previous_plan_version_id: Some(pending.context.previous_plan_version_id),
+                    previous_plan_version_id: Some(
+                        pending.context.previous_plan_version_id.clone(),
+                    ),
                     context_version_id: Some(artifact.version_id),
                 }),
             )
@@ -232,7 +245,15 @@ impl TaskRuntime {
         let proposal = &result.candidates[0];
         let steps = serde_json::from_value::<PlanProposal>(proposal.payload.clone())
             .map_err(|e| invalid(e.to_string()))
-            .and_then(|p| config.compile_revision(sequence, &p, &self.config.routes, revision));
+            .and_then(|proposal| {
+                config.compile_revision(
+                    sequence,
+                    &proposal,
+                    &self.config.routes,
+                    revision,
+                    pending.as_ref().map(|checkpoint| &checkpoint.context),
+                )
+            });
         let steps = match steps {
             Ok(steps) => steps,
             Err(error) => return self.journal.reject_plan(&completion, &error.to_string()),

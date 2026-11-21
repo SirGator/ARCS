@@ -3,6 +3,7 @@ use crate::task_runtime::config::{identifier, invalid, validate_route_contract};
 use crate::task_runtime::goal::GoalApproval;
 use crate::{Host, HostError};
 use arcs::adapters::AdapterManifest;
+use arcs::reasoning::ContextSelection;
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -19,7 +20,7 @@ impl PlanningConfig {
             || self.max_total_output_tokens == Some(0)
             || self.max_total_actions.is_some_and(|n| n > 31_000)
             || owner.goal.is_some()
-            || owner.target_schema_id.0 != PLAN_CANDIDATE
+            || ![PLAN_CANDIDATE, REUSE_PLAN_CANDIDATE].contains(&owner.target_schema_id.0.as_str())
             || owner
                 .permitted_reasoner_choices()
                 .iter()
@@ -32,6 +33,11 @@ impl PlanningConfig {
             ));
         }
         if let Some(policy) = &self.replanning {
+            if policy.reuse_completed_exports && owner.target_schema_id.0 != REUSE_PLAN_CANDIDATE {
+                return Err(invalid(
+                    "reuse_completed_exports requires arcs.plan_candidate.v2",
+                ));
+            }
             let mut budget = super::budgets::PlanBudget::default();
             budget.add(owner, self.max_total_output_tokens.is_some())?;
             budget.check(self)?;
@@ -232,7 +238,15 @@ impl PlanningConfig {
         proposal: &PlanProposal,
         static_routes: &[ReasoningRoute],
         revision: u8,
+        previous: Option<&ReplanningContext>,
     ) -> Result<Vec<AcceptedStep>, HostError> {
+        if previous.is_some_and(|context| {
+            revision == 0 || context.parent_sequence != parent || context.revision != revision
+        }) {
+            return Err(invalid(
+                "previous dependency context has the wrong plan generation",
+            ));
+        }
         if proposal.steps.is_empty() || proposal.steps.len() > self.max_steps {
             return Err(invalid("plan step count exceeds configured limit"));
         }
@@ -257,6 +271,8 @@ impl PlanningConfig {
         }
         budget.check(self)?;
         let mut accepted = Vec::new();
+        let mut validation_routes = Vec::new();
+        let mut previous_routes = HashMap::new();
         for step in &proposal.steps {
             let mut route = templates[step.template.as_str()].route.clone();
             route.id = route_id(parent, &step.id, self.replanning.as_ref().map(|_| revision));
@@ -264,7 +280,33 @@ impl PlanningConfig {
                 return Err(invalid("generated plan route collides with a static route"));
             }
             route.dependencies.clear();
+            let mut previous_dependencies = Vec::new();
+            let mut previous_edges = Vec::new();
             for edge in &step.dependencies {
+                if edge.previous_revision {
+                    if !self
+                        .replanning
+                        .as_ref()
+                        .is_some_and(|policy| policy.reuse_completed_exports)
+                    {
+                        return Err(invalid(
+                            "previous_revision dependencies are not enabled for this plan",
+                        ));
+                    }
+                    let previous = previous.ok_or_else(|| {
+                        invalid("previous_revision dependencies require a replacement plan")
+                    })?;
+                    let (binding, source_route) = previous_dependency(edge, previous, &templates)?;
+                    previous_edges.push(TaskDependency {
+                        route_id: binding.route_id.clone(),
+                        payload_fields: edge.payload_fields.clone(),
+                    });
+                    previous_routes
+                        .entry(source_route.id.clone())
+                        .or_insert(source_route);
+                    previous_dependencies.push(binding);
+                    continue;
+                }
                 let upstream = steps
                     .get(edge.step_id.as_str())
                     .ok_or_else(|| invalid("plan references an unknown step"))?;
@@ -284,14 +326,85 @@ impl PlanningConfig {
                     self.replanning.as_ref().map(|_| revision),
                 ));
             }
+            let mut validation_route = route.clone();
+            validation_route.dependencies.extend(previous_edges);
+            validation_routes.push(validation_route);
             accepted.push(AcceptedStep {
                 id: step.id.clone(),
                 template_id: step.template.clone(),
                 route,
+                previous_dependencies,
             });
         }
-        let routes: Vec<_> = accepted.iter().map(|s| s.route.clone()).collect();
-        crate::task_runtime::dependencies::validate_routes(&routes)?;
+        validation_routes.extend(previous_routes.into_values());
+        crate::task_runtime::dependencies::validate_routes(&validation_routes)?;
         Ok(accepted)
     }
+}
+
+/// A prior step contributes only its versioned exports admitted to the replanner's context.
+fn previous_dependency(
+    edge: &StepDependency,
+    context: &ReplanningContext,
+    templates: &HashMap<&str, &StepTemplate>,
+) -> Result<(DependencyBinding, ReasoningRoute), HostError> {
+    let step = context
+        .steps
+        .iter()
+        .find(|step| step.id == edge.step_id && step.resolution == "ready")
+        .ok_or_else(|| invalid("previous_revision must name a completed predecessor step"))?;
+    let template = templates
+        .get(step.template_id.as_str())
+        .ok_or_else(|| invalid("completed predecessor has no authorized template"))?;
+    let result_version_id = step
+        .result_version_id
+        .clone()
+        .ok_or_else(|| invalid("completed predecessor result reference is missing"))?;
+    if step.output_version_ids.is_empty()
+        || edge
+            .payload_fields
+            .iter()
+            .any(|field| !template.export_fields.contains(field))
+    {
+        return Err(invalid(
+            "previous_revision dependency exceeds the predecessor exports",
+        ));
+    }
+    let mut results = Vec::new();
+    for version in &step.output_version_ids {
+        let selected = context.context.iter().any(|item| {
+            &item.version_id == version
+                && edge
+                    .payload_fields
+                    .iter()
+                    .all(|field| item.payload_fields.contains(field))
+        });
+        if !selected {
+            return Err(invalid(
+                "previous_revision dependency uses an export omitted from the replanning context",
+            ));
+        }
+        results.push(ContextSelection {
+            version_id: version.clone(),
+            payload_fields: edge.payload_fields.clone(),
+        });
+    }
+    // The source is used only for DAG and context-limit validation. Already
+    // committed exports occupy their exact number of context slots.
+    let mut source_route = template.route.clone();
+    source_route.id = route_id(
+        context.parent_sequence,
+        &step.id,
+        Some(context.revision - 1),
+    );
+    source_route.budget.max_candidates = results.len();
+    Ok((
+        DependencyBinding {
+            sequence: step.sequence,
+            route_id: source_route.id.clone(),
+            result_version_id,
+            context: results,
+        },
+        source_route,
+    ))
 }

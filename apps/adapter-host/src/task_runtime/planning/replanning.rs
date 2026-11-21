@@ -117,16 +117,46 @@ impl TaskRuntime {
         } else {
             owner.reasoner.adapter_id.0.clone()
         };
-        if candidate.schema_id.0 != PLAN_CANDIDATE || candidate.created_by.id != producer {
+        if candidate.schema_id != owner.target_schema_id || candidate.created_by.id != producer {
             return Err(invalid("plan proposal origin changed"));
         }
         let proposal: PlanProposal =
             serde_json::from_value(candidate.payload).map_err(|e| invalid(e.to_string()))?;
+        let previous = if proposal
+            .steps
+            .iter()
+            .any(|step| step.dependencies.iter().any(|edge| edge.previous_revision))
+        {
+            let meta = plan
+                .revision
+                .as_ref()
+                .ok_or_else(|| invalid("previous dependencies need a versioned plan"))?;
+            let context = self.load_replanning_context(
+                host,
+                meta.context_version_id.as_ref().ok_or_else(|| {
+                    invalid("previous dependencies need a frozen replanning context")
+                })?,
+            )?;
+            if context.runtime_id != plan.runtime_id
+                || context.parent_sequence != plan.parent_sequence
+                || context.input_version_id != plan.input_version_id
+                || context.revision != revision
+                || Some(&context.previous_plan_version_id) != meta.previous_plan_version_id.as_ref()
+            {
+                return Err(invalid(
+                    "previous dependency context belongs to another plan",
+                ));
+            }
+            Some(context)
+        } else {
+            None
+        };
         let expected = config.compile_revision(
             plan.parent_sequence,
             &proposal,
             &self.config.routes,
             revision,
+            previous.as_ref(),
         )?;
         if serde_json::to_value(expected).map_err(|e| invalid(e.to_string()))?
             != serde_json::to_value(&plan.steps).map_err(|e| invalid(e.to_string()))?
@@ -304,8 +334,27 @@ impl TaskRuntime {
                 .ok_or_else(|| invalid("missing template export scope"))?
                 .export_fields
                 .clone();
+            let snapshot = context
+                .steps
+                .iter()
+                .find(|item| item.sequence == task.sequence)
+                .filter(|item| item.id == step.id && item.template_id == step.template_id)
+                .ok_or_else(|| invalid("replanning step snapshot identity changed"))?;
             if let ParentResult::Ready(binding) = self.resolve_parent(host, task)? {
+                if snapshot.resolution != "ready"
+                    || snapshot.result_version_id.as_ref() != Some(&binding.result_version_id)
+                    || !snapshot
+                        .output_version_ids
+                        .iter()
+                        .eq(binding.context.iter().map(|item| &item.version_id))
+                {
+                    return Err(invalid("replanning step result snapshot changed"));
+                }
                 permitted.extend(binding.context);
+            } else if snapshot.resolution == "ready" {
+                return Err(invalid(
+                    "completed replanning step no longer has a ready result",
+                ));
             }
         }
         for item in &context.context {

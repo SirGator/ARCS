@@ -55,8 +55,47 @@ impl Journal {
         Ok(())
     }
 
-    pub(in crate::task_runtime) fn next_dependency_wait(&self) -> Result<Option<u64>, HostError> {
-        self.connection.query_row("SELECT d.sequence FROM runtime_job_joins d JOIN runtime_jobs j ON j.sequence=d.sequence WHERE d.state='waiting' AND j.state='pending' ORDER BY (d.sequence<=(SELECT cursor FROM runtime_dependency_scheduler WHERE singleton=1)),d.sequence LIMIT 1",[],|row|row.get::<_,i64>(0).map(|n|n as u64)).optional().map_err(db)
+    pub(in crate::task_runtime) fn seed_previous_dependencies(
+        transaction: &Transaction<'_>,
+        sequence: u64,
+        bindings: &[DependencyBinding],
+    ) -> Result<(), HostError> {
+        let encoded =
+            serde_json::to_string(bindings).map_err(|error| invalid(error.to_string()))?;
+        // A join with current-generation edges stays waiting. A step whose
+        // inputs are all frozen is immediately eligible for the scheduler.
+        let changed = transaction
+            .execute(
+                "INSERT INTO runtime_job_joins(sequence,state,bindings_json) VALUES(?1,'ready',?2)
+             ON CONFLICT(sequence) DO UPDATE SET bindings_json=excluded.bindings_json
+             WHERE runtime_job_joins.state='waiting'",
+                params![sequence as i64, encoded],
+            )
+            .map_err(db)?;
+        if changed != 1 {
+            return Err(invalid("previous dependency exports could not be bound"));
+        }
+        Ok(())
+    }
+
+    pub(in crate::task_runtime) fn next_dependency_wait(
+        &self,
+    ) -> Result<Option<(u64, Vec<DependencyBinding>)>, HostError> {
+        let row: Option<(i64, String)> = self.connection.query_row(
+            "SELECT d.sequence,d.bindings_json FROM runtime_job_joins d
+             JOIN runtime_jobs j ON j.sequence=d.sequence
+             WHERE d.state='waiting' AND j.state='pending'
+             ORDER BY (d.sequence<=(SELECT cursor FROM runtime_dependency_scheduler WHERE singleton=1)),d.sequence LIMIT 1",
+            [],
+            |row| Ok((row.get(0)?,row.get(1)?)),
+        ).optional().map_err(db)?;
+        row.map(|(sequence, bindings)| {
+            let bindings = serde_json::from_str(&bindings).map_err(|error| {
+                invalid(format!("invalid waiting dependency bindings: {error}"))
+            })?;
+            Ok((sequence as u64, bindings))
+        })
+        .transpose()
     }
 
     pub(in crate::task_runtime) fn dependency_parents(
