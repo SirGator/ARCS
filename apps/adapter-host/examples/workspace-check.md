@@ -146,6 +146,41 @@ unter `result.revision` neben Prüfstatus und Exitcode fest. Bei
 `interrupted` belegt der Commit die Zielrevision des Auftrags.
 Ein gespeichertes Ergebnis bleibt bei einer Wiederaufnahme erhalten,
 auch wenn sich die Referenz inzwischen verschoben hat.
+## Diagnoseausgaben einer Revision erfassen
+
+Ergänze das Adapterprofil um `"diagnostic_revision_checks": ["unit"]`,
+um für die benannte Prüfung auch `check.revision.diagnostic` anzubieten.
+Der Host lädt zusätzlich `revision-diagnostic-execution.schema.json`.
+Der Grant gibt die neue Capability mit
+`workspace.check_revision_diagnostics` frei. Der Kandidat enthält
+weiterhin den Prüfnamen und den vollständigen Commit-Hash. Die
+Prüfung braucht eine eigene Freigabe. Für die Erweiterung einer
+bestehenden gebundenen Installation verwende eine neue Adapter-ID und
+ein neues Journal.
+
+`arcs.execution_result.workspace_revision_check.v2` behält
+`result` für Prüfstatus, Revision und Exitcode. Bei
+`failed` und `timed_out_or_killed` enthält `diagnostics`
+zusätzlich `stdout` und `stderr`. Beide Proben enthalten
+`text` und `truncated`. Der Adapter behält je Strom höchstens
+die ersten 512 Eingabebytes. Er liest weitere Ausgabe während der
+beaufsichtigten Ausführung ab, damit ein schreibintensiver Test
+weiterlaufen kann. Der Adapter ersetzt ungültige UTF-8-Folgen
+und ASCII-Steuerzeichen außer Zeilenumbrüchen, Wagenrücklauf und
+Tabulatoren. Offen gebliebene Ströme gelten als unvollständig. Ein bestandener Test erzeugt nur die
+Statusquittung. Bei Wiederaufnahme bleibt die gespeicherte
+Diagnose zusammen mit der Quittung erhalten.
+
+Für die Neuplanung kann der Betreiber
+`replanning_failure_receipt_fields: ["result", "diagnostics"]`
+an der Prüfvorlage setzen, wenn das Goal das v2-Ausführungsschema
+exportiert. Mit `["result"]` erhält der Ersatzplaner weiterhin
+nur die Prüfmetadaten. Die Diagnose enthält Text aus dem
+konfigurierten Prüfprogramm. Wähle Programme, deren Ausgabe
+für die freigegebenen Empfänger bestimmt ist.
+
+[Konfiguration der Neuplanung](plan-replanning.md#geprüfte-fehlerquittungen-für-den-ersatzplaner)
+
 ## Korrektur und Prüfung in einem Plan verbinden
 
 Der Rules-Reasoner bietet mit dem Profil `scenario: "workspace_repair"`

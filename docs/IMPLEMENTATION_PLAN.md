@@ -540,6 +540,13 @@
 > Ein Softwaretest demonstriert den Wechsel zu einer zweiten
 > Korrektur mit eigener Prüfung und erneuten Freigaben.
 >
+> Einundfünfzigster Schritt gemäß v3 §4 Act, §5.2 HET-06,
+> §8.2 LNG-09 und TEST-02. Eine eigens freigegebene revisionsgenaue
+> Prüfung speichert begrenzte Standardausgaben bei Fehlschlägen.
+> Der Ersatzplaner kann diesen Text über ein separates Exportfeld
+> auswerten. Prozess- und Integrationstests prüfen die Ausgabegrenze,
+> Wiederaufnahme und den Befund aus einer realen fehlgeschlagenen Assertion.
+>
 **Leitbild:** ARCS ist ein universeller Agent. Es soll sich einfach bedienen lassen, beliebige kompatible Systeme verbinden, eigenständig Probleme lösen und langfristige Aufgaben über Monate verfolgen.
 
 ## 1. Verbindliche Architekturregeln

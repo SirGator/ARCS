@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Instant;
 
+use crate::diagnostics::{self, Diagnostics};
 use crate::git_edit::{self, EditProfile};
 
 use arcs_adapter_protocol::{
@@ -23,6 +24,9 @@ const REVISION_CAPABILITY: &str = "check.revision";
 const REVISION_CANDIDATE: &str = "arcs.workspace_revision_check_candidate.v1";
 const REVISION_RESULT: &str = "arcs.execution_result.workspace_revision_check.v1";
 const REVISION_PERMISSION: &str = "workspace.check_revision";
+const DIAGNOSTIC_CAPABILITY: &str = "check.revision.diagnostic";
+const DIAGNOSTIC_RESULT: &str = "arcs.execution_result.workspace_revision_check.v2";
+const DIAGNOSTIC_PERMISSION: &str = "workspace.check_revision_diagnostics";
 const SUPERVISOR: &str = "/usr/bin/timeout";
 
 #[derive(Serialize, Deserialize)]
@@ -35,6 +39,8 @@ struct Profile {
     edit: Option<EditProfile>,
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     revision_checks: BTreeSet<String>,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    diagnostic_revision_checks: BTreeSet<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -98,11 +104,11 @@ impl Runner {
         if let Some(edit) = &profile.edit {
             edit.validate(&profile.workspace)?;
         }
-        if !profile.revision_checks.is_empty()
+        if (!profile.revision_checks.is_empty() || !profile.diagnostic_revision_checks.is_empty())
             && (profile.edit.is_none()
                 || profile
                     .revision_checks
-                    .iter()
+                    .union(&profile.diagnostic_revision_checks)
                     .any(|name| !profile.checks.contains_key(name)))
         {
             return Err(
@@ -209,24 +215,40 @@ impl Runner {
     fn execute_named(&self, invocation: &ActInvocation) -> Result<ActResponse, AdapterError> {
         let action: CommandSelection =
             self.materialized(invocation, CAPABILITY, CANDIDATE, RESULT)?;
-        self.execute_check(invocation, &action.check, None)
+        self.execute_check(invocation, &action.check, None, false)
     }
 
-    fn execute_revision(&self, invocation: &ActInvocation) -> Result<ActResponse, AdapterError> {
-        let action: RevisionSelection = self.materialized(
-            invocation,
-            REVISION_CAPABILITY,
-            REVISION_CANDIDATE,
-            REVISION_RESULT,
-        )?;
-        if !self.profile.revision_checks.contains(&action.check)
-            || !git_edit::object_id(&action.revision)
-        {
+    fn execute_revision(
+        &self,
+        invocation: &ActInvocation,
+        diagnostic: bool,
+    ) -> Result<ActResponse, AdapterError> {
+        let (capability, schema, allowed) = if diagnostic {
+            (
+                DIAGNOSTIC_CAPABILITY,
+                DIAGNOSTIC_RESULT,
+                &self.profile.diagnostic_revision_checks,
+            )
+        } else {
+            (
+                REVISION_CAPABILITY,
+                REVISION_RESULT,
+                &self.profile.revision_checks,
+            )
+        };
+        let action: RevisionSelection =
+            self.materialized(invocation, capability, REVISION_CANDIDATE, schema)?;
+        if !allowed.contains(&action.check) || !git_edit::object_id(&action.revision) {
             return Err(AdapterError::rejected(
                 "workspace revision check requires a configured check and a full commit ID",
             ));
         }
-        self.execute_check(invocation, &action.check, Some(&action.revision))
+        self.execute_check(
+            invocation,
+            &action.check,
+            Some(&action.revision),
+            diagnostic,
+        )
     }
 
     fn execute_check(
@@ -234,6 +256,7 @@ impl Runner {
         invocation: &ActInvocation,
         name: &str,
         revision: Option<&str>,
+        diagnostic: bool,
     ) -> Result<ActResponse, AdapterError> {
         let check = self
             .profile
@@ -260,7 +283,14 @@ impl Runner {
             }
             match result {
                 Some(result) => serde_json::from_str(&result).map_err(unavailable)?,
-                None => self.save_result(id, check_result(name, "interrupted", revision))?,
+                None => self.save_result(
+                    id,
+                    journal_result(
+                        check_result(name, "interrupted", revision),
+                        None,
+                        diagnostic,
+                    ),
+                )?,
             }
         } else {
             let snapshot = revision
@@ -282,12 +312,22 @@ impl Runner {
                     params![id, input],
                 )
                 .map_err(unavailable)?;
-            self.save_result(id, run_check(working_dir, name, check, revision))?
+            let (result, output) = run_check(working_dir, name, check, revision, diagnostic);
+            self.save_result(id, journal_result(result, output, diagnostic))?
         };
+        let mut payload = if diagnostic {
+            result
+        } else {
+            json!({"result":result})
+        };
+        payload
+            .as_object_mut()
+            .ok_or_else(|| AdapterError::unavailable("saved check receipt must be an object"))?
+            .insert("action_version".into(), json!(invocation.action_version_id));
         Ok(ActResponse {
             invocation_id: id.clone(),
             external_reference: format!("workspace-check:{id}"),
-            result_payload: json!({"action_version":invocation.action_version_id,"result":result}),
+            result_payload: payload,
         })
     }
 
@@ -336,6 +376,14 @@ impl Adapter for Runner {
                 REVISION_PERMISSION,
             ));
         }
+        if !self.profile.diagnostic_revision_checks.is_empty() {
+            capabilities.push(act_capability(
+                DIAGNOSTIC_CAPABILITY,
+                REVISION_CANDIDATE,
+                DIAGNOSTIC_RESULT,
+                DIAGNOSTIC_PERMISSION,
+            ));
+        }
         AdapterManifest {
             protocol_version: 1,
             adapter_id: self.profile.adapter_id.clone(),
@@ -347,7 +395,8 @@ impl Adapter for Runner {
     fn execute(&mut self, invocation: ActInvocation) -> Result<ActResponse, AdapterError> {
         match invocation.capability.capability_id.0.as_str() {
             CAPABILITY => return self.execute_named(&invocation),
-            REVISION_CAPABILITY => return self.execute_revision(&invocation),
+            REVISION_CAPABILITY => return self.execute_revision(&invocation, false),
+            DIAGNOSTIC_CAPABILITY => return self.execute_revision(&invocation, true),
             git_edit::CAPABILITY => {}
             _ => return Err(AdapterError::rejected("unknown workspace capability")),
         }
@@ -390,7 +439,13 @@ fn act_capability(id: &str, accepts: &str, emits: &str, permission: &str) -> Cap
     }
 }
 
-fn run_check(workspace: &Path, name: &str, check: &Check, revision: Option<&str>) -> Value {
+fn run_check(
+    workspace: &Path,
+    name: &str,
+    check: &Check,
+    revision: Option<&str>,
+    diagnostic: bool,
+) -> (Value, Option<Diagnostics>) {
     let started = Instant::now();
     // The supervisor maintains the deadline even if the adapter process is lost.
     let timeout = format!(
@@ -410,30 +465,53 @@ fn run_check(workspace: &Path, name: &str, check: &Check, revision: Option<&str>
             workspace.parent().expect("snapshot directory has a parent"),
         );
     }
-    let process = command
+    command
         .args(["--signal=KILL", "--", &timeout])
         .arg(&check.program)
         .args(&check.args)
         .current_dir(workspace)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
+        .stdin(Stdio::null());
+    let process = if diagnostic {
+        diagnostics::run(&mut command).map(|(status, output)| (status, Some(output)))
+    } else {
+        command
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map(|status| (status, None))
+    };
+    let (process, output) = match process {
+        Ok((status, output)) => (Some(status), output),
+        Err(_) => (None, None),
+    };
     let (status, exit_code) = match process {
-        Ok(exit) if exit.success() => ("passed", exit.code()),
-        Ok(exit) if exit.code().is_none() || matches!(exit.code(), Some(124 | 137)) => {
+        Some(exit) if exit.success() => ("passed", exit.code()),
+        Some(exit) if exit.code().is_none() || matches!(exit.code(), Some(124 | 137)) => {
             ("timed_out_or_killed", exit.code())
         }
-        Ok(exit) if matches!(exit.code(), Some(125..=127)) => ("runner_error", exit.code()),
-        Ok(exit) => ("failed", exit.code()),
-        Err(_) => ("runner_error", None),
+        Some(exit) if matches!(exit.code(), Some(125..=127)) => ("runner_error", exit.code()),
+        Some(exit) => ("failed", exit.code()),
+        None => ("runner_error", None),
     };
     let mut result = check_result(name, status, revision);
     result["duration_ms"] = json!(started.elapsed().as_millis() as u64);
     if let Some(code) = exit_code {
         result["exit_code"] = json!(code);
     }
-    result
+    let output = output.filter(|_| matches!(status, "failed" | "timed_out_or_killed"));
+    (result, output)
+}
+
+// Existing profiles keep the original bare result in their journals.
+fn journal_result(result: Value, output: Option<Diagnostics>, diagnostic: bool) -> Value {
+    if !diagnostic {
+        return result;
+    }
+    let mut payload = json!({"result":result});
+    if let Some(output) = output {
+        payload["diagnostics"] = json!(output);
+    }
+    payload
 }
 
 fn check_result(name: &str, status: &str, revision: Option<&str>) -> Value {

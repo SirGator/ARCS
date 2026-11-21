@@ -8,7 +8,7 @@ PLAN = "arcs.plan_candidate.v2"
 EDIT = "arcs.workspace_edit_candidate.v1"
 CHECK = "arcs.workspace_revision_check_candidate.v1"
 EDIT_RECEIPT = "arcs.execution_result.workspace_edit.v1"
-CHECK_RECEIPT = "arcs.execution_result.workspace_revision_check.v1"
+CHECK_RECEIPT = "arcs.execution_result.workspace_revision_check.v2"
 CONTEXT = "arcs.plan_replanning.v2"
 ID = "workspace.replanner"
 
@@ -51,7 +51,11 @@ def propose(inv):
             failure = context(inv, check["failure_receipt_version_id"], CHECK_RECEIPT)["payload"]
             previous, = edit["output_version_ids"]
             applied = context(inv, previous, EDIT_RECEIPT)["payload"]["result"]
-            assert set(failure) == {"result"}
+            if "diagnostics" not in failure:
+                assert set(failure) == {"result"}
+                return None, required
+            assert set(failure) == {"result", "diagnostics"}
+            assert "AssertionError: 6 != 5" in failure["diagnostics"]["stderr"]["text"]
             result = failure["result"]
             assert result["status"] == "failed" and result["exit_code"] != 0
             assert result["revision"] == applied["commit"]

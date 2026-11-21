@@ -6,6 +6,8 @@ const EDIT_CANDIDATE: &str = "arcs.workspace_edit_candidate.v1";
 const EDIT_RECEIPT: &str = "arcs.execution_result.workspace_edit.v1";
 const CHECK_CANDIDATE: &str = "arcs.workspace_revision_check_candidate.v1";
 const CHECK_RECEIPT: &str = "arcs.execution_result.workspace_revision_check.v1";
+const DIAGNOSTIC_CAPABILITY: &str = "check.revision.diagnostic";
+const DIAGNOSTIC_RECEIPT: &str = "arcs.execution_result.workspace_revision_check.v2";
 const TASK: &str = "arcs.task.workspace_repair.v1";
 const REF: &str = "refs/arcs/repair";
 const BROKEN: &str = "def add(left, right):\n    return left - right\n";
@@ -336,7 +338,7 @@ fn a_plan_cannot_request_a_receipt_field_outside_the_template_exports() {
     host.shutdown().unwrap();
 }
 
-fn configure_retry(f: &Fixture, share_failure: bool) {
+fn configure_retry(f: &Fixture, failure_fields: &[&str]) {
     configure(f, "result");
     let mut input = f.read("input-profile.json");
     input["events"][0]["payload"]["replacement"] =
@@ -349,10 +351,23 @@ fn configure_retry(f: &Fixture, share_failure: bool) {
     )
     .unwrap();
     f.write("retry.json", json!({"replacement":FIXED}));
+    let mut checker = f.read("check-profile.json");
+    checker["diagnostic_revision_checks"] = json!(["unit"]);
+    f.write("check-profile.json", checker);
+    let mut check_grant = f.read("check-grant.json");
+    check_grant["enabled_capabilities"] = json!(["edit.apply", DIAGNOSTIC_CAPABILITY]);
+    check_grant["granted_permissions"] =
+        json!(["workspace.edit", "workspace.check_revision_diagnostics"]);
+    f.write("check-grant.json", check_grant);
     let mut grant = f.read("reasoner-grant.json");
     grant["adapter_id"] = json!("workspace.replanner");
     f.write("retry-grant.json", grant);
     let mut host = f.read("host.json");
+    host["schemas"].as_array_mut().unwrap().push(json!(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join(
+            "../../adapters/workspace-check/schemas/revision-diagnostic-execution.schema.json"
+        )
+    ));
     host["adapters"].as_array_mut().unwrap().push(json!({
         "program":"/usr/bin/python3","args":[{"path":"retry.py"},{"path":"retry.json"}],
         "grant_file":"retry-grant.json","timeout_ms":10000
@@ -372,11 +387,14 @@ fn configure_retry(f: &Fixture, share_failure: bool) {
     for template in templates.iter_mut() {
         template["route"]["goal"]["exclusive_resources"] = json!(["workspace-repair"]);
     }
-    templates[1]["route"]["goal"]["export_execution_schema_id"] = json!(CHECK_RECEIPT);
-    templates[1]["export_fields"] = json!(["result"]);
-    if share_failure {
-        templates[1]["replanning_failure_receipt_fields"] = json!(["result"]);
-    }
+    let diagnostic =
+        json!({"adapter_id":"workspace.checker","capability_id":DIAGNOSTIC_CAPABILITY});
+    let check = &mut templates[1];
+    check["route"]["allowed_capabilities"] = json!([diagnostic]);
+    check["route"]["goal"]["actions"][0]["capability"] = diagnostic;
+    check["route"]["goal"]["export_execution_schema_id"] = json!(DIAGNOSTIC_RECEIPT);
+    check["export_fields"] = json!(["result"]);
+    check["replanning_failure_receipt_fields"] = json!(failure_fields);
     let mut retries = templates.clone();
     for (template, name) in retries.iter_mut().zip(["retry-edit", "retry-check"]) {
         template["route"]["id"] = json!(name);
@@ -414,7 +432,7 @@ fn run_failed_revision(host: &mut Host, runtime: &mut TaskRuntime) -> GoalTask {
 #[test]
 fn a_failed_revision_receipt_drives_a_replacement_plan_that_repairs_and_rechecks_the_code() {
     let f = Fixture::new();
-    configure_retry(&f, true);
+    configure_retry(&f, &["result", "diagnostics"]);
     let (mut host, mut runtime) = f.open();
     let failed = run_failed_revision(&mut host, &mut runtime);
     let failed_receipt = failed.execution.as_ref().unwrap();
@@ -437,7 +455,7 @@ fn a_failed_revision_receipt_drives_a_replacement_plan_that_repairs_and_rechecks
     assert_eq!(summary["failure_receipt_version_id"], json!(failed_receipt));
     assert_eq!(
         context.payload["context"][0],
-        json!({"version_id":failed_receipt,"payload_fields":["result"]})
+        json!({"version_id":failed_receipt,"payload_fields":["result","diagnostics"]})
     );
     assert_eq!(
         result(&host, retry.candidate.as_ref())["base_commit"],
@@ -493,34 +511,50 @@ fn a_failed_revision_receipt_drives_a_replacement_plan_that_repairs_and_rechecks
 }
 
 #[test]
-fn a_failed_receipt_stays_private_without_a_template_export() {
-    let f = Fixture::new();
-    configure_retry(&f, false);
-    let (mut host, mut runtime) = f.open();
-    let failed = run_failed_revision(&mut host, &mut runtime);
-    advance(&mut host, &mut runtime, NOW, |runtime| {
-        let plan = runtime.plans_after(0, 1).unwrap().remove(0);
-        matches!(plan.state, PlanState::Blocked | PlanState::Rejected).then_some(())
-    });
-    let db = rusqlite::Connection::open(f.path("retry.sqlite")).unwrap();
-    let input: String = db
-        .query_row(
-            "SELECT input FROM calls ORDER BY rowid DESC LIMIT 1",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    let invocation: Value = serde_json::from_str(&input).unwrap();
-    assert_eq!(invocation["constraints"]["task_replanning"]["revision"], 1);
-    assert!(!input.contains(&failed.execution.unwrap().0));
-    assert_eq!(f.checks(), 1);
-    host.shutdown().unwrap();
+fn diagnostic_text_stays_private_without_its_own_export_field() {
+    for fields in [&[][..], &["result"][..]] {
+        let f = Fixture::new();
+        configure_retry(&f, fields);
+        let (mut host, mut runtime) = f.open();
+        let failed = run_failed_revision(&mut host, &mut runtime);
+        advance(&mut host, &mut runtime, NOW, |runtime| {
+            let plan = runtime.plans_after(0, 1).unwrap().remove(0);
+            matches!(plan.state, PlanState::Blocked | PlanState::Rejected).then_some(())
+        });
+        let db = rusqlite::Connection::open(f.path("retry.sqlite")).unwrap();
+        let input: String = db
+            .query_row(
+                "SELECT input FROM calls ORDER BY rowid DESC LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let invocation: Value = serde_json::from_str(&input).unwrap();
+        assert_eq!(invocation["constraints"]["task_replanning"]["revision"], 1);
+        let receipt_id = failed.execution.unwrap();
+        let visible = invocation["context"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["version_id"] == receipt_id.0);
+        if fields.is_empty() {
+            assert!(visible.is_none());
+            assert!(!input.contains(&receipt_id.0));
+        } else {
+            let payload = visible.unwrap()["payload"].as_object().unwrap();
+            assert_eq!(payload.len(), 1);
+            assert_eq!(payload["result"]["status"], "failed");
+        }
+        assert!(!input.contains("AssertionError"));
+        assert_eq!(f.checks(), 1);
+        host.shutdown().unwrap();
+    }
 }
 
 #[test]
 fn a_restarted_replanner_rejects_receipt_fields_outside_the_frozen_scope() {
     let f = Fixture::new();
-    configure_retry(&f, true);
+    configure_retry(&f, &["result", "diagnostics"]);
     let (mut host, mut runtime) = f.open();
     let failed = run_failed_revision(&mut host, &mut runtime);
     host.shutdown().unwrap();
@@ -536,7 +570,7 @@ fn a_restarted_replanner_rejects_receipt_fields_outside_the_frozen_scope() {
         .unwrap();
     let mut context: Value = serde_json::from_str(&raw).unwrap();
     assert_eq!(context["context"][0]["version_id"], json!(failed.execution));
-    context["context"][0]["payload_fields"] = json!(["result", "action_version"]);
+    context["context"][0]["payload_fields"] = json!(["result", "diagnostics", "action_version"]);
     db.execute(
         "UPDATE runtime_plan_replanning SET context_json=?1",
         [context.to_string()],

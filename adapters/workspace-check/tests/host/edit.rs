@@ -502,3 +502,148 @@ fn a_revision_receipt_replays_after_restart_even_when_the_ref_moves() {
     assert_eq!(fs::read_to_string(&count_file).unwrap(), "unit\n");
     host.shutdown().unwrap();
 }
+
+const DIAGNOSTIC_CAPABILITY: &str = "check.revision.diagnostic";
+const DIAGNOSTIC_RECEIPT: &str = "arcs.execution_result.workspace_revision_check.v2";
+
+fn diagnostic_checks(f: &Fixture) -> String {
+    let base = enable_edits(f, &f.0.join("project"));
+    let schemas = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("schemas");
+    let mut host = f.read("host.json");
+    host["schemas"].as_array_mut().unwrap().extend([
+        json!(schemas.join("revision-candidate.schema.json")),
+        json!(schemas.join("revision-diagnostic-execution.schema.json")),
+    ]);
+    f.write("host.json", host);
+    let mut grant = f.read("grant.json");
+    grant["enabled_capabilities"] = json!([DIAGNOSTIC_CAPABILITY]);
+    grant["granted_permissions"] = json!(["workspace.check_revision_diagnostics"]);
+    f.write("grant.json", grant);
+    let mut profile = f.read("profile.json");
+    profile["diagnostic_revision_checks"] = json!(["loud", "quiet", "held-open", "timeout"]);
+    profile["checks"]["loud"] = json!({
+        "program":"/usr/bin/python3","timeout_ms":5000,"args":["-I","-c",r#"
+import os, sys
+from pathlib import Path
+with Path(sys.argv[1]).open('a') as calls:
+    calls.write('run\n')
+os.write(1, b'stdout\n')
+os.write(2, b'stderr\n\xff\x1b')
+for _ in range(64):
+    os.write(1, b'A' * 16384)
+    os.write(2, b'B' * 16384)
+raise SystemExit(1)
+"#, f.0.join("diagnostic-attempts")]
+    });
+    profile["checks"]["quiet"] = json!({
+        "program":"/usr/bin/python3","timeout_ms":3000,
+        "args":["-I","-c","print('passing output is discarded')"]
+    });
+    profile["checks"]["held-open"] = json!({
+        "program":"/usr/bin/python3","timeout_ms":5000,
+        "args":["-I","-c",r#"
+import subprocess, sys
+subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(4)'])
+print('failure with a background child', file=sys.stderr)
+raise SystemExit(1)
+"#]
+    });
+    profile["checks"]["timeout"] = json!({
+        "program":"/usr/bin/python3","timeout_ms":500,
+        "args":["-I","-u","-c","import time; print('started'); time.sleep(5)"]
+    });
+    f.write("profile.json", profile);
+    base
+}
+
+fn diagnostic_candidate(host: &Host, check: &str, revision: &str) -> Artifact {
+    propose(
+        host,
+        check,
+        REVISION_SCHEMA,
+        DIAGNOSTIC_CAPABILITY,
+        json!({"check":check,"revision":revision}),
+    )
+}
+
+#[test]
+fn diagnostic_checks_bound_both_streams_and_replay_the_saved_failure_after_restart() {
+    let f = Fixture::new();
+    let base = diagnostic_checks(&f);
+    let mut host = f.open();
+    let adapter = AdapterId(ADAPTER.into());
+    let proposed = diagnostic_candidate(&host, "loud", &base);
+    let attempts = f.0.join("diagnostic-attempts");
+    assert!(
+        host.execute_approved(&adapter, &proposed.version_id)
+            .is_err()
+    );
+    assert!(!attempts.exists());
+    let action = approve_for(&host, &proposed, DIAGNOSTIC_CAPABILITY);
+    let core = Connection::open(f.0.join("core.sqlite")).unwrap();
+    core.execute_batch(&format!(
+        "CREATE TRIGGER lose_diagnostic_receipt BEFORE INSERT ON artifact_versions
+         WHEN NEW.schema_id='{DIAGNOSTIC_RECEIPT}' BEGIN SELECT RAISE(ABORT,'simulated Core receipt rollback'); END;"
+    )).unwrap();
+    assert!(host.execute_approved(&adapter, &action).is_err());
+    assert_eq!(fs::read_to_string(&attempts).unwrap(), "run\n");
+    let journal = Connection::open(f.0.join("checks.sqlite")).unwrap();
+    let saved: String = journal
+        .query_row("SELECT result FROM checks", [], |row| row.get(0))
+        .unwrap();
+    let saved: Value = serde_json::from_str(&saved).unwrap();
+    host.shutdown().unwrap();
+    drop(host);
+    core.execute_batch("DROP TRIGGER lose_diagnostic_receipt")
+        .unwrap();
+
+    let mut host = f.open();
+    let receipt = host.execute_approved(&adapter, &action).unwrap();
+    assert_eq!(receipt.schema_id.0, DIAGNOSTIC_RECEIPT);
+    assert_eq!(receipt.payload["action_version"], json!(action));
+    assert_eq!(receipt.payload["result"]["revision"], base);
+    assert_eq!(receipt.payload["result"]["status"], "failed");
+    assert_eq!(receipt.payload["result"]["exit_code"], 1);
+    assert_eq!(receipt.payload["diagnostics"], saved["diagnostics"]);
+    let output = &receipt.payload["diagnostics"];
+    for (stream, start) in [("stdout", "stdout\n"), ("stderr", "stderr\n�.")] {
+        assert_eq!(output[stream]["truncated"], true);
+        let captured = output[stream]["text"].as_str().unwrap();
+        assert!(captured.starts_with(start), "{captured:?}");
+        assert_eq!(captured.chars().count(), 512);
+    }
+    assert_eq!(fs::read_to_string(&attempts).unwrap(), "run\n");
+    host.shutdown().unwrap();
+}
+
+#[test]
+fn diagnostic_checks_preserve_deadlines_and_discard_successful_output() {
+    let f = Fixture::new();
+    let base = diagnostic_checks(&f);
+    let mut host = f.open();
+    let adapter = AdapterId(ADAPTER.into());
+    for (name, status) in [
+        ("quiet", "passed"),
+        ("held-open", "failed"),
+        ("timeout", "timed_out_or_killed"),
+    ] {
+        let proposed = diagnostic_candidate(&host, name, &base);
+        let action = approve_for(&host, &proposed, DIAGNOSTIC_CAPABILITY);
+        let result = host.execute_approved(&adapter, &action).unwrap().payload;
+        assert_eq!(result["result"]["status"], status);
+        assert!(result["result"]["duration_ms"].as_u64().unwrap() < 3000);
+        match name {
+            "quiet" => assert!(result.get("diagnostics").is_none()),
+            "held-open" => {
+                assert_eq!(
+                    result["diagnostics"]["stderr"]["text"],
+                    "failure with a background child\n"
+                );
+                assert_eq!(result["diagnostics"]["stderr"]["truncated"], true);
+            }
+            "timeout" => assert_eq!(result["diagnostics"]["stdout"]["text"], "started\n"),
+            _ => unreachable!(),
+        }
+    }
+    host.shutdown().unwrap();
+}

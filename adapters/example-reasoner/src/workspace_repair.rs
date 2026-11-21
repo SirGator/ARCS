@@ -13,6 +13,7 @@ pub const EDIT: &str = "arcs.workspace_edit_candidate.v1";
 pub const CHECK: &str = "arcs.workspace_revision_check_candidate.v1";
 const TASK: &str = "arcs.task.workspace_repair.v1";
 const EDIT_RECEIPT: &str = "arcs.execution_result.workspace_edit.v1";
+const CHECK_WITH_DIAGNOSTICS: &str = "arcs.execution_result.workspace_revision_check.v2";
 const CHECK_RECEIPT: &str = "arcs.execution_result.workspace_revision_check.v1";
 
 pub fn reason(invocation: &ReasoningInvocationV2) -> Result<ReasoningResponseV2, AdapterError> {
@@ -36,12 +37,15 @@ pub fn reason(invocation: &ReasoningInvocationV2) -> Result<ReasoningResponseV2,
             ]
         }),
         (EDIT, Some("plan")) => {
-            required_capabilities.push(select_action(invocation, "edit.apply")?);
+            required_capabilities.push(select_action(invocation, &["edit.apply"])?);
             json!({"base_commit":task.payload["base_commit"],"path":task.payload["path"],
                 "replacement":task.payload["replacement"]})
         }
         (CHECK, Some("plan")) => {
-            required_capabilities.push(select_action(invocation, "check.revision")?);
+            required_capabilities.push(select_action(
+                invocation,
+                &["check.revision", "check.revision.diagnostic"],
+            )?);
             let [binding] = invocation.constraints["task_dependencies"]
                 .as_array()
                 .map(Vec::as_slice)
@@ -60,7 +64,7 @@ pub fn reason(invocation: &ReasoningInvocationV2) -> Result<ReasoningResponseV2,
                     "revision check requires one bound edit receipt",
                 ));
             };
-            let receipt = bound_context(invocation, &source["version_id"], EDIT_RECEIPT)?;
+            let receipt = bound_context(invocation, &source["version_id"], &[EDIT_RECEIPT])?;
             let revision =
                 successful_edit(&receipt.payload["result"], &task.payload).ok_or_else(|| {
                     AdapterError::rejected("edit receipt does not prove the requested repair")
@@ -75,16 +79,16 @@ pub fn reason(invocation: &ReasoningInvocationV2) -> Result<ReasoningResponseV2,
                 .iter()
                 .find(|item| identifies(candidate_id, &item.version_id))
                 .ok_or_else(|| AdapterError::rejected("missing workspace repair candidate"))?;
-            let schema = match candidate.schema_id.0.as_str() {
-                EDIT => EDIT_RECEIPT,
-                CHECK => CHECK_RECEIPT,
+            let schemas: &[_] = match candidate.schema_id.0.as_str() {
+                EDIT => &[EDIT_RECEIPT],
+                CHECK => &[CHECK_RECEIPT, CHECK_WITH_DIAGNOSTICS],
                 _ => {
                     return Err(AdapterError::rejected(
                         "unsupported workspace repair candidate",
                     ));
                 }
             };
-            let receipt = bound_context(invocation, &metadata["execution_version_id"], schema)?;
+            let receipt = bound_context(invocation, &metadata["execution_version_id"], schemas)?;
             let result = &receipt.payload["result"];
             let (effect, detail) = if candidate.schema_id.0 == EDIT {
                 if successful_edit(result, &candidate.payload).is_some() {
@@ -159,25 +163,27 @@ fn identifies(value: &Value, version: &VersionId) -> bool {
 fn bound_context<'a>(
     invocation: &'a ReasoningInvocationV2,
     version: &Value,
-    schema: &str,
+    schemas: &[&str],
 ) -> Result<&'a ReasoningContextItem, AdapterError> {
     invocation
         .context
         .iter()
-        .find(|item| identifies(version, &item.version_id) && item.schema_id.0 == schema)
+        .find(|item| {
+            identifies(version, &item.version_id) && schemas.contains(&item.schema_id.0.as_str())
+        })
         .ok_or_else(|| AdapterError::rejected("missing bound workspace repair receipt"))
 }
 
 fn select_action(
     invocation: &ReasoningInvocationV2,
-    id: &str,
+    ids: &[&str],
 ) -> Result<arcs_adapter_protocol::CapabilityRef, AdapterError> {
     let [capability] = invocation.allowed_capabilities.as_slice() else {
         return Err(AdapterError::rejected(
             "workspace repair needs one configured action",
         ));
     };
-    if capability.capability_id.0 != id {
+    if !ids.contains(&capability.capability_id.0.as_str()) {
         return Err(AdapterError::rejected("unexpected workspace repair action"));
     }
     Ok(capability.clone())

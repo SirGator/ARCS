@@ -1,3 +1,4 @@
+mod diagnostics;
 mod git_edit;
 mod runner;
 
