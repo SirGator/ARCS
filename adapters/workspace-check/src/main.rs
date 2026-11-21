@@ -1,3 +1,4 @@
+mod git_edit;
 mod runner;
 
 use std::io::{self, BufReader};

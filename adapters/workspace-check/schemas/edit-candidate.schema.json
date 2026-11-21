@@ -1,0 +1,11 @@
+{
+  "$id": "arcs.workspace_edit_candidate.v1",
+  "type": "object",
+  "required": ["base_commit", "path", "replacement"],
+  "properties": {
+    "base_commit": { "type": "string", "minLength": 40 },
+    "path": { "type": "string", "minLength": 1 },
+    "replacement": { "type": "string" }
+  },
+  "additionalProperties": false
+}

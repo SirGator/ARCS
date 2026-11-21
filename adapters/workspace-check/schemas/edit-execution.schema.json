@@ -1,0 +1,20 @@
+{
+  "$id": "arcs.execution_result.workspace_edit.v1",
+  "type": "object",
+  "required": ["action_version", "result"],
+  "properties": {
+    "action_version": { "type": "string", "minLength": 1 },
+    "result": {
+      "type": "object",
+      "required": ["path", "base_commit", "status", "commit"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "base_commit": { "type": "string", "minLength": 40 },
+        "status": { "type": "string", "enum": ["applied", "unchanged", "conflict"] },
+        "commit": { "type": "string", "minLength": 40 }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

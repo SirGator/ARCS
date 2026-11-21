@@ -510,6 +510,13 @@
 > verwendet den Workspace-Check-Adapter und demonstriert einen
 > fehlgeschlagenen und einen später bestandenen Test in derselben Aufgabe.
 
+> Siebenundvierzigster Schritt gemäß v3 §4 Act, §7.2 PAR-10 und
+> TEST-02. Der Workspace-Adapter kann eine freigegebene Textdatei auf
+> Basis eines konkreten Git-Commits ersetzen. Git veröffentlicht das
+> Ergebnis per atomarem Vergleich auf einer lokalen ARCS-Referenz.
+> Das Adapterjournal erhält die Vorbereitungsdaten und die Quittung
+> über Neustarts. Ein konfigurierter Test prüft den neuen Git-Stand.
+
 **Leitbild:** ARCS ist ein universeller Agent. Es soll sich einfach bedienen lassen, beliebige kompatible Systeme verbinden, eigenständig Probleme lösen und langfristige Aufgaben über Monate verfolgen.
 
 ## 1. Verbindliche Architekturregeln

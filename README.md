@@ -65,7 +65,8 @@ dokumentiert Slice 42. Der [Bericht zum Reasoning-Kontingent](docs/ZWISCHENBERIC
 dokumentiert Slice 43. Der [Bericht zur Übernahme fertiger Teilergebnisse](docs/ZWISCHENBERICHT_2026-11-21_PLAN_REUSE.md)
 dokumentiert Slice 44. Der [Bericht zu lokalen Softwareprüfungen](docs/ZWISCHENBERICHT_2026-11-21_WORKSPACE_CHECK.md)
 dokumentiert Slice 45. Der [Bericht zum dauerhaften Softwareprüfungs-Ziel](docs/ZWISCHENBERICHT_2026-11-21_WORKSPACE_GOAL.md)
-dokumentiert Slice 46. Die Berichte vom
+dokumentiert Slice 46. Der [Bericht zu freigegebenen Projektänderungen](docs/ZWISCHENBERICHT_2026-11-21_WORKSPACE_EDIT.md)
+dokumentiert Slice 47. Die Berichte vom
 [17. November](docs/ZWISCHENBERICHT_2026-11-17.md) und
 [16. November](docs/ZWISCHENBERICHT_2026-11-16.md) dokumentieren frühere
 Umsetzungsstände, Prüfergebnisse und offene Grenzen.

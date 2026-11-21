@@ -70,6 +70,54 @@ Bei einem Wiederholungsaufruf verwendet der Adapter die gespeicherte
 Quittung oder meldet `interrupted`. Ein neuer Prüflauf braucht einen neuen
 freigegebenen Auftrag.
 
+## Freigegebene Codekorrekturen als Git-Versionen speichern
+
+Mit der optionalen `edit`-Konfiguration bietet derselbe Adapter die
+Fähigkeit `edit.apply` an. `workspace` muss dann auf die Wurzel eines
+lokalen Git-Repositories zeigen. Beispielsweise kann die lokale
+Arbeitsreferenz einmal vom aktuellen HEAD aus angelegt werden.
+
+```bash
+git -C my-project update-ref refs/arcs/review HEAD ''
+```
+
+Ergänze das Profil um die Referenz und die erlaubten Dateien.
+
+```json
+{
+  "reference": "refs/arcs/review",
+  "files": ["calculator.py"]
+}
+```
+
+Der Host lädt `edit-candidate.schema.json` und
+`edit-execution.schema.json` zusätzlich. Der Executor-Grant
+autorisiert `edit.apply` mit `workspace.edit`. Beide Fähigkeiten des
+Adapters können in derselben Sitzung verwendet werden. Für eine reine
+Edit-Installation kann `checks` leer sein. Profil und Journal
+gehören zu derselben Installation.
+
+Der Kandidat für `arcs.workspace_edit_candidate.v1` enthält den vollständigen
+Basis-Commit unter `base_commit`, den freigegebenen Pfad unter `path` sowie
+den vollständigen neuen UTF-8-Text unter `replacement`. Die Grenze liegt
+bei 32 KiB pro Textdatei. Git übernimmt die übrigen Dateien aus dem
+Basis-Commit. Nach Verification und Freigabe veröffentlicht der Adapter
+den Commit auf `refs/arcs/review`. Diese Referenz dient als Arbeitsstand
+für nachfolgende Werkzeuge.
+
+Das `arcs.execution_result.workspace_edit.v1`-Artefakt enthält den
+Pfad, die Basis und den Commit. Bei `applied` ist der Commit veröffentlicht,
+bei `unchanged` war der Text bereits identisch. Bei `conflict` enthält
+`commit` den beobachteten neueren Stand. Eine Korrektur dafür benötigt
+einen neuen Kandidaten mit passender Basis und eigener Freigabe.
+
+Der Prüfadapter `check.run` führt sein konfiguriertes Programm im
+Arbeitsverzeichnis aus. Für Git-basierte Prüfungen kann dieses Programm
+die Arbeitsreferenz auf einen vollständigen Hash auflösen und die
+Prüfung aus einem Checkout dieses Commits starten. Der Integrationstest
+zeigt denselben Ablauf mit einer fehlerhaften und der korrigierten
+Version eines Rechners.
+
 ## Dauerhaftes Prüfziel starten
 
 Das [mitgelieferte Beispiel](../config/workspace-goal/runtime.json)

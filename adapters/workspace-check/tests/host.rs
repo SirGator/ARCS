@@ -1,3 +1,6 @@
+#[path = "host/edit.rs"]
+mod edit;
+
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -57,6 +60,9 @@ impl Fixture {
     fn write(&self, filename: &str, data: Value) {
         fs::write(self.0.join(filename), serde_json::to_vec(&data).unwrap()).unwrap();
     }
+    fn read(&self, filename: &str) -> Value {
+        serde_json::from_slice(&fs::read(self.0.join(filename)).unwrap()).unwrap()
+    }
     fn attempts(&self) -> usize {
         fs::read_to_string(self.0.join("project/attempts"))
             .unwrap_or_default()
@@ -81,6 +87,22 @@ impl Verifier for PassedPolicy {
 }
 
 fn candidate(host: &Host, proposal: &str, check: &str) -> Artifact {
+    propose(
+        host,
+        proposal,
+        "arcs.workspace_check_candidate.v1",
+        "check.run",
+        json!({"check":check}),
+    )
+}
+
+fn propose(
+    host: &Host,
+    proposal: &str,
+    schema: &str,
+    capability: &str,
+    payload: Value,
+) -> Artifact {
     let mut registry = AdapterRegistry::new();
     registry.register(
         serde_json::from_value(json!({
@@ -122,15 +144,19 @@ fn candidate(host: &Host, proposal: &str, check: &str) -> Artifact {
     .propose(CandidateProposal {
         proposal_id: proposal.into(),
         rule_id: "test.workspace.v1".into(),
-        schema_id: SchemaId("arcs.workspace_check_candidate.v1".into()),
-        payload: json!({"check":check}),
+        schema_id: SchemaId(schema.into()),
+        payload,
         evidence: vec![task.version_id],
-        required_capabilities: vec![CapabilityRef::new(ADAPTER, "check.run")],
+        required_capabilities: vec![CapabilityRef::new(ADAPTER, capability)],
     })
     .unwrap()
 }
 
 fn approve(host: &Host, candidate: &Artifact) -> VersionId {
+    approve_for(host, candidate, "check.run")
+}
+
+fn approve_for(host: &Host, candidate: &Artifact, capability: &str) -> VersionId {
     let mut ids = host.store().durable_id_generator("test-workspace").unwrap();
     let verification =
         VerificationService::new(host.schemas(), host.store(), &mut ids, &SystemClock)
@@ -157,7 +183,7 @@ fn approve(host: &Host, candidate: &Artifact) -> VersionId {
     )
     .materialize(
         &approval.version_id,
-        &CapabilityRef::new(ADAPTER, "check.run"),
+        &CapabilityRef::new(ADAPTER, capability),
     )
     .unwrap()
     .version_id

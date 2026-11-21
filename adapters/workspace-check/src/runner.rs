@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Instant;
 
+use crate::git_edit::{self, EditProfile};
+
 use arcs_adapter_protocol::{
     ActInvocation, ActResponse, AdapterId, AdapterManifest, CapabilityContract,
     CapabilityDescriptor, CapabilityId, CapabilityRef, SchemaId,
@@ -25,6 +27,8 @@ struct Profile {
     adapter_id: AdapterId,
     workspace: PathBuf,
     checks: BTreeMap<String, Check>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    edit: Option<EditProfile>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -44,17 +48,18 @@ struct CommandSelection {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct MaterializedAction {
+struct MaterializedAction<T> {
     target_version: String,
     approval_version: String,
     capability: CapabilityRef,
     input_schema_id: SchemaId,
-    payload: CommandSelection,
+    payload: T,
 }
 
 pub(crate) struct Runner {
     profile: Profile,
     db: Connection,
+    journal: PathBuf,
     _lock: File,
 }
 
@@ -64,15 +69,21 @@ impl Runner {
         let mut profile: Profile =
             serde_json::from_slice(&fs::read(&profile_path).map_err(message)?).map_err(message)?;
         let base = profile_path.parent().ok_or("profile directory missing")?;
-        if !Path::new(SUPERVISOR).is_file() {
+        if !profile.checks.is_empty() && !Path::new(SUPERVISOR).is_file() {
             return Err("workspace checks require /usr/bin/timeout".into());
         }
         profile.workspace = base
             .join(&profile.workspace)
             .canonicalize()
             .map_err(message)?;
-        if !profile.workspace.is_dir() || !(1..=64).contains(&profile.checks.len()) {
-            return Err("a workspace directory and 1–64 named checks are required".into());
+        if !profile.workspace.is_dir()
+            || profile.checks.len() > 64
+            || (profile.checks.is_empty() && profile.edit.is_none())
+        {
+            return Err("a workspace directory and configured capabilities are required".into());
+        }
+        if let Some(edit) = &profile.edit {
+            edit.validate(&profile.workspace)?;
         }
         for (name, check) in &mut profile.checks {
             // Keep aliases such as rustup's cargo proxy as the executable name.
@@ -104,10 +115,13 @@ impl Runner {
             .map_err(message)?;
         lock.try_lock()
             .map_err(|error| format!("workspace check journal is in use: {error}"))?;
-        let db = Connection::open(journal).map_err(message)?;
+        let db = Connection::open(&journal).map_err(message)?;
+        db.pragma_update(None, "synchronous", "FULL")
+            .map_err(message)?;
         let runner = Self {
             profile,
             db,
+            journal,
             _lock: lock,
         };
         runner
@@ -115,6 +129,9 @@ impl Runner {
             .validate()
             .map_err(|error| format!("{error:?}"))?;
         runner.bind_profile()?;
+        if runner.profile.edit.is_some() {
+            git_edit::initialize(&runner.db)?;
+        }
         Ok(runner)
     }
 
@@ -141,24 +158,34 @@ impl Runner {
         Ok(())
     }
 
-    fn execute_named(&self, invocation: &ActInvocation) -> Result<ActResponse, AdapterError> {
-        let action: MaterializedAction =
+    fn materialized<T: serde::de::DeserializeOwned>(
+        &self,
+        invocation: &ActInvocation,
+        capability: &str,
+        candidate_schema: &str,
+        result_schema: &str,
+    ) -> Result<T, AdapterError> {
+        let action: MaterializedAction<T> =
             serde_json::from_value(invocation.payload.clone()).map_err(rejected)?;
-        if invocation.capability != CapabilityRef::new(&self.profile.adapter_id.0, CAPABILITY)
+        if invocation.capability != CapabilityRef::new(&self.profile.adapter_id.0, capability)
             || invocation.action_schema_id.0 != "arcs.action.v1"
-            || invocation.result_schema_id.0 != RESULT
+            || invocation.result_schema_id.0 != result_schema
             || !identifier(&invocation.invocation_id)
             || invocation.action_version_id.0.trim().is_empty()
             || action.target_version.trim().is_empty()
             || action.approval_version.trim().is_empty()
             || action.capability != invocation.capability
-            || action.input_schema_id.0 != CANDIDATE
+            || action.input_schema_id.0 != candidate_schema
         {
-            return Err(AdapterError::rejected(
-                "workspace check action contract mismatch",
-            ));
+            return Err(AdapterError::rejected("workspace action contract mismatch"));
         }
-        let name = &action.payload.check;
+        Ok(action.payload)
+    }
+
+    fn execute_named(&self, invocation: &ActInvocation) -> Result<ActResponse, AdapterError> {
+        let action: CommandSelection =
+            self.materialized(invocation, CAPABILITY, CANDIDATE, RESULT)?;
+        let name = &action.check;
         let check = self
             .profile
             .checks
@@ -222,25 +249,71 @@ impl Runner {
 
 impl Adapter for Runner {
     fn manifest(&self) -> AdapterManifest {
+        let mut capabilities = Vec::new();
+        if !self.profile.checks.is_empty() {
+            capabilities.push(act_capability(
+                CAPABILITY,
+                CANDIDATE,
+                RESULT,
+                "workspace.check",
+            ));
+        }
+        if self.profile.edit.is_some() {
+            capabilities.push(act_capability(
+                git_edit::CAPABILITY,
+                git_edit::CANDIDATE,
+                git_edit::RESULT,
+                "workspace.edit",
+            ));
+        }
         AdapterManifest {
             protocol_version: 1,
             adapter_id: self.profile.adapter_id.clone(),
             adapter_version: env!("CARGO_PKG_VERSION").into(),
-            capabilities: vec![CapabilityDescriptor {
-                id: CapabilityId(CAPABILITY.into()),
-                description: None,
-                contract: CapabilityContract::Act {
-                    accepts: vec![SchemaId(CANDIDATE.into())],
-                    emits: vec![SchemaId(RESULT.into())],
-                    idempotent: true,
-                },
-                required_permissions: vec!["workspace.check".into()],
-            }],
+            capabilities,
         }
     }
 
     fn execute(&mut self, invocation: ActInvocation) -> Result<ActResponse, AdapterError> {
-        self.execute_named(&invocation)
+        if invocation.capability.capability_id.0 != git_edit::CAPABILITY {
+            return self.execute_named(&invocation);
+        }
+        let edit = self
+            .profile
+            .edit
+            .as_ref()
+            .ok_or_else(|| AdapterError::rejected("workspace editing is not configured"))?;
+        let replacement = self.materialized(
+            &invocation,
+            git_edit::CAPABILITY,
+            git_edit::CANDIDATE,
+            git_edit::RESULT,
+        )?;
+        let result = edit.execute(
+            &self.profile.workspace,
+            &self.journal,
+            &self.db,
+            &invocation,
+            replacement,
+        )?;
+        Ok(ActResponse {
+            invocation_id: invocation.invocation_id.clone(),
+            external_reference: format!("workspace-edit:{}", invocation.invocation_id),
+            result_payload: json!({"action_version":invocation.action_version_id,"result":result}),
+        })
+    }
+}
+
+fn act_capability(id: &str, accepts: &str, emits: &str, permission: &str) -> CapabilityDescriptor {
+    CapabilityDescriptor {
+        id: CapabilityId(id.into()),
+        description: None,
+        contract: CapabilityContract::Act {
+            accepts: vec![SchemaId(accepts.into())],
+            emits: vec![SchemaId(emits.into())],
+            idempotent: true,
+        },
+        required_permissions: vec![permission.into()],
     }
 }
 
