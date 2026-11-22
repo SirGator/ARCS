@@ -83,7 +83,8 @@
             "enum": [
               "ready",
               "busy",
-              "unavailable"
+              "unavailable",
+              "incompatible"
             ]
           },
           "matched": {

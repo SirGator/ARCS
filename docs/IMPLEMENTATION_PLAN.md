@@ -625,6 +625,12 @@
 > Stichproben am Auswahlbeleg. Die Betreiberpolicy legt Gewichte,
 > Mindeststichprobe und Zeitskala fest.
 >
+> Vierundsechzigster Schritt gemäß v3 §7.2 PAR-04/PAR-11 und §9.2.
+> Die erstmalige Planerauswahl zählt autorisierte Binärdaten und prüft
+> die gemeinsame Poolanforderung von Reasoner und Datenquellen. Eine
+> inkompatible Option kann die Bindung eines geeigneten Planers nicht
+> mehr verhindern. Der vorhandene Dispatch prüft erneut vor dem Aufruf.
+>
 **Leitbild:** ARCS ist ein universeller Agent. Es soll sich einfach bedienen lassen, beliebige kompatible Systeme verbinden, eigenständig Probleme lösen und langfristige Aufgaben über Monate verfolgen.
 
 ## 1. Verbindliche Architekturregeln

@@ -4,6 +4,8 @@ mod jobs;
 pub(super) use jobs::PendingReasoning;
 
 use super::*;
+use arcs::adapters::input_data::{InputDataDescriptor, InputDataSelection, InputDataService};
+use arcs::reasoning::{ContextSelection, ReasoningError};
 
 impl Host {
     pub(crate) fn recovery_adapter_unavailable(
@@ -38,28 +40,43 @@ impl Host {
         arcs::reasoning::attempts::history(&self.registry, &self.schemas, &self.store, query)
             .map_err(HostError::Reasoning)
     }
-    pub(crate) fn reasoner_choice_availability(
+    fn reasoner_choice_availability(
         &self,
         choice: &arcs::reasoning::selection::ReasonerChoice,
+        inputs: &[InputDataDescriptor],
     ) -> Result<arcs::reasoning::selection::ReasonerAvailability, HostError> {
         use arcs::reasoning::selection::ReasonerAvailability;
-        if !self
-            .adapters
-            .iter()
-            .any(|adapter| adapter.config.grant.adapter_id == choice.capability.adapter_id)
-            || self
-                .unavailable_adapters
-                .contains(&choice.capability.adapter_id)
-        {
+        let resources: HashSet<_> = std::iter::once(choice.capability.adapter_id.clone())
+            .chain(
+                inputs
+                    .iter()
+                    .map(|input| input.selection.source.adapter_id.clone()),
+            )
+            .collect();
+        let accepts = InputDataService::new(&self.registry, &self.schemas, &self.store)
+            .receiver_accepts(&choice.capability, inputs)
+            .map_err(|error| HostError::Reasoning(ReasoningError::InputData(error)))?;
+        if !accepts {
+            return Ok(ReasonerAvailability::Incompatible);
+        }
+        let claims = match self.reasoning_claims(&resources) {
+            Ok(claims) => claims,
+            Err(HostError::InvalidConfig(_)) => return Ok(ReasonerAvailability::Incompatible),
+            Err(error) => return Err(error),
+        };
+        if resources.iter().any(|id| {
+            self.unavailable_adapters.contains(id)
+                || !self
+                    .adapters
+                    .iter()
+                    .any(|adapter| &adapter.config.grant.adapter_id == id)
+        }) {
             return Ok(ReasonerAvailability::Unavailable);
         }
-        if self.busy_adapters().contains(&choice.capability.adapter_id) {
+        let busy = self.busy_adapters();
+        if resources.iter().any(|id| busy.contains(id)) {
             return Ok(ReasonerAvailability::Busy);
         }
-        let claims = self.reasoning_claims(&std::collections::HashSet::from([choice
-            .capability
-            .adapter_id
-            .clone()]))?;
         match self.ensure_resources_available(&claims) {
             Ok(()) => Ok(ReasonerAvailability::Ready),
             Err(HostError::ResourceBusy { .. }) => Ok(ReasonerAvailability::Busy),
@@ -94,6 +111,8 @@ impl Host {
         &mut self,
         owner: &arcs::reasoning::selection::SelectionOwner,
         policy: &arcs::reasoning::selection::SelectionPolicy,
+        context: &[ContextSelection],
+        selections: &[InputDataSelection],
     ) -> Result<arcs::reasoning::selection::SelectionPreparation, HostError> {
         // Load before looking at transient occupancy. Replay must not switch
         // providers because the old worker is busy or another one became free.
@@ -102,10 +121,18 @@ impl Host {
                 Box::new(saved),
             ));
         }
+        let inputs = arcs::reasoning::selection::describe_inputs(
+            &self.registry,
+            &self.schemas,
+            &self.store,
+            context,
+            selections,
+        )
+        .map_err(HostError::Reasoning)?;
         let availability = policy
             .choices
             .iter()
-            .map(|choice| self.reasoner_choice_availability(choice))
+            .map(|choice| self.reasoner_choice_availability(choice, &inputs))
             .collect::<Result<Vec<_>, _>>()?;
         arcs::reasoning::selection::ReasonerSelectionService {
             registry: &self.registry,

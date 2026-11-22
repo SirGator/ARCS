@@ -71,16 +71,24 @@ abgewiesen. Adapterbeschreibungen bleiben ungeprüfte Behauptungen.
 Die lexikalische Suche bleibt auf diese Optionen begrenzt. Alle Suchwörter
 müssen passen. Unter aktuell verfügbaren Treffern gewinnt die höchste Relevanz;
 bei Gleichstand gilt die Betreiberreihenfolge. Leerer Suchtext erlaubt alle
-konfigurierten Optionen. Verbindung, Quarantäne, laufende Reasoning-Aufrufe und
-die eigenen Poolanforderungen des Adapters bestimmen die beobachtete Verfügbarkeit.
+konfigurierten Optionen. Verbindung, Quarantäne, laufende Aufrufe und Poolanforderungen bestimmen
+die beobachtete Verfügbarkeit. Bei einem Goal mit Binäreingaben prüft der
+Host die konkreten, autorisierten Datenreferenzen bereits vor der ersten
+Planerbindung. Er prüft den Receiver-Grant auf Objektzahl und Bytes. Für
+die Kapazität zählt die gemeinsame Anforderung des Reasoners und aller
+beteiligten Datenadapter. Jede Adapterinstallation zählt einmal.
 
-Diese Beobachtung reserviert keine Ressourcen. Der tatsächliche Aufruf prüft
-erneut Grants, Eingaben, Workerplätze und die gemeinsamen Anforderungen von
-Reasoner und binären Datenquellen. Eine gewählte Option kann deshalb anschließend
-warten oder an einem später erkennbaren Eingabe-/Kapazitätsfehler scheitern.
+Die Prüfung reserviert keine Ressourcen und lädt keine Bildbytes.
+Der Dispatch prüft Grants, Eingaben, Workerplätze und die aktuelle
+Poolbelegung erneut. Spätere Zielrunden verwenden den gespeicherten
+Planer weiterhin und prüfen ihre eigenen Eingaben beim Dispatch.
 
-Sind alle passenden Optionen belegt oder unerreichbar, wartet die Aufgabe mit
-`resource: "reasoner-selection"`, ohne Auswahlbeleg oder Worker. Gibt es keinen
+Ein Reasoner, der das ausgewählte Datenvolumen oder die gemeinsame
+Poolanforderung grundsätzlich nicht tragen kann, erscheint als
+`incompatible`. Wenn alle inhaltlich passenden Optionen inkompatibel sind,
+endet die Aufgabe mit einem Fehler. Sind mögliche Optionen aktuell belegt
+oder unerreichbar, wartet die Aufgabe mit `resource: "reasoner-selection"`,
+ohne Auswahlbeleg oder Worker. Gibt es keinen
 inhaltlichen Treffer, schlägt diese Aufgabe ausdrücklich fehl. Unabhängige
 Aufträge können weiterlaufen.
 

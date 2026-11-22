@@ -15,7 +15,7 @@ impl TaskRuntime {
         let route = self.apply_saved_reasoner(host, sequence, route.clone())?;
         let route = &route;
         let route = if route.goal.is_none() {
-            self.bind_reasoner_route(host, sequence, route, input)?
+            self.bind_reasoner_route(host, sequence, route, input, &[], &[])?
         } else {
             route.clone()
         };

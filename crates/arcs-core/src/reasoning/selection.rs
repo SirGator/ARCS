@@ -1,5 +1,7 @@
 //! Durable choice of a permitted Reason endpoint, with no execution authority.
 mod history;
+mod inputs;
+pub use inputs::describe_inputs;
 pub(super) mod records;
 pub use history::{HistoryEvidence, HistoryRanking};
 #[cfg(test)]
@@ -50,6 +52,7 @@ pub enum ReasonerAvailability {
     Ready,
     Busy,
     Unavailable,
+    Incompatible,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -222,6 +225,15 @@ impl ReasonerSelectionService<'_> {
         if !observations.iter().any(|observation| observation.matched) {
             return Err(invalid(
                 "no permitted reasoner matches the task selection query",
+            ));
+        }
+        if observations
+            .iter()
+            .filter(|observation| observation.matched)
+            .all(|observation| observation.availability == ReasonerAvailability::Incompatible)
+        {
+            return Err(invalid(
+                "no matching reasoner can admit the selected inputs and configured resources",
             ));
         }
         let tier = history::top_tier(&observations);

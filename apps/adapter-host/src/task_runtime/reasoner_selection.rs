@@ -2,8 +2,9 @@
 //! task orchestration only binds its operator policy and immutable input.
 use super::{ReasoningRoute, TaskRuntime, config::invalid};
 use crate::{Host, HostError};
-use arcs::adapters::AdapterManifest;
+use arcs::adapters::{AdapterManifest, input_data::InputDataSelection};
 use arcs::core::{Artifact, VersionId};
+use arcs::reasoning::ContextSelection;
 use arcs::reasoning::selection::{
     HistoryEvidence, HistoryRanking, ReasonerChoice, SelectedReasoner, SelectionOwner,
     SelectionPolicy, SelectionPreparation,
@@ -171,12 +172,14 @@ impl TaskRuntime {
         sequence: u64,
         route: &ReasoningRoute,
         input: &Artifact,
+        context: &[ContextSelection],
+        inputs: &[InputDataSelection],
     ) -> Result<ReasoningRoute, HostError> {
         if route.reasoner_selection.is_none() {
             return Ok(route.clone());
         }
         let (owner, policy) = self.selection_identity(host, sequence, route, input)?;
-        match host.select_reasoner(&owner, &policy)? {
+        match host.select_reasoner(&owner, &policy, context, inputs)? {
             SelectionPreparation::Selected(selection) => Ok(apply(route.clone(), &selection)),
             SelectionPreparation::Waiting => Err(HostError::ResourceBusy {
                 resource: "reasoner-selection".into(),

@@ -34,6 +34,16 @@ impl From<DataError> for InputDataError {
 fn invalid(message: &str) -> InputDataError {
     InputDataError::Invalid(message.into())
 }
+fn fits(limits: &InputDataLimits, inputs: &[InputDataDescriptor]) -> bool {
+    inputs.len() <= limits.max_objects
+        && inputs
+            .iter()
+            .try_fold(0u64, |sum, input| {
+                sum.checked_add(input.reference.size_bytes)
+            })
+            .is_some_and(|total| total <= limits.max_total_bytes)
+}
+
 pub struct InputDataService<'a> {
     registry: &'a AdapterRegistry,
     schemas: &'a SchemaRegistry,
@@ -60,29 +70,58 @@ impl<'a> InputDataService<'a> {
         if selections.is_empty() {
             return Ok(vec![]);
         }
-        let (receiver, cap) = self
+        let limits = self
+            .receiver_limits(target)?
+            .ok_or_else(|| invalid("binary input is not granted"))?;
+        if selections.len() > limits.max_objects {
+            return Err(invalid("receiver object limit mismatch"));
+        }
+        let inputs = self.describe(context, selections)?;
+        if !fits(limits, &inputs) {
+            return Err(invalid("binary inputs exceed receiver byte limit"));
+        }
+        Ok(inputs)
+    }
+
+    fn receiver_limits(
+        &self,
+        target: &CapabilityRef,
+    ) -> Result<Option<&InputDataLimits>, InputDataError> {
+        let (receiver, capability) = self
             .registry
             .authorized_capability(&target.adapter_id, &target.capability_id)?;
-        let limits = receiver
-            .grant()
-            .input_data_limits
-            .as_ref()
-            .filter(|limits| limits.is_valid())
-            .ok_or_else(|| invalid("binary input is not granted"))?;
-        if !cap.contract.is_reasoning()
-            || !receiver
-                .grant()
-                .granted_permissions
-                .iter()
-                .any(|permission| permission == "data.receive")
-            || selections.len() > limits.max_objects
-        {
-            return Err(invalid(
-                "receiver role, permission or object limit mismatch",
-            ));
+        let grant = receiver.grant();
+        Ok(grant.input_data_limits.as_ref().filter(|limits| {
+            limits.is_valid()
+                && capability.contract.is_reasoning()
+                && grant
+                    .granted_permissions
+                    .iter()
+                    .any(|permission| permission == "data.receive")
+        }))
+    }
+
+    /// Compare the prepared input set with the current receiver grant without a transfer.
+    pub fn receiver_accepts(
+        &self,
+        target: &CapabilityRef,
+        inputs: &[InputDataDescriptor],
+    ) -> Result<bool, InputDataError> {
+        Ok(inputs.is_empty()
+            || self
+                .receiver_limits(target)?
+                .is_some_and(|limits| fits(limits, inputs)))
+    }
+
+    pub(crate) fn describe(
+        &self,
+        context: &[ReasoningContextItem],
+        selections: &[InputDataSelection],
+    ) -> Result<Vec<InputDataDescriptor>, InputDataError> {
+        if selections.len() > arcs_adapter_protocol::MAX_INPUT_DATA_OBJECTS {
+            return Err(invalid("binary input object limit exceeded"));
         }
         let mut names = std::collections::HashSet::new();
-        let mut total = 0u64;
         let mut inputs = Vec::new();
         for selection in selections {
             let item = context
@@ -131,12 +170,6 @@ impl<'a> InputDataService<'a> {
             };
             if !input.is_valid() || !names.insert(&selection.name) {
                 return Err(invalid("invalid binary input descriptor or duplicate name"));
-            }
-            total = total
-                .checked_add(input.reference.size_bytes)
-                .ok_or_else(|| invalid("binary input size overflow"))?;
-            if total > limits.max_total_bytes {
-                return Err(invalid("binary inputs exceed receiver byte limit"));
             }
             DataService::new(self.registry).authorize(&selection.source, &input.reference)?;
             inputs.push(input);

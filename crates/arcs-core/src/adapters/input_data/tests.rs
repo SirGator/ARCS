@@ -459,3 +459,66 @@ fn transient_source_failure_retries_the_same_invocation_before_any_backend_call(
     assert_eq!(result.status, ReasoningStatus::Solved);
     assert_eq!(fixture.receiver.reasons.load(Ordering::Relaxed), 1);
 }
+
+#[test]
+fn selection_uses_dispatch_descriptors_and_tests_receiver_limits_without_transfer() {
+    use crate::reasoning::selection::describe_inputs;
+    let mut fixture = Fixture::new();
+    let request = request();
+    let selections = [selection()];
+    let registry = fixture.registry();
+    let described = describe_inputs(
+        &registry,
+        &fixture.schemas,
+        &fixture.store,
+        &request.context,
+        &selections,
+    )
+    .unwrap();
+    assert_eq!(
+        described,
+        fixture.prepare(&fixture.context, &selections).unwrap()
+    );
+    assert!(
+        describe_inputs(
+            &registry,
+            &fixture.schemas,
+            &fixture.store,
+            &[],
+            &selections
+        )
+        .is_err()
+    );
+    let mut excluded = request.context.clone();
+    excluded[0].payload_fields.clear();
+    assert!(
+        describe_inputs(
+            &registry,
+            &fixture.schemas,
+            &fixture.store,
+            &excluded,
+            &selections
+        )
+        .is_err()
+    );
+    fixture
+        .receiver_grant
+        .input_data_limits
+        .as_mut()
+        .unwrap()
+        .max_total_bytes = 100_000;
+    let registry = fixture.registry();
+    let data = InputDataService::new(&registry, &fixture.schemas, &fixture.store);
+    assert!(
+        !data
+            .receiver_accepts(&request.capability, &described)
+            .unwrap()
+    );
+    assert!(
+        data.prepare(&request.capability, &fixture.context, &selections)
+            .is_err()
+    );
+    assert_eq!(fixture.source.reads.load(Ordering::Relaxed), 0);
+    assert_eq!(fixture.receiver.reasons.load(Ordering::Relaxed), 0);
+    assert_eq!(fixture.store.len().unwrap(), 1);
+}

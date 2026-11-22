@@ -82,7 +82,8 @@ dokumentiert Slice 59. Der [Bericht zu Nachher-Abfragen mit Ausführungsbeleg](d
 dokumentiert Slice 60. Der [Bericht zur startbaren Farbsuche im Simulator](docs/ZWISCHENBERICHT_2026-11-22_DRONE_COLOR_SEARCH.md)
 dokumentiert Slice 61. Der [Bericht zum prüfbaren Bildbeleg und zur Zustellung](docs/ZWISCHENBERICHT_2026-11-22_DRONE_SEARCH_EVIDENCE.md)
 dokumentiert Slice 62. Der [Bericht zur Reasoner-Auswahl mit technischen Messwerten](docs/ZWISCHENBERICHT_2026-11-22_REASONER_HISTORY_RANKING.md)
-dokumentiert Slice 63. Die Berichte vom
+dokumentiert Slice 63. Der [Bericht zur Reasoner-Zuteilung mit Binärdaten](docs/ZWISCHENBERICHT_2026-11-22_REASONER_DATA_ADMISSION.md)
+dokumentiert Slice 64. Die Berichte vom
 [17. November](docs/ZWISCHENBERICHT_2026-11-17.md) und
 [16. November](docs/ZWISCHENBERICHT_2026-11-16.md) dokumentieren frühere
 Umsetzungsstände, Prüfergebnisse und offene Grenzen.

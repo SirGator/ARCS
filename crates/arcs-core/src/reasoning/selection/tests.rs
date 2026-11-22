@@ -385,3 +385,49 @@ fn history_applies_only_to_comparable_equal_relevance_choices() {
     observations[1].matched = false;
     assert!(history::top_tier(&observations).is_empty());
 }
+
+#[test]
+fn permanently_incompatible_options_do_not_pin_a_task_or_hide_a_busy_valid_choice() {
+    let (mut f, owner, policy) = fixture();
+    let artifacts = f.store.len().unwrap();
+    assert!(
+        select(
+            &mut f,
+            &owner,
+            &policy,
+            &[ReasonerAvailability::Incompatible; 2]
+        )
+        .is_err()
+    );
+    assert!(matches!(
+        select(
+            &mut f,
+            &owner,
+            &policy,
+            &[
+                ReasonerAvailability::Incompatible,
+                ReasonerAvailability::Busy
+            ]
+        )
+        .unwrap(),
+        SelectionPreparation::Waiting
+    ));
+    assert_eq!(f.store.len().unwrap(), artifacts);
+    let binding = selected(
+        select(
+            &mut f,
+            &owner,
+            &policy,
+            &[
+                ReasonerAvailability::Incompatible,
+                ReasonerAvailability::Ready,
+            ],
+        )
+        .unwrap(),
+    );
+    assert_eq!(binding.choice(), &policy.choices[1]);
+    assert_eq!(
+        binding.record.observations[0].availability,
+        ReasonerAvailability::Incompatible
+    );
+}

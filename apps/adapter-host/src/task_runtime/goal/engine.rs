@@ -88,14 +88,6 @@ impl TaskRuntime {
             );
             return self.save_goal(&task);
         }
-        // A goal may spend months acquiring control or waiting before it needs
-        // a planner. Freeze the planner binding when planning actually begins.
-        let route = if task.state == GoalState::Planning {
-            self.bind_reasoner_route(host, sequence, route, input)?
-        } else {
-            route.clone()
-        };
-        let route = &route;
         match task.state {
             GoalState::Acquiring | GoalState::Observing => {
                 let after = task.state == GoalState::Observing;
@@ -204,6 +196,10 @@ impl TaskRuntime {
                         payload_fields: assessment_fields(),
                     });
                 }
+                // Freeze the binding only after the actual binary inputs are known.
+                let inputs = binary_inputs(config, &task.before);
+                let route =
+                    self.bind_reasoner_route(host, sequence, route, input, &context, &inputs)?;
                 let request = ReasoningRequestV2 {
                     request_id: self.goal_request_id(&task, "plan"),
                     capability: route.reasoner.clone(),
@@ -219,7 +215,7 @@ impl TaskRuntime {
                     host,
                     task.sequence,
                     request,
-                    &binary_inputs(config, &task.before),
+                    &inputs,
                     route.memory.as_ref(),
                     now_unix_ms,
                 )?
