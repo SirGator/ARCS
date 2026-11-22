@@ -99,12 +99,10 @@ Strecke und speichert Zustand, Bewegungsjournal und Telemetrie-Outbox.
 persistierter Nachher-Observation und Outcome nach. Ein Neustart wiederholt
 die Bewegung nicht. Der Core wurde dafür nicht geändert.
 
-Die externe Kamera liefert inzwischen zugeordnete Bildsnapshots. Bildwahrnehmung,
-ein Suchauftrag, eine fortlaufende Suchsteuerung und eine interaktive Anzeige
-sind noch nicht vorhanden.
-Die bestehende Host-CLI führt begrenzte Abfragen und Polling-Runden aus;
-die vollständige Suchschleife fehlt noch. Ihr allgemeiner Ablauf soll
-wiederverwendbar sein; die Anwendung ergänzt die Suchstrategie und Policy.
+Die externe Kamera liefert zugeordnete Bildsnapshots. Im separaten
+Drohnenprojekt verwendet eine erste Suchanwendung den allgemeinen Host für
+Aufnahme, Bildbewertung, freigegebene Drehung und erneute Aufnahme. Die
+Anwendung hält Suchstrategie, Bewegungsgrenzen und Szenendaten fest.
 
 ## Vorschlag für den ersten beherrschbaren Durchstich
 
@@ -119,19 +117,20 @@ wiederverwendbar sein; die Anwendung ergänzt die Suchstrategie und Policy.
 Die Bewegung verwendet inzwischen eine eigene deterministische Rust-
 Simulation bei fester Höhe. Die optionale Kamera verwendet inzwischen eine
 Pinhole-Projektion und RGB-Bilder im PPM-P6-Format mit farbigen Wandmarkierungen.
-Erkennungsverfahren und die vollständige Suchsteuerung sind noch offen.
+Die erste Suchsteuerung verwendet einen Farbdetektor für ausgewählte
+Bildbytes und dreht die Drohne am Standort.
 
 ## Geplante Zuständigkeiten
 
-Bewegung und Kamera-Snapshots sind implementiert; Wahrnehmung und Suche folgen:
+Die erste Suche setzt sich aus den vorhandenen externen Komponenten zusammen.
 
 | Ort | Verantwortung und Stand |
 | --- | --- |
 | `../drone-sim/simulation/room/` | Raum, Pose, Bewegung, Kollisionen und perspektivische Kamerabilder implementiert |
 | `../drone-sim/adapters/simulated-drone/` | Telemetrie, Pose-Abfrage, idempotente Bewegung und optionale Kamera-Snapshots mit Datenabruf implementiert |
 | `../drone-sim/apps/drone-demo/` | Einzelner Bewegungsauftrag, Verification, System-Approval und Wirkungsprüfung implementiert |
-| `../drone-sim/adapters/camera-perception/` | Geplant: Bildanalyse mit referenziertem Eingangsbild, Fundkandidaten und beobachteten Bildpositionen |
-| `../drone-sim/apps/drone-search/` | Geplant: Suchauftrag, Strategie, fortlaufender Ablauf und Fundbericht |
+| `../drone-sim/adapters/image-reasoner/` | Pixelanalyse und Bildbereiche für ausgewählte Bilder |
+| `../drone-sim/apps/drone-demo/search.py` | Startbare Farbsuche mit getrennten Reasonern für Vorschlag und Wirkungsprüfung |
 | `crates/arcs-core/` | Bestehende allgemeine Verträge und Kontrollmechanismen; für die Bewegung unverändert |
 
 Simulation und Drohnenadapter laufen derzeit in einem Prozess, mit der
@@ -219,8 +218,8 @@ Der lokale Integrationstest führte zwei begrenzte Drehungen aus. Er
 übernahm danach jeweils die bestätigte Revision aus der Bewegungsquittung
 in `camera.capture` und wertete die zurückgegebenen Bildbytes aus.
 
-Als Nächstes folgt eine dauerhaft startbare Suchschleife in der externen Anwendung:
-Nach einem negativen Befund einen Bewegungsvorschlag erzeugen, separat
-prüfen und freigeben, ein neues Bild aufnehmen und erneut auswerten.
-Schrittbudget und kontrollierter Abbruch gehören zu dieser Etappe.
-Die reine Farbsuche ersetzt noch keine semantische Objekterkennung.
+Die [startbare Farbsuche](../../drone-sim/apps/drone-demo/README.md#wiederholbare-farbsuche)
+wiederholt diesen Ablauf bis zum bestätigten Fund oder Rundenbudget. Ein
+separater Test bestätigt den Abschluss bei einem schon sichtbaren Ziel.
+Als nächste Etappen bleiben die freie Erkundung mit Hindernissen und die
+semantische Objekterkennung.

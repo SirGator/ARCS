@@ -607,6 +607,12 @@
 > Der Beleg des Requests verknüpft beide Versionen. Die vorhandene
 > externe Drohnenkamera nimmt damit zur bestätigten Revision auf.
 >
+> Einundsechzigster Schritt gemäß v3 TEST-01. Die externe
+> Farbsuche startet mit wiederholbaren Szenarien im Simulator.
+> Ein begrenzter Suchlauf bestätigt Bildfund und Bewegung anhand der
+> jeweiligen Aufnahme. Bei fehlendem Ziel endet er am Rundenbudget.
+> Der Quellstand der Suchanwendung liegt in `drone-sim`.
+>
 **Leitbild:** ARCS ist ein universeller Agent. Es soll sich einfach bedienen lassen, beliebige kompatible Systeme verbinden, eigenständig Probleme lösen und langfristige Aufgaben über Monate verfolgen.
 
 ## 1. Verbindliche Architekturregeln

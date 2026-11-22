@@ -79,7 +79,8 @@ dokumentiert Slice 56. Der [Bericht zur Bereinigung abgebrochener Prüfungen](do
 dokumentiert Slice 57. Der [Bericht zur Ereignisaktivierung mit spätestem Termin](docs/ZWISCHENBERICHT_2026-11-22_EVENT_WITH_DEADLINE.md)
 dokumentiert Slice 58. Der [Bericht zum Verlauf bewerteter Zielrunden](docs/ZWISCHENBERICHT_2026-11-22_GOAL_ROUND_HISTORY.md)
 dokumentiert Slice 59. Der [Bericht zu Nachher-Abfragen mit Ausführungsbeleg](docs/ZWISCHENBERICHT_2026-11-22_EXECUTION_BOUND_QUERIES.md)
-dokumentiert Slice 60. Die Berichte vom
+dokumentiert Slice 60. Der [Bericht zur startbaren Farbsuche im Simulator](docs/ZWISCHENBERICHT_2026-11-22_DRONE_COLOR_SEARCH.md)
+dokumentiert Slice 61. Die Berichte vom
 [17. November](docs/ZWISCHENBERICHT_2026-11-17.md) und
 [16. November](docs/ZWISCHENBERICHT_2026-11-16.md) dokumentieren frühere
 Umsetzungsstände, Prüfergebnisse und offene Grenzen.
@@ -286,8 +287,9 @@ eine separate Raum-Simulation mit einem externen Drohnenadapter und den
 bestehenden allgemeinen Kontrollmechanismen. Er liest die Pose, führt eine
 begrenzt freigegebene Bewegung aus und prüft die neue Position anhand einer
 separaten Abfrage und einer gespeicherten Observation. Zustand, Outbox und
-Bewegungsjournal überstehen Neustarts ohne zweite Bewegung. Die autonome
-Suche ist noch nicht implementiert.
+Bewegungsjournal überstehen Neustarts ohne zweite Bewegung. Die
+[wiederholbare Farbsuche](../drone-sim/apps/drone-demo/README.md#wiederholbare-farbsuche)
+verwendet dieselben Verträge für einen begrenzten Suchlauf.
 
 Der [externe Kamera-Nachweis](../drone-sim/adapters/simulated-drone/CAMERA.md) liefert inzwischen
 perspektivische Bilder mit geometrischer Verdeckung. Aufnahmekontext, Pose,
@@ -416,8 +418,9 @@ ARCS-Repositorys und -Workspace. Aktuell sind die allgemeine Adapteranbindung
 und die kontrollierte Action-Pipeline sowie eine einfache Drohnenbewegung in einer Raumsimulation
 vorhanden. Eine optionale simulierte Kamera liefert zugeordnete Bildsnapshots.
 Ein externer Rules-Reasoner weist sichtbare und fehlende Farbsignale anhand
-der übertragenen Pixel nach. Semantische Objekterkennung und autonome
-Suchsteuerung sind noch nicht implementiert.
+der übertragenen Pixel nach. Die erste Suchanwendung findet damit einen
+Farbmarker nach freigegebenen Drehungen. Freie Raumerkundung und semantische
+Objekterkennung sind weitere Etappen.
 
 Etappen, Zuständigkeiten und Erfolgskriterien stehen im
 [Plan für die Drohnensuche](docs/DRONE_SEARCH.md).
@@ -470,7 +473,7 @@ Observation → Belief Update → Goal → Memory/Skill Retrieval
 | Observation → Entity → StateEstimate → WorldState | Implementiert |
 | Append-only SQLite-Store und deterministisches Replay | Implementiert |
 | Artifact-Netz als bekannter Fast Path | Implementiert |
-| Externe Kamera und Pixel-Suche | In `../drone-sim`: zielunabhängige Kamera und separater Rules-Reasoner mit ausgewählten Bildbytes; noch keine autonome Suche |
+| Externe Kamera und Pixel-Suche | In `../drone-sim` sind zielunabhängige Kamera, externe Rules-Reasoner und eine begrenzte Suche mit revisionsgebundenen Aufnahmen ausführbar |
 | Dauerhafte Aufgabenverarbeitung | Input-/Observe-zu-Reason-Routen, persistente Queue, Wiederaufnahme und Review-Übergabe. [Reasoning](apps/adapter-host/examples/parallel-runtime.md) und [Goal-Quellenabfragen](apps/adapter-host/examples/parallel-requests.md) nutzen begrenzte Worker. |
 | Allgemeine Zielschleife | Optional pro Route: externe Planung und Bewertung, kontrollierte Aktionen, frische Quellen, Wiederaufnahme und Rundenbudget; Lüftertest nachgewiesen |
 | Kuratiertes Reasoning | V1-Modellfall und allgemeiner V2-Port; externe Solver und Modell-Testadapter, noch kein echter Modellanbieter |
