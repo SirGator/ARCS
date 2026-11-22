@@ -10,6 +10,14 @@ pub fn read(
     schemas: &SchemaRegistry,
     artifact: &Artifact,
 ) -> Result<ReasoningAttempt, ReasoningError> {
+    read_with_target(store, schemas, artifact).map(|(record, _)| record)
+}
+
+pub(in crate::reasoning) fn read_with_target(
+    store: &SqliteArtifactStore,
+    schemas: &SchemaRegistry,
+    artifact: &Artifact,
+) -> Result<(ReasoningAttempt, Option<SchemaId>), ReasoningError> {
     validate_artifact(artifact, schemas)
         .map_err(|_| invalid("invalid reasoning attempt envelope"))?;
     if !trusted(artifact, PUBLISHER) || artifact.schema_id.0 != SCHEMA || artifact.version != 1 {
@@ -47,6 +55,7 @@ pub fn read(
             MetadataField::value("capability", "$.payload.invocation.capability"),
             MetadataField::value("method", "$.payload.invocation.method"),
             MetadataField::value("budget", "$.payload.invocation.budget"),
+            MetadataField::value("target_schema_id", "$.payload.invocation.target_schema_id"),
         ],
     )?;
     if !trusted_metadata(&dispatch, "arcs.runtime.invocation")
@@ -167,10 +176,15 @@ pub fn read(
             return Err(invalid("reasoning attempt provenance is incomplete"));
         }
     }
-    Ok(record)
+    Ok((
+        record,
+        invocation["target_schema_id"]
+            .as_str()
+            .map(|id| SchemaId(id.into())),
+    ))
 }
 
-pub(super) fn trusted(artifact: &Artifact, publisher: &str) -> bool {
+pub(in crate::reasoning) fn trusted(artifact: &Artifact, publisher: &str) -> bool {
     artifact.created_by.id == publisher
         && artifact.created_by.actor_type == ActorType::System
         && artifact.source.kind == SourceKind::Internal

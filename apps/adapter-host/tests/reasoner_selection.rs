@@ -583,3 +583,76 @@ fn a_frozen_cached_result_replays_while_its_adapter_is_busy_without_named_pools(
     });
     host.shutdown().unwrap();
 }
+
+#[test]
+fn verified_attempts_break_a_tie_and_survive_restart_with_their_original_samples() {
+    let f = simple("invalid", "normal");
+    let mut config = f.read("runtime.json");
+    let route = &mut config["routes"][0];
+    route["reasoner_selection"]["history"] = json!({"lookback":4,"min_samples":1,
+        "failure_weight":100,"latency_weight":0,"latency_reference_ms":1000});
+    let budget = route["budget"].clone();
+    f.write("runtime.json", config);
+    let (mut host, mut runtime) = f.open();
+    let input = host.poll_inputs().unwrap().remove(0);
+    let calibration = |id: &str, adapter: &str, budget: Value| {
+        serde_json::from_value(json!({"request_id":id,"capability":{"adapter_id":adapter,"capability_id":"solution.propose"},"method":"learned",
+            "objective":"Calibrate the technical response","context":[{"version_id":input.version_id,"payload_fields":["values","target"]}],
+            "target_schema_id":"arcs.solution_candidate.nearest.v1","allowed_capabilities":[],"constraints":{},"budget":budget})).unwrap()
+    };
+    assert!(
+        host.reason(calibration("bad", "a", budget.clone()))
+            .is_err()
+    );
+    host.reason(calibration("good", "b", budget.clone()))
+        .unwrap();
+    let mut mismatched_budget = budget;
+    mismatched_budget["max_runtime_ms"] = json!(9000);
+    host.reason(calibration("different-budget", "b", mismatched_budget))
+        .unwrap();
+    let attempts = plan_support::artifacts(&host, arcs::reasoning::attempts::SCHEMA);
+    assert_eq!(attempts.len(), 3);
+    until(&mut host, &mut runtime, |r| {
+        r.report(0).unwrap().ready_for_review == 1
+    });
+    let saved = records(&host).remove(0);
+    let observations = &saved.payload["observations"];
+    assert_eq!(saved.payload["selected_index"], 1);
+    assert_eq!(observations[0]["history"]["failures"], 1);
+    assert_eq!(observations[1]["history"]["failures"], 0);
+    assert_eq!(
+        observations[0]["history"]["sample_versions"],
+        json!([attempts[0].version_id])
+    );
+    assert_eq!(
+        observations[1]["history"]["sample_versions"],
+        json!([attempts[1].version_id])
+    );
+    let edges = arcs::store::ArtifactRelations::new(host.store())
+        .outgoing(&saved.version_id)
+        .unwrap();
+    assert!(edges.iter().any(|edge| edge.to == attempts[0].version_id));
+    assert!(edges.iter().any(|edge| edge.to == attempts[1].version_id));
+    assert!(!edges.iter().any(|edge| edge.to == attempts[2].version_id));
+    assert_eq!(
+        plan_support::artifacts(&host, arcs::reasoning::attempts::SCHEMA).len(),
+        4
+    );
+    host.shutdown().unwrap();
+    drop((host, runtime));
+
+    let (mut host, mut runtime) = f.open();
+    runtime.tick(&mut host).unwrap();
+    assert_eq!(records(&host), vec![saved.clone()]);
+    let report = runtime.reasoner_selections(&host).unwrap().remove(0);
+    assert_eq!(report.selected.capability.adapter_id.0, "b");
+    assert_eq!(
+        report.history.unwrap().sample_versions,
+        vec![attempts[1].version_id.clone()]
+    );
+    assert_eq!(
+        plan_support::artifacts(&host, arcs::reasoning::attempts::SCHEMA).len(),
+        4
+    );
+    host.shutdown().unwrap();
+}

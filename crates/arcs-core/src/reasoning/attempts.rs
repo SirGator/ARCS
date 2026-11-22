@@ -208,6 +208,7 @@ mod history;
 mod validation;
 pub use history::*;
 pub use validation::read;
-use validation::trusted;
+pub(super) use validation::read_with_target;
+pub(super) use validation::trusted;
 #[cfg(test)]
 mod tests;

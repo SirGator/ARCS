@@ -47,6 +47,7 @@ impl RecoveryPolicy {
                 target_schema_id: target.clone(),
                 query_text: String::new(),
                 choices: vec![choice.clone()],
+                history: None,
             }
             .validate(registry, schemas)?;
         }

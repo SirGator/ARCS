@@ -619,6 +619,12 @@
 > erneut. Die Abschlussbewertung kann über den vorhandenen
 > Output-Vertrag gesondert zur Zustellung freigegeben werden.
 >
+> Dreiundsechzigster Schritt gemäß v3 §9.2 und §9.3. Bei gleicher
+> Relevanz können gespeicherte technische Reasoning-Versuche die
+> Auswahl freier Reasoner beeinflussen. Der Core speichert die
+> Stichproben am Auswahlbeleg. Die Betreiberpolicy legt Gewichte,
+> Mindeststichprobe und Zeitskala fest.
+>
 **Leitbild:** ARCS ist ein universeller Agent. Es soll sich einfach bedienen lassen, beliebige kompatible Systeme verbinden, eigenständig Probleme lösen und langfristige Aufgaben über Monate verfolgen.
 
 ## 1. Verbindliche Architekturregeln

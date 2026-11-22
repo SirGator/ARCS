@@ -76,12 +76,22 @@ pub(super) fn read(
         return Err(invalid("untrusted reasoner selection receipt"));
     }
     let record: SelectionRecord = serde_json::from_value(artifact.payload.clone())?;
+    let tier = history::top_tier(&record.observations);
     if record.owner != *owner
         || record.policy != *policy
         || record.observations.len() != policy.choices.len()
-        || record.selected_index >= policy.choices.len()
-        || !record.observations[record.selected_index].matched
-        || record.observations[record.selected_index].availability != ReasonerAvailability::Ready
+        || tier.is_empty()
+        || !history::recorded_samples_valid(&record, &tier)
+        || record.selected_index
+            != history::pick(&tier, &record.observations, policy.history.as_ref())
+        || artifact.provenance.as_ref().is_none_or(|provenance| {
+            record
+                .observations
+                .iter()
+                .filter_map(|option| option.history.as_ref())
+                .flat_map(|sample| &sample.sample_versions)
+                .any(|attempt| !provenance.parents.contains(&attempt.0))
+        })
     {
         return Err(invalid("reasoner selection identity or choice changed"));
     }
@@ -99,10 +109,22 @@ pub(super) fn persist(
     clock: &dyn Clock,
 ) -> Result<Artifact, ReasoningError> {
     let key = stream(&record.owner);
-    let parents = vec![
-        record.owner.definition_version.clone(),
-        record.owner.input_version.clone(),
-    ];
+    let mut seen = HashSet::new();
+    let parents = [
+        &record.owner.definition_version,
+        &record.owner.input_version,
+    ]
+    .into_iter()
+    .chain(
+        record
+            .observations
+            .iter()
+            .filter_map(|option| option.history.as_ref())
+            .flat_map(|sample| &sample.sample_versions),
+    )
+    .filter(|version| seen.insert(*version))
+    .cloned()
+    .collect::<Vec<_>>();
     let artifact = ArtifactFactory::new(clock, ids)
         .create(ArtifactFactoryInput {
             schema: schemas

@@ -35,6 +35,53 @@ impl SqliteArtifactStore {
         })
         .transpose()
     }
+    /// Latest scoped rows first, all at or before the same immutable log cursor.
+    pub(crate) fn schema_subject_recent(
+        &self,
+        schema: &SchemaId,
+        subject: &SubjectId,
+        through: u64,
+        limit: usize,
+        max_encoded_bytes: usize,
+    ) -> Result<Vec<ScopedArtifactRow>, StoreError> {
+        if through > i64::MAX as u64
+            || !(1..=257).contains(&limit)
+            || !(1..=262_144).contains(&max_encoded_bytes)
+        {
+            return Err(StoreError::InvalidPageLimits);
+        }
+        let mut query = self.connection.prepare(
+            "SELECT sequence,CASE WHEN length(CAST(artifact_json AS BLOB))<=?4 THEN artifact_json ELSE NULL END
+             FROM artifact_versions INDEXED BY idx_artifact_versions_schema_subject_sequence
+             WHERE schema_id=?1 AND subject=?2 AND sequence<=?3 ORDER BY sequence DESC LIMIT ?5",
+        )?;
+        let rows = query.query_map(
+            params![
+                schema.0,
+                subject.0,
+                through as i64,
+                max_encoded_bytes as i64,
+                limit as i64
+            ],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)? as u64,
+                    row.get::<_, Option<String>>(1)?,
+                ))
+            },
+        )?;
+        rows.map(|row| {
+            let (sequence, body) = row?;
+            Ok(ScopedArtifactRow {
+                sequence,
+                artifact: body
+                    .map(|encoded| serde_json::from_str(&encoded))
+                    .transpose()?,
+            })
+        })
+        .collect()
+    }
+
     pub fn schema_subject_page_after(
         &self,
         schema: &SchemaId,

@@ -15,6 +15,7 @@ pub(super) fn definition(
         target_schema_id: base.target_schema_id.clone(),
         query_text: String::new(),
         choices: vec![choice(value, 0)],
+        history: None,
     }
     .validate(registry, schemas)?;
     super::super::selection::request_selection(registry, schemas, store, base)?;

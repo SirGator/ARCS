@@ -5,7 +5,8 @@ use crate::{Host, HostError};
 use arcs::adapters::AdapterManifest;
 use arcs::core::{Artifact, VersionId};
 use arcs::reasoning::selection::{
-    ReasonerChoice, SelectedReasoner, SelectionOwner, SelectionPolicy, SelectionPreparation,
+    HistoryEvidence, HistoryRanking, ReasonerChoice, SelectedReasoner, SelectionOwner,
+    SelectionPolicy, SelectionPreparation,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
@@ -19,6 +20,8 @@ pub struct ReasonerRouting {
     /// Explicit Core-only input fields; values are not exported to the reasoner.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub search_input_fields: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub history: Option<HistoryRanking>,
 }
 
 impl ReasonerRouting {
@@ -47,6 +50,7 @@ impl ReasonerRouting {
             target_schema_id: route.target_schema_id.clone(),
             query_text: self.search_text.clone(),
             choices: route.reasoner_choices(),
+            history: self.history.clone(),
         };
         policy
             .validate(host.registry(), host.schemas())
@@ -101,6 +105,8 @@ pub struct ReasonerSelectionReport {
     pub selection_version_id: VersionId,
     pub selected: ReasonerChoice,
     pub relevance_score: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub history: Option<HistoryEvidence>,
 }
 
 impl TaskRuntime {
@@ -151,6 +157,7 @@ impl TaskRuntime {
             target_schema_id: route.target_schema_id.clone(),
             query_text: query,
             choices: route.reasoner_choices(),
+            history: routing.history.clone(),
         };
         policy
             .validate(host.registry(), host.schemas())
@@ -252,6 +259,9 @@ impl TaskRuntime {
                     selected: selection.choice().clone(),
                     relevance_score: selection.record.observations[selection.record.selected_index]
                         .relevance_score,
+                    history: selection.record.observations[selection.record.selected_index]
+                        .history
+                        .clone(),
                 });
             }
         }

@@ -94,6 +94,7 @@ fn fixture() -> (Fixture, SelectionOwner, SelectionPolicy) {
         target_schema_id: request.target_schema_id,
         query_text: String::new(),
         choices: vec![first, second],
+        history: None,
     };
     let owner = SelectionOwner {
         definition_version: definition.version_id,
@@ -336,4 +337,51 @@ fn a_request_links_its_binding_without_disclosing_private_selection_data_and_rej
         .prepare(&f.peer, request, &[])
         .is_err()
     );
+}
+
+#[test]
+fn history_applies_only_to_comparable_equal_relevance_choices() {
+    let evidence = |id: &str, mean_latency_ms| HistoryEvidence {
+        sample_versions: vec![VersionId(id.into())],
+        failures: 0,
+        latency_samples: 1,
+        mean_latency_ms: Some(mean_latency_ms),
+    };
+    let mut observations = vec![
+        ReasonerObservation {
+            availability: ReasonerAvailability::Ready,
+            matched: true,
+            relevance_score: 1,
+            history: Some(evidence("slow", 200)),
+        },
+        ReasonerObservation {
+            availability: ReasonerAvailability::Ready,
+            matched: true,
+            relevance_score: 1,
+            history: Some(evidence("fast", 10)),
+        },
+    ];
+    let mut policy = HistoryRanking {
+        lookback: 4,
+        min_samples: 1,
+        failure_weight: 100,
+        latency_weight: 50,
+        latency_reference_ms: 1000,
+    };
+    let choose = |options: &[ReasonerObservation], policy: &HistoryRanking| {
+        history::pick(&history::top_tier(options), options, Some(policy))
+    };
+    assert_eq!(choose(&observations, &policy), 1);
+    policy.latency_weight = 0;
+    assert_eq!(choose(&observations, &policy), 0);
+    policy.latency_weight = 50;
+    policy.min_samples = 2;
+    assert_eq!(choose(&observations, &policy), 0);
+    policy.min_samples = 1;
+    observations[0].relevance_score = 2;
+    assert_eq!(choose(&observations, &policy), 0);
+    observations[0].availability = ReasonerAvailability::Busy;
+    assert_eq!(choose(&observations, &policy), 1);
+    observations[1].matched = false;
+    assert!(history::top_tier(&observations).is_empty());
 }

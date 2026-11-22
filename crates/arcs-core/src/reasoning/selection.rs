@@ -1,5 +1,7 @@
 //! Durable choice of a permitted Reason endpoint, with no execution authority.
+mod history;
 pub(super) mod records;
+pub use history::{HistoryEvidence, HistoryRanking};
 #[cfg(test)]
 mod tests;
 
@@ -38,6 +40,8 @@ pub struct SelectionPolicy {
     pub target_schema_id: SchemaId,
     pub query_text: String,
     pub choices: Vec<ReasonerChoice>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub history: Option<HistoryRanking>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -54,6 +58,8 @@ pub struct ReasonerObservation {
     pub availability: ReasonerAvailability,
     pub matched: bool,
     pub relevance_score: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub history: Option<HistoryEvidence>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -63,6 +69,8 @@ pub struct SelectionRecord {
     pub policy: SelectionPolicy,
     pub observations: Vec<ReasonerObservation>,
     pub selected_index: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub history_through_sequence: Option<u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -94,6 +102,9 @@ impl SelectionPolicy {
     ) -> Result<(), ReasoningError> {
         if self.choices.is_empty() || self.choices.len() > 8 {
             return Err(invalid("selection needs 1..8 reasoner choices"));
+        }
+        if let Some(history) = &self.history {
+            history.validate()?;
         }
         let mut seen = HashSet::new();
         let schema = schemas.get(&self.target_schema_id).ok_or_else(|| {
@@ -192,7 +203,7 @@ impl ReasonerSelectionService<'_> {
             .registry
             .find_capabilities(&policy.query())
             .map_err(|error| invalid(format!("selection discovery failed: {error:?}")))?;
-        let observations: Vec<_> = policy
+        let mut observations: Vec<_> = policy
             .choices
             .iter()
             .zip(availability)
@@ -204,6 +215,7 @@ impl ReasonerSelectionService<'_> {
                     availability: *availability,
                     matched: hit.is_some(),
                     relevance_score: hit.map_or(0, |hit| hit.relevance_score),
+                    history: None,
                 }
             })
             .collect();
@@ -212,27 +224,34 @@ impl ReasonerSelectionService<'_> {
                 "no permitted reasoner matches the task selection query",
             ));
         }
-        let selected = observations
-            .iter()
-            .enumerate()
-            .filter(|(_, observation)| {
-                observation.matched && observation.availability == ReasonerAvailability::Ready
-            })
-            .max_by(|(a, first), (b, second)| {
-                first
-                    .relevance_score
-                    .cmp(&second.relevance_score)
-                    .then_with(|| b.cmp(a))
-            })
-            .map(|(index, _)| index);
-        let Some(selected_index) = selected else {
+        let tier = history::top_tier(&observations);
+        if tier.is_empty() {
             return Ok(SelectionPreparation::Waiting);
-        };
+        }
+        let mut history_through_sequence = None;
+        if let Some(config) = &policy.history
+            && tier.len() > 1
+        {
+            let through = self.store.latest_sequence()?;
+            for &index in &tier {
+                observations[index].history = Some(history::observe(
+                    self.store,
+                    self.schemas,
+                    &policy.choices[index],
+                    &policy.target_schema_id,
+                    through,
+                    config.lookback,
+                )?);
+            }
+            history_through_sequence = Some(through);
+        }
+        let selected_index = history::pick(&tier, &observations, policy.history.as_ref());
         let record = SelectionRecord {
             owner: owner.clone(),
             policy: policy.clone(),
             observations,
             selected_index,
+            history_through_sequence,
         };
         let committed = records::persist(&record, self.schemas, self.store, self.ids, self.clock)?;
         Ok(SelectionPreparation::Selected(Box::new(records::read(

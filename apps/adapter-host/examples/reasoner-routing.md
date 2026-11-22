@@ -84,6 +84,48 @@ Sind alle passenden Optionen belegt oder unerreichbar, wartet die Aufgabe mit
 inhaltlichen Treffer, schlägt diese Aufgabe ausdrücklich fehl. Unabhängige
 Aufträge können weiterlaufen.
 
+## Technische Erfahrung bei gleicher Relevanz nutzen
+
+`reasoner_selection.history` erlaubt eine Bewertung von bisherigen
+technischen Antworten. Sie wird bei gleicher höchster Relevanz unter den
+aktuell verfügbaren Optionen angewendet. Rolle, Grants, Suchtreffer und
+Verfügbarkeit werden weiterhin zuerst geprüft.
+
+```json
+"history": {
+  "lookback": 8,
+  "min_samples": 3,
+  "failure_weight": 100,
+  "latency_weight": 30,
+  "latency_reference_ms": 4000
+}
+```
+
+Der Core liest je Option höchstens `lookback` der neuesten gespeicherten
+Versuche ihrer Capability an derselben Loggrenze. Gültige Belege müssen
+zur Capability, Methode, zum Zielschema und zum exakten Budget passen.
+Technische Adapterfehler und ungültige Antworten zählen als Fehler.
+Fehler im Core, bei der Autorisierung oder beim Binärdatenabruf zählen
+hier nicht zum Adapter. Gültige Antworten ohne Lösung zählen als technisch
+gültige Antworten.
+
+Der kleinere gewichtete Wert gewinnt. Der Fehleranteil wird auf 0 bis
+10.000 skaliert. Die mittlere Host-Antwortzeit gültiger Antworten erhält
+auf derselben Skala bei `latency_reference_ms` ihren Höchstwert. Beide
+Werte werden mit ihren Gewichten multipliziert und addiert. Gibt es für
+jede gleich relevante Option genug Versuche, wird der Fehlerwert verwendet.
+Der Zeitanteil kommt hinzu, wenn für jede dieser Optionen mindestens
+`min_samples` gültige Antworten mit Zeitmessung vorliegen. Bei fehlenden
+Stichproben oder gleichem Wert bleibt die Betreiberreihenfolge maßgeblich.
+
+`lookback` liegt zwischen 1 und 16. `min_samples` liegt zwischen 1 und
+`lookback`. Die Fehlergewichtung liegt zwischen 1 und 100. Die Zeitgewichtung
+liegt zwischen 0 und 100. `latency_reference_ms` liegt zwischen 1 und
+600.000 Millisekunden. Ein Auswahlbeleg speichert die Auswertungsgrenze,
+Stichprobenversionen und Zähler. Neustarts verwenden den bestehenden Beleg.
+Die Kennzahlen beschreiben technische Zuverlässigkeit und Host-Latenz.
+Fachliche Ergebnisqualität und externe Kosten werden separat bewertet.
+
 ## Private Suchfelder
 
 Optional ergänzt `search_input_fields` bis zu 16 ausdrücklich benannte,
@@ -155,6 +197,6 @@ alternative Root-/Schritt-/Goal-Planer, falsche Belege und konservative Budgets.
 Der Goal-Prozesstest verlangt eine manuelle Freigabe und prüft anschließend
 die bestätigte Wirkung am simulierten Gerät.
 
-Gemessene Zuverlässigkeit, Kostenoptimierung, semantische Eignungsprüfung,
+Fachliche Erfolgsquoten, Kostenoptimierung, semantische Eignungsprüfung,
 automatische Fähigkeitszertifizierung, Mehrfachbeauftragung mit Ergebnisvergleich
-und allgemeine Werkzeugauswahl sind noch nicht implementiert.
+und allgemeine Werkzeugauswahl bleiben weitere Etappen.

@@ -42,6 +42,7 @@
         "query_text": {
           "type": "string"
         },
+        "history": {"type": "object"},
         "choices": {
           "type": "array",
           "items": {
@@ -91,11 +92,13 @@
           "relevance_score": {
             "type": "integer",
             "minimum": 0
-          }
+          },
+          "history": {"type": "object"}
         },
         "additionalProperties": false
       }
     },
+    "history_through_sequence": {"type": "integer", "minimum": 1},
     "selected_index": {
       "type": "integer",
       "minimum": 0,
