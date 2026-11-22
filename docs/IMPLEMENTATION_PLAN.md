@@ -587,6 +587,12 @@
 > Ausführungsidentität liefert `interrupted`, wenn die Prüfung
 > ohne gespeichertes Ergebnis abgebrochen wurde.
 >
+> Achtundfünfzigster Schritt gemäß v3 §8.2 LNG-03/LNG-04/LNG-07.
+> Ein gespeicherter Aktivierungsbeleg kann eine autorisierte
+> Ereignisquelle mit einem relativen Termin verbinden. Auch
+> zwischen Zielrunden kann ein Signal früher wecken, während
+> der Termin eine erneute Prüfung bei ausbleibendem Signal auslöst.
+>
 **Leitbild:** ARCS ist ein universeller Agent. Es soll sich einfach bedienen lassen, beliebige kompatible Systeme verbinden, eigenständig Probleme lösen und langfristige Aufgaben über Monate verfolgen.
 
 ## 1. Verbindliche Architekturregeln

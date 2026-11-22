@@ -79,7 +79,7 @@ fn queue_pages_keep_their_sequence_bound_and_show_live_waiting_and_pause_states(
     config["routes"][2]["dependencies"] =
         json!([{"route_id":"scheduled","payload_fields":["value"]}]);
     config["routes"][2]["budget"]["max_context_items"] = json!(2);
-    config["routes"][3]["activation"] = json!({"kind":"on_event","source":{"adapter_id":"example.input","capability_id":"task.submit"},
+    config["routes"][3]["activation"] = json!({"kind":"on_event_or_after_delay","delay_ms":2_592_000_000u64,"source":{"adapter_id":"example.input","capability_id":"task.submit"},
         "schema_id":"arcs.task.nearest.v1","subject":"later-signal-only"});
     f.write("runtime.json", config);
     let mut monitor = Monitor::start(&f.directory);
@@ -159,6 +159,8 @@ fn queue_pages_keep_their_sequence_bound_and_show_live_waiting_and_pause_states(
     assert_eq!(page["tasks"][0]["sequence"], 3);
     assert_eq!(page["tasks"][0]["waiting_for"], "dependency");
     assert_eq!(page["tasks"][1]["waiting_for"], "event");
+    assert!(page["tasks"][1]["not_before_unix_ms"].is_null());
+    assert!(page["tasks"][1]["fallback_at_unix_ms"].as_u64().is_some());
     assert!(page["next_after_sequence"].is_null());
 
     let all = monitor.command("history", "queue", json!({"limit":10,"scope":"all"}));

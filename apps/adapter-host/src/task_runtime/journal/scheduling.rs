@@ -46,23 +46,26 @@ fn read(row: &Row<'_>) -> rusqlite::Result<SavedSchedule> {
 }
 impl SavedSchedule {
     fn decode(self) -> Result<ScheduledTask, HostError> {
-        let activation = serde_json::from_str(&self.activation)
+        let activation: Activation = serde_json::from_str(&self.activation)
             .map_err(|e| invalid(format!("invalid saved activation: {e}")))?;
+        let waits_for_event = activation.event_source().is_some();
+        let state = if self.released_at.is_some() {
+            ScheduleState::Ready
+        } else if waits_for_event {
+            ScheduleState::WaitingEvent
+        } else {
+            ScheduleState::WaitingTime
+        };
         Ok(ScheduledTask {
             sequence: self.sequence,
             revision: self.revision,
             route_id: self.route_id,
             input_version_id: VersionId(self.input),
             activation,
-            state: if self.released_at.is_some() {
-                ScheduleState::Ready
-            } else if self.not_before.is_some() {
-                ScheduleState::WaitingTime
-            } else {
-                ScheduleState::WaitingEvent
-            },
+            state,
             accepted_at_unix_ms: self.accepted_at,
-            not_before_unix_ms: self.not_before,
+            not_before_unix_ms: self.not_before.filter(|_| !waits_for_event),
+            fallback_at_unix_ms: self.not_before.filter(|_| waits_for_event),
             event_cursor: self.cursor,
             released_at_unix_ms: self.released_at,
             wake_event_version_id: self.wake.map(VersionId),
@@ -124,10 +127,7 @@ impl Journal {
         now: u64,
     ) -> Result<(), HostError> {
         let due = activation.due_at(now)?;
-        let adapter = match activation {
-            Activation::OnEvent { source, .. } => Some(&source.adapter_id.0),
-            _ => None,
-        };
+        let adapter = activation.event_source().map(|source| &source.adapter_id.0);
         let revision: i64 = transaction
             .query_row(
                 "SELECT COALESCE(MAX(revision),-1)+1 FROM runtime_job_schedules WHERE sequence=?1",
@@ -151,7 +151,7 @@ impl Journal {
     pub(in crate::task_runtime) fn next_event_wait(
         &self,
     ) -> Result<Option<ScheduledTask>, HostError> {
-        self.connection.query_row(&format!("{SELECT} WHERE s.released_at IS NULL AND s.not_before IS NULL AND j.state='pending' ORDER BY (j.sequence<=(SELECT cursor FROM runtime_scheduler WHERE singleton=1)),j.sequence LIMIT 1"),[],read)
+        self.connection.query_row(&format!("{SELECT} WHERE s.released_at IS NULL AND s.event_adapter IS NOT NULL AND j.state='pending' ORDER BY (j.sequence<=(SELECT cursor FROM runtime_scheduler WHERE singleton=1)),j.sequence LIMIT 1"),[],read)
             .optional().map_err(db)?.map(SavedSchedule::decode).transpose()
     }
 
@@ -188,7 +188,7 @@ impl Journal {
     pub(in crate::task_runtime) fn schedule_summary(
         &self,
     ) -> Result<(u64, u64, Option<u64>), HostError> {
-        self.connection.query_row("SELECT COUNT(CASE WHEN s.not_before IS NOT NULL THEN 1 END),COUNT(CASE WHEN s.not_before IS NULL THEN 1 END),MIN(s.not_before) FROM runtime_job_schedules s JOIN runtime_jobs j ON j.sequence=s.sequence WHERE s.released_at IS NULL AND j.state='pending'",[],|row|Ok((row.get::<_,i64>(0)? as u64,row.get::<_,i64>(1)? as u64,row.get::<_,Option<i64>>(2)?.map(|n| n as u64)))).map_err(db)
+        self.connection.query_row("SELECT COUNT(CASE WHEN s.event_adapter IS NULL THEN 1 END),COUNT(CASE WHEN s.event_adapter IS NOT NULL THEN 1 END),MIN(s.not_before) FROM runtime_job_schedules s JOIN runtime_jobs j ON j.sequence=s.sequence WHERE s.released_at IS NULL AND j.state='pending'",[],|row|Ok((row.get::<_,i64>(0)? as u64,row.get::<_,i64>(1)? as u64,row.get::<_,Option<i64>>(2)?.map(|n| n as u64)))).map_err(db)
     }
 
     pub(in crate::task_runtime) fn scheduled_after(

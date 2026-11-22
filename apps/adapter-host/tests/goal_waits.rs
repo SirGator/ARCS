@@ -91,23 +91,48 @@ fn invocations(f: &Fixture, name: &str) -> i64 {
 
 #[test]
 fn a_goal_waits_between_rounds_then_reacquires_data_and_requires_a_new_manual_approval() {
+    goal_reacquires_data_after_wait(
+        json!({"kind":"after_delay","delay_ms":MONTH}),
+        GoalState::WaitingTime,
+    );
+}
+
+#[test]
+fn without_a_signal_a_goal_reassesses_on_its_deadline_after_restart() {
+    goal_reacquires_data_after_wait(
+        json!({"kind":"on_event_or_after_delay","delay_ms":MONTH,"source":{"adapter_id":"goal.signal","capability_id":"task.submit"},"schema_id":"arcs.task.fan_goal.v1"}),
+        GoalState::WaitingEvent,
+    );
+}
+
+fn goal_reacquires_data_after_wait(activation: Value, wait_state: GoalState) {
     let f = Fixture::new();
     f.manual();
     f.with_observer(false);
-    configure(&f, json!({"kind":"after_delay","delay_ms":MONTH}), 2, false);
+    if wait_state == GoalState::WaitingEvent {
+        add_signal(&f);
+    }
+    configure(&f, activation, 2, false);
     let mut host = f.host();
     let mut runtime = f.runtime(&host);
     let first = until_at(&mut host, &mut runtime, NOW, |s| {
         s == GoalState::AwaitingApproval
     });
     approve(&host, &mut runtime, &first);
-    let waiting = until_at(&mut host, &mut runtime, NOW, |s| {
-        s == GoalState::WaitingTime
-    });
+    let waiting = until_at(&mut host, &mut runtime, NOW, |state| state == wait_state);
     assert_eq!(waiting.round, 2);
     assert!(waiting.outcome.is_some());
     assert_eq!(actuations(&f), 1);
-    assert_eq!(runtime.report(0).unwrap().waiting_time, 1);
+    let report = runtime.report(0).unwrap();
+    assert_eq!(
+        report.waiting_time,
+        u64::from(wait_state == GoalState::WaitingTime)
+    );
+    assert_eq!(
+        report.waiting_event,
+        u64::from(wait_state == GoalState::WaitingEvent)
+    );
+    assert_eq!(report.next_wake_unix_ms, Some(NOW + MONTH));
     let calls = invocations(&f, "planner") + invocations(&f, "assessor");
     for _ in 0..3 {
         runtime.tick_at(&mut host, NOW + MONTH - 1).unwrap();
@@ -116,7 +141,7 @@ fn a_goal_waits_between_rounds_then_reacquires_data_and_requires_a_new_manual_ap
         invocations(&f, "planner") + invocations(&f, "assessor"),
         calls
     );
-    assert_eq!(task(&runtime).state, GoalState::WaitingTime);
+    assert_eq!(task(&runtime).state, wait_state);
     host.shutdown().unwrap();
     drop(runtime);
     drop(host);
@@ -126,6 +151,12 @@ fn a_goal_waits_between_rounds_then_reacquires_data_and_requires_a_new_manual_ap
     runtime.tick_at(&mut host, NOW + MONTH).unwrap();
     let resumed = task(&runtime);
     assert_eq!(resumed.state, GoalState::Acquiring);
+    let released = runtime
+        .scheduled_history(resumed.sequence, None, 1)
+        .unwrap()
+        .remove(0);
+    assert_eq!(released.released_at_unix_ms, Some(NOW + MONTH));
+    assert_eq!(released.wake_event_version_id, None);
     assert!(resumed.before.is_empty());
     assert!(resumed.approval.is_none());
     let barrier = resumed.observation_cursor;

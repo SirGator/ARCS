@@ -68,6 +68,8 @@ pub struct TaskQueueRow {
     pub goal_state: Option<String>,
     pub waiting_for: Option<TaskWait>,
     pub not_before_unix_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fallback_at_unix_ms: Option<u64>,
     pub deadline_unix_ms: Option<u64>,
     pub parent_plan_sequence: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]

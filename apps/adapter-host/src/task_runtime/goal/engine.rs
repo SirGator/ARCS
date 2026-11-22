@@ -371,9 +371,9 @@ impl TaskRuntime {
                             task.before = task.after.clone();
                             task.after.clear();
                             match &config.between_rounds {
-                                Some(crate::task_runtime::scheduler::Activation::OnEvent {
-                                    ..
-                                }) => GoalState::WaitingEvent,
+                                Some(activation) if activation.event_source().is_some() => {
+                                    GoalState::WaitingEvent
+                                }
                                 Some(_) => GoalState::WaitingTime,
                                 None => GoalState::Planning,
                             }

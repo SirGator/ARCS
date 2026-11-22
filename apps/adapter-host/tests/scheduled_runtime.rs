@@ -125,6 +125,13 @@ impl Drop for Fixture {
 fn event_activation() -> Value {
     json!({"kind":"on_event","source":{"adapter_id":"schedule.events","capability_id":"task.submit"},"schema_id":"arcs.task.nearest.v1","subject":"input:15:schedule.events:11:task.submit:11:project:one"})
 }
+fn event_with_deadline() -> Value {
+    let mut activation = event_activation();
+    activation["kind"] = json!("on_event_or_after_delay");
+    activation["delay_ms"] = json!(MONTH);
+    activation
+}
+
 fn assert_no_authority(host: &Host) {
     assert!(
         host.store()
@@ -361,6 +368,106 @@ fn event_wait_replays_acked_events_after_restart_and_ignores_events_before_the_t
 }
 
 #[test]
+fn a_matching_signal_releases_the_wait_before_its_saved_deadline_at_capacity() {
+    let f = Fixture::new(event_with_deadline());
+    let (mut host, mut runtime) = f.open();
+    host.poll_inputs().unwrap();
+    runtime.tick_at(&mut host, NOW).unwrap();
+    let due = NOW + MONTH;
+    let report = runtime.report(0).unwrap();
+    assert_eq!(report.pending_jobs, 1);
+    assert_eq!(report.waiting_event, 1);
+    assert_eq!(report.waiting_time, 0);
+    assert_eq!(report.next_wake_unix_ms, Some(due));
+    assert_eq!(
+        runtime.scheduled_after(0, 1).unwrap()[0].state,
+        ScheduleState::WaitingEvent
+    );
+    assert_eq!(f.invocations(), 0);
+    host.shutdown().unwrap();
+    drop((host, runtime));
+
+    let (mut host, mut runtime) = f.open();
+    f.enqueue("wake", "other-project", "project:two");
+    host.poll_inputs().unwrap();
+    runtime.tick_at(&mut host, due - 2).unwrap();
+    assert_eq!(f.invocations(), 0);
+    assert_eq!(runtime.report(0).unwrap().waiting_event, 1);
+    // The runtime must poll the wake adapter despite its full task queue.
+    f.enqueue("wake", "before-deadline", "project:one");
+    let done = review_at(&mut host, &mut runtime, due - 1);
+    let saved = runtime.scheduled_after(0, 1).unwrap().remove(0);
+    let signal = host
+        .store()
+        .get(saved.wake_event_version_id.as_ref().unwrap())
+        .unwrap()
+        .unwrap();
+    assert_eq!(signal.subject.unwrap().0, event_activation()["subject"]);
+    assert_eq!(saved.input_version_id, done.input_version_id);
+    assert_eq!(saved.not_before_unix_ms, None);
+    assert_eq!(saved.fallback_at_unix_ms, Some(due));
+    assert_eq!(saved.released_at_unix_ms, Some(due - 1));
+    assert!(
+        runtime
+            .tick_at(&mut host, due)
+            .unwrap()
+            .ready_for_review
+            .is_empty()
+    );
+    assert_eq!(f.invocations(), 1);
+    assert_no_authority(&host);
+    host.shutdown().unwrap();
+}
+
+#[test]
+fn the_saved_deadline_wins_once_when_a_signal_is_first_seen_at_expiry() {
+    let f = Fixture::new(event_with_deadline());
+    let (mut host, mut runtime) = f.open();
+    host.poll_inputs().unwrap();
+    runtime.tick_at(&mut host, NOW).unwrap();
+    host.shutdown().unwrap();
+    drop((host, runtime));
+
+    let (mut host, mut runtime) = f.open();
+    let due = NOW + MONTH;
+    runtime.tick_at(&mut host, due - 1).unwrap();
+    assert_eq!(f.invocations(), 0);
+    host.shutdown().unwrap();
+    drop((host, runtime));
+
+    // Commit the signal before this scheduler session sees its first tick.
+    f.enqueue("wake", "simultaneous", "project:one");
+    let (mut host, mut runtime) = f.open();
+    assert_eq!(host.poll_inputs().unwrap().len(), 1);
+    let done = review_at(&mut host, &mut runtime, due);
+    let saved = runtime.scheduled_after(0, 1).unwrap().remove(0);
+    assert_eq!(saved.input_version_id, done.input_version_id);
+    assert_eq!(saved.not_before_unix_ms, None);
+    assert_eq!(saved.fallback_at_unix_ms, Some(due));
+    assert_eq!(saved.released_at_unix_ms, Some(due));
+    assert_eq!(saved.wake_event_version_id, None);
+    assert_eq!(f.invocations(), 1);
+    host.shutdown().unwrap();
+    drop((host, runtime));
+
+    let (mut host, mut runtime) = f.open();
+    assert!(
+        runtime
+            .tick_at(&mut host, due + MONTH)
+            .unwrap()
+            .ready_for_review
+            .is_empty()
+    );
+    assert_eq!(
+        runtime.scheduled_after(0, 1).unwrap()[0].wake_event_version_id,
+        None
+    );
+    assert_eq!(f.invocations(), 1);
+    assert_no_authority(&host);
+    host.shutdown().unwrap();
+}
+
+#[test]
 fn bounded_event_scans_are_fair_across_restarts_and_do_not_lose_full_queue_backlog() {
     let f = Fixture::new(event_activation());
     let mut config = f.read("runtime.json");
@@ -424,6 +531,8 @@ fn invalid_activation_or_clock_cannot_create_a_job_or_skip_the_source_event() {
         json!({"kind":"after_delay","delay_ms":315_576_000_001_u64}),
         json!({"kind":"on_event","source":{"adapter_id":"example.solver","capability_id":"solution.propose"},"schema_id":"arcs.task.nearest.v1"}),
         json!({"kind":"on_event","source":{"adapter_id":"schedule.events","capability_id":"task.submit"},"schema_id":"unknown"}),
+        json!({"kind":"on_event_or_after_delay","delay_ms":MONTH,"source":{"adapter_id":"schedule.events","capability_id":"task.submit"},"schema_id":"unknown"}),
+        json!({"kind":"on_event_or_after_delay","delay_ms":315_576_000_001_u64,"source":{"adapter_id":"schedule.events","capability_id":"task.submit"},"schema_id":"arcs.task.nearest.v1"}),
     ] {
         let f = Fixture::new(activation);
         let mut host = Host::open(f.directory.join("host.json")).unwrap();

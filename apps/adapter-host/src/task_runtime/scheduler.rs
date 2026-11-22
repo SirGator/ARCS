@@ -31,6 +31,13 @@ pub enum Activation {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         subject: Option<SubjectId>,
     },
+    OnEventOrAfterDelay {
+        source: CapabilityRef,
+        schema_id: SchemaId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subject: Option<SubjectId>,
+        delay_ms: u64,
+    },
 }
 
 impl Activation {
@@ -43,35 +50,30 @@ impl Activation {
             Self::AtTime { unix_ms } if *unix_ms > i64::MAX as u64 => {
                 return Err(invalid("activation timestamp exceeds SQLite range"));
             }
-            Self::AfterDelay { delay_ms } if *delay_ms > 315_576_000_000 => {
+            Self::AfterDelay { delay_ms } | Self::OnEventOrAfterDelay { delay_ms, .. }
+                if *delay_ms > 315_576_000_000 =>
+            {
                 return Err(invalid("activation delay must be at most ten years"));
             }
-            Self::OnEvent {
-                source,
-                schema_id,
-                subject,
-            } => {
-                if subject
-                    .as_ref()
-                    .is_some_and(|s| s.0.is_empty() || s.0.len() > 256)
-                {
-                    return Err(invalid("activation subject must contain 1..256 bytes"));
-                }
-                let (adapter, capability) = host
-                    .registry()
-                    .authorized_capability(&source.adapter_id, &source.capability_id)
-                    .map_err(HostError::Registration)?;
-                if !matches!(&capability.contract,
-                    CapabilityContract::Input { emits } | CapabilityContract::Observe { emits }
-                    if emits.contains(schema_id))
-                {
-                    return Err(invalid(
-                        "activation event needs an authorized Input or Observe schema",
-                    ));
-                }
-                manifests.insert(source.adapter_id.0.clone(), adapter.manifest().clone());
-            }
             _ => {}
+        }
+        if let Some((source, schema_id, subject)) = self.event() {
+            if subject.is_some_and(|s| s.0.is_empty() || s.0.len() > 256) {
+                return Err(invalid("activation subject must contain 1..256 bytes"));
+            }
+            let (adapter, capability) = host
+                .registry()
+                .authorized_capability(&source.adapter_id, &source.capability_id)
+                .map_err(HostError::Registration)?;
+            if !matches!(&capability.contract,
+                CapabilityContract::Input { emits } | CapabilityContract::Observe { emits }
+                if emits.contains(schema_id))
+            {
+                return Err(invalid(
+                    "activation event needs an authorized Input or Observe schema",
+                ));
+            }
+            manifests.insert(source.adapter_id.0.clone(), adapter.manifest().clone());
         }
         Ok(())
     }
@@ -79,7 +81,7 @@ impl Activation {
     pub(super) fn due_at(&self, now: u64) -> Result<Option<u64>, HostError> {
         match self {
             Self::AtTime { unix_ms } => Ok(Some(*unix_ms)),
-            Self::AfterDelay { delay_ms } => now
+            Self::AfterDelay { delay_ms } | Self::OnEventOrAfterDelay { delay_ms, .. } => now
                 .checked_add(*delay_ms)
                 .filter(|time| *time <= i64::MAX as u64)
                 .map(Some)
@@ -88,10 +90,32 @@ impl Activation {
         }
     }
 
+    fn event(&self) -> Option<(&CapabilityRef, &SchemaId, Option<&SubjectId>)> {
+        match self {
+            Self::OnEvent {
+                source,
+                schema_id,
+                subject,
+            }
+            | Self::OnEventOrAfterDelay {
+                source,
+                schema_id,
+                subject,
+                ..
+            } => Some((source, schema_id, subject.as_ref())),
+            Self::AtTime { .. } | Self::AfterDelay { .. } => None,
+        }
+    }
+
+    pub(super) fn event_source(&self) -> Option<&CapabilityRef> {
+        self.event().map(|(source, _, _)| source)
+    }
+
     pub(super) fn matches(&self, artifact: &Artifact) -> bool {
-        matches!(self, Self::OnEvent { source, schema_id, subject }
-            if super::matches_capability(source, schema_id, artifact)
-                && subject.as_ref().is_none_or(|expected| artifact.subject.as_ref() == Some(expected)))
+        self.event().is_some_and(|(source, schema_id, subject)| {
+            super::matches_capability(source, schema_id, artifact)
+                && subject.is_none_or(|expected| artifact.subject.as_ref() == Some(expected))
+        })
     }
 }
 
@@ -116,6 +140,9 @@ pub struct ScheduledTask {
     pub state: ScheduleState,
     pub accepted_at_unix_ms: u64,
     pub not_before_unix_ms: Option<u64>,
+    /// Fälligkeit des Zeitzweigs, falls vorher kein Signal freigibt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fallback_at_unix_ms: Option<u64>,
     pub event_cursor: u64,
     pub released_at_unix_ms: Option<u64>,
     pub wake_event_version_id: Option<VersionId>,
@@ -134,6 +161,7 @@ pub(super) fn now_unix_ms() -> Result<u64, HostError> {
 
 impl TaskRuntime {
     pub(super) fn activate_scheduled(&mut self, host: &Host, now: u64) -> Result<(), HostError> {
+        // A due timer wins over any signal the scheduler has yet to scan.
         self.journal.release_timers(now)?;
         let mut visited = std::collections::HashSet::new();
         for _ in 0..self.config.max_jobs_per_tick {

@@ -64,6 +64,12 @@ Core-Subject-ID. Pro Runde gilt eine neue Ereignisgrenze: Das Signal muss
 weckt keine spätere Runde erneut. Der begrenzte Ereignisabruf und die
 Weiterleitung benötigter Signale bei voller Queue gelten auch hier.
 
+Für eine regelmäßige Überprüfung, die bei einer Zustandsmeldung früher
+starten darf, nutze `on_event_or_after_delay` aus der
+[Scheduler-Konfiguration](scheduled-runtime.md#ereignis-mit-spätestem-termin).
+Jede Wartephase speichert einen eigenen Termin und eine eigene Ereignisgrenze.
+Beide Wege starten die neue Runde mit frischen Zustandsdaten.
+
 Ohne `between_rounds` bleibt das bisherige Verhalten erhalten. Eine neue
 oder geänderte Wartebedingung verändert die fachliche Route und braucht eine
 neue Runtime-ID und ein neues Journal.

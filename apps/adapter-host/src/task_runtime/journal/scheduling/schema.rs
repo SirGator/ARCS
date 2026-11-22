@@ -38,6 +38,7 @@ pub(in crate::task_runtime::journal) fn initialize(
     }
     transaction.execute_batch("CREATE INDEX IF NOT EXISTS runtime_schedule_due ON runtime_job_schedules(released_at,not_before,sequence);
         CREATE UNIQUE INDEX IF NOT EXISTS runtime_schedule_open ON runtime_job_schedules(sequence) WHERE released_at IS NULL;
+        CREATE INDEX IF NOT EXISTS runtime_schedule_event_wait ON runtime_job_schedules(sequence) WHERE released_at IS NULL AND event_adapter IS NOT NULL;
         CREATE TABLE IF NOT EXISTS runtime_scheduler(singleton INTEGER PRIMARY KEY CHECK(singleton=1),cursor INTEGER NOT NULL DEFAULT 0 CHECK(cursor>=0));
         INSERT OR IGNORE INTO runtime_scheduler(singleton) VALUES(1);").map_err(db)?;
     transaction.commit().map_err(db)

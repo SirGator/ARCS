@@ -91,6 +91,32 @@ Die Signalversion bleibt im Aktivierungsbeleg gespeichert. Sie erteilt keine
 Freigabe und wird nicht automatisch als zusätzlicher Reasoning-Kontext oder
 Nachweis einer erfolgreichen Geräteaktion übernommen.
 
+### Ereignis mit spätestem Termin
+
+Mit `on_event_or_after_delay` kann ein Signal die Aufgabe früh wecken.
+Falls der Scheduler bis dahin kein passendes Signal verarbeitet hat,
+wird die Aufgabe zum gespeicherten Termin bereit.
+
+```json
+"activation": {
+  "kind": "on_event_or_after_delay",
+  "source": {"adapter_id": "schedule.events", "capability_id": "task.submit"},
+  "schema_id": "arcs.task.nearest.v1",
+  "delay_ms": 2592000000
+}
+```
+
+Beide Wege schreiben denselben Aktivierungsbeleg. Pro Tick gibt der
+Scheduler zuerst fällige Termine frei. Ein noch ungelesenes Signal
+kann einen bereits fälligen Termin deshalb auch nach einem längeren
+Ausfall nicht ersetzen. Bei der Freigabe durch ein Ereignis enthält
+der Beleg dessen Version. Bei der Freigabe durch den Termin bleibt
+das Feld leer.
+
+Der Wartezustand zählt zu `waiting_event`. `fallback_at_unix_ms` nennt
+im Aktivierungsbeleg und in der Queue die gespeicherte Fälligkeit.
+Sie fließt auch in `next_wake_unix_ms` ein.
+
 ## Persistenz, Last und Wiederaufnahme
 
 Queue-Aufnahme, Aktivierungsbedingung, Fälligkeit und Discovery-Cursor werden

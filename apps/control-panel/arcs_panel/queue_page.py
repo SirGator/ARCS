@@ -272,6 +272,8 @@ class QueuePage(Gtk.Box):
             lines = [state_text(task), f"Eingabe {task['input_version_id']}"]
             if task.get("not_before_unix_ms") is not None:
                 lines.append("Frühestens " + local_time(task["not_before_unix_ms"]))
+            if task.get("fallback_at_unix_ms") is not None:
+                lines.append("Ohne Ereignis ab " + local_time(task["fallback_at_unix_ms"]))
             if task.get("deadline_unix_ms") is not None:
                 lines.append("Frist " + local_time(task["deadline_unix_ms"]))
             if task.get("parent_plan_sequence") is not None:

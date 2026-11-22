@@ -99,9 +99,9 @@ fn read_tasks(tx: &Transaction<'_>, ids: &[i64]) -> Result<Vec<TaskQueueRow>, Ho
         CASE WHEN NOT ({open}) THEN NULL
              WHEN j.state='awaiting_approval' THEN 'approval'
              WHEN deps.state='waiting' THEN 'dependency'
-             WHEN schedule.sequence IS NOT NULL AND schedule.not_before IS NULL THEN 'event'
+             WHEN schedule.event_adapter IS NOT NULL THEN 'event'
              WHEN schedule.sequence IS NOT NULL THEN 'time' END,
-        CASE WHEN {open} THEN schedule.not_before END,
+        CASE WHEN {open} AND schedule.event_adapter IS NULL THEN schedule.not_before END,
         deadline.expires_at, parent.parent_sequence, occurrence.series,
         COALESCE(control.revision,0), COALESCE(control.paused,0), {PAUSED},
         (({open}) OR EXISTS(SELECT 1 FROM runtime_plan_steps s JOIN runtime_jobs child ON child.sequence=s.sequence
@@ -109,7 +109,8 @@ fn read_tasks(tx: &Transaction<'_>, ids: &[i64]) -> Result<Vec<TaskQueueRow>, Ho
         EXISTS(SELECT 1 FROM runtime_jobs work
             WHERE (work.sequence=j.sequence OR work.sequence IN (SELECT sequence FROM runtime_plan_steps WHERE parent_sequence=j.sequence))
               AND work.state='running' AND json_extract(work.goal_json,'$.state')='executing'
-              AND json_extract(work.goal_json,'$.dispatch_cursor') IS NOT NULL)
+              AND json_extract(work.goal_json,'$.dispatch_cursor') IS NOT NULL),
+        CASE WHEN {open} AND schedule.event_adapter IS NOT NULL THEN schedule.not_before END
         FROM runtime_jobs j
         JOIN runtime_job_priorities priority ON priority.sequence=j.sequence
         LEFT JOIN runtime_job_joins deps ON deps.sequence=j.sequence
@@ -154,6 +155,7 @@ fn read_task(row: &Row<'_>) -> rusqlite::Result<TaskQueueRow> {
         goal_state: row.get(5)?,
         waiting_for: wait,
         not_before_unix_ms: optional_sequence(7)?,
+        fallback_at_unix_ms: optional_sequence(16)?,
         deadline_unix_ms: optional_sequence(8)?,
         parent_plan_sequence: optional_sequence(9)?,
         reasoning_budget: None,
