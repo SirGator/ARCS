@@ -78,7 +78,8 @@ dokumentiert Slice 55. Der [Bericht zu Ressourcenlimits für isolierte Prüfunge
 dokumentiert Slice 56. Der [Bericht zur Bereinigung abgebrochener Prüfungen](docs/ZWISCHENBERICHT_2026-11-22_CHECK_RESOURCE_RECOVERY.md)
 dokumentiert Slice 57. Der [Bericht zur Ereignisaktivierung mit spätestem Termin](docs/ZWISCHENBERICHT_2026-11-22_EVENT_WITH_DEADLINE.md)
 dokumentiert Slice 58. Der [Bericht zum Verlauf bewerteter Zielrunden](docs/ZWISCHENBERICHT_2026-11-22_GOAL_ROUND_HISTORY.md)
-dokumentiert Slice 59. Die Berichte vom
+dokumentiert Slice 59. Der [Bericht zu Nachher-Abfragen mit Ausführungsbeleg](docs/ZWISCHENBERICHT_2026-11-22_EXECUTION_BOUND_QUERIES.md)
+dokumentiert Slice 60. Die Berichte vom
 [17. November](docs/ZWISCHENBERICHT_2026-11-17.md) und
 [16. November](docs/ZWISCHENBERICHT_2026-11-16.md) dokumentieren frühere
 Umsetzungsstände, Prüfergebnisse und offene Grenzen.

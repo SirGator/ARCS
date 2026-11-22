@@ -101,6 +101,119 @@ fn external_planner_and_assessor_complete_two_rounds_with_fresh_requests_and_obs
     host.shutdown().unwrap();
 }
 
+fn bind_after_query(fixture: &Fixture, pointer: &str) {
+    let mut config = fixture.read("runtime.json");
+    config["routes"][0]["goal"]["sources"][0]["query"]["after_from_execution"] = json!({
+        "device_id":{"schema_id":"arcs.execution_result.fan.v1","pointer":pointer}
+    });
+    fixture.write("runtime.json", config);
+}
+
+fn fan_queries(host: &Host) -> Vec<arcs::core::Artifact> {
+    host.store()
+        .committed_after(0)
+        .unwrap()
+        .into_iter()
+        .map(|event| event.artifact)
+        .filter(|artifact| artifact.schema_id.0 == "arcs.request.fan.v1")
+        .collect()
+}
+
+#[test]
+fn an_after_query_reuses_the_same_execution_receipt_and_request_after_restart() {
+    let fixture = Fixture::new();
+    bind_after_query(&fixture, "/result/device_id");
+    let mut host = fixture.host();
+    let mut runtime = fixture.runtime(&host);
+    let first = until(&mut host, &mut runtime, |state| {
+        state == GoalState::Observing
+    });
+    fixture
+        .db("runtime")
+        .execute_batch(
+            r#"
+        CREATE TRIGGER reject_query_checkpoint BEFORE UPDATE OF goal_json ON runtime_jobs
+        WHEN json_extract(OLD.goal_json,'$.state')='observing'
+         AND json_extract(NEW.goal_json,'$.source_versions.fan-state') IS NOT NULL
+        BEGIN SELECT RAISE(ABORT,'injected checkpoint failure'); END;
+    "#,
+        )
+        .unwrap();
+    support::wait_for_interrupted_checkpoint(|| runtime.tick(&mut host));
+    let interrupted = fan_queries(&host);
+    assert_eq!(interrupted.len(), 2);
+    assert_eq!(actuations(&fixture), 1);
+    assert_eq!(task(&runtime).state, GoalState::Observing);
+    assert!(task(&runtime).source_versions.is_empty());
+    host.shutdown().unwrap();
+    drop((host, runtime));
+    fixture
+        .db("runtime")
+        .execute_batch("DROP TRIGGER reject_query_checkpoint")
+        .unwrap();
+
+    let mut host = fixture.host();
+    let mut runtime = fixture.runtime(&host);
+    let done = until(&mut host, &mut runtime, GoalState::terminal);
+    assert_eq!(done.state, GoalState::Completed);
+    assert_eq!(actuations(&fixture), 2);
+    let queries = fan_queries(&host);
+    assert_eq!(queries.len(), 3);
+    assert_eq!(queries[1].version_id, interrupted[1].version_id);
+    let links = arcs::store::ArtifactRelations::new(host.store());
+    for (index, query) in queries.iter().enumerate() {
+        assert_eq!(query.payload["device_id"], "fan-01");
+        let sources = links.outgoing(&query.version_id).unwrap();
+        if index == 0 {
+            assert!(sources.is_empty());
+            continue;
+        }
+        let execution = if index == 1 {
+            first.execution.as_ref()
+        } else {
+            done.execution.as_ref()
+        };
+        assert_eq!(sources.len(), 1);
+        assert_eq!(Some(&sources[0].to), execution);
+        assert_eq!(sources[0].kind, arcs::store::relation_kinds::based_on());
+    }
+    host.shutdown().unwrap();
+}
+
+#[test]
+fn an_invalid_receipt_value_stops_before_sending_the_after_query() {
+    let fixture = Fixture::new();
+    bind_after_query(&fixture, "/result/actuation_count");
+    let mut host = fixture.host();
+    let mut runtime = fixture.runtime(&host);
+    let done = until(&mut host, &mut runtime, GoalState::terminal);
+    assert_eq!(done.state, GoalState::Failed);
+    assert_eq!(actuations(&fixture), 1);
+    assert_eq!(fan_queries(&host).len(), 1);
+    assert!(done.outcome.is_none());
+    host.shutdown().unwrap();
+}
+
+#[test]
+fn a_goal_query_cannot_bind_a_receipt_field_outside_the_route_export() {
+    let fixture = Fixture::new();
+    bind_after_query(&fixture, "/action_version");
+    let mut host = fixture.host();
+    let config =
+        arcs_host::task_runtime::RuntimeConfig::load(fixture.directory.join("runtime.json"))
+            .unwrap();
+    let Err(error) = TaskRuntime::open(&host, config) else {
+        panic!("unexported action receipt field was accepted");
+    };
+    assert!(
+        error
+            .to_string()
+            .contains("invalid after-action execution bindings")
+    );
+    assert!(!fixture.directory.join("runtime.sqlite").exists());
+    host.shutdown().unwrap();
+}
+
 #[test]
 fn a_goal_reserves_its_assessment_budget_before_sending_an_action() {
     use arcs_host::task_runtime::queue::{TaskQueueQuery, TaskQueueScope};

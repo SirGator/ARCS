@@ -213,7 +213,13 @@ Bildbytes nach. Der Suchauftrag geht getrennt an den Reasoner; die Kamera
 bleibt zielunabhängig. Allgemeine Binäreingaben für Reasoning V2 liegen in
 ARCS, Bildauswertung und Fachverträge ausschließlich extern.
 
-Als Nächstes folgt eine begrenzte Suchschleife in der externen Anwendung:
+Die allgemeine Goal-Runtime unterstützt jetzt
+[Nachher-Abfragen aus Ausführungsquittungen](../apps/adapter-host/examples/goal-runtime.md#nachher-abfragen-an-die-ausführungsquittung-binden).
+Der lokale Integrationstest führte zwei begrenzte Drehungen aus. Er
+übernahm danach jeweils die bestätigte Revision aus der Bewegungsquittung
+in `camera.capture` und wertete die zurückgegebenen Bildbytes aus.
+
+Als Nächstes folgt eine dauerhaft startbare Suchschleife in der externen Anwendung:
 Nach einem negativen Befund einen Bewegungsvorschlag erzeugen, separat
 prüfen und freigeben, ein neues Bild aufnehmen und erneut auswerten.
 Schrittbudget und kontrollierter Abbruch gehören zu dieser Etappe.

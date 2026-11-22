@@ -71,6 +71,55 @@ pub struct GoalQuery {
     pub payload: Value,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub from_dependencies: BTreeMap<String, QueryField>,
+    /// Additional or substituted fields for the query after a committed action.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub after_from_execution: BTreeMap<String, QueryField>,
+}
+
+impl GoalQuery {
+    fn validate(&self, host: &Host, execution_fields: &[String]) -> Result<(), HostError> {
+        host.schemas()
+            .validate(&self.schema_id, &self.payload)
+            .map_err(|e| invalid(format!("invalid source query: {e:?}")))?;
+        if self.from_dependencies.len() > 16
+            || self.from_dependencies.iter().any(|(target, binding)| {
+                self.payload.get(target).is_none()
+                    || binding.pointer.len() > 512
+                    || binding.root_field().is_none()
+                    || host.schemas().get(&binding.schema_id).is_none()
+            })
+        {
+            return Err(invalid("goal query has invalid dependency bindings"));
+        }
+        let query_schema = host
+            .schemas()
+            .get(&self.schema_id)
+            .ok_or_else(|| invalid("missing goal query schema"))?;
+        if self.after_from_execution.len() > 16
+            || (!self.after_from_execution.is_empty() && !self.payload.is_object())
+            || self.after_from_execution.iter().any(|(target, binding)| {
+                let Some(root) = binding.root_field() else {
+                    return true;
+                };
+                query_schema.document["properties"].get(target).is_none()
+                    || self.from_dependencies.contains_key(target)
+                    || binding.pointer.len() > 512
+                    || !execution_fields.iter().any(|field| field == root)
+                    || host
+                        .schemas()
+                        .get(&binding.schema_id)
+                        .is_none_or(|schema| schema.document["properties"].get(root).is_none())
+            })
+        {
+            return Err(invalid(
+                "goal query has invalid after-action execution bindings",
+            ));
+        }
+        if self.payload.to_string().len() > 60_000 {
+            return Err(invalid("goal query too large"));
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -349,22 +398,7 @@ impl GoalConfig {
                 (CapabilityContract::Request { accepts, emits }, Some(query))
                     if accepts.contains(&query.schema_id) && emits.contains(&source.schema_id) =>
                 {
-                    host.schemas()
-                        .validate(&query.schema_id, &query.payload)
-                        .map_err(|e| invalid(format!("invalid source query: {e:?}")))?;
-                    if query.from_dependencies.len() > 16
-                        || query.from_dependencies.iter().any(|(target, binding)| {
-                            query.payload.get(target).is_none()
-                                || binding.pointer.len() > 512
-                                || binding.root_field().is_none()
-                                || host.schemas().get(&binding.schema_id).is_none()
-                        })
-                    {
-                        return Err(invalid("goal query has invalid dependency bindings"));
-                    }
-                    if query.payload.to_string().len() > 60_000 {
-                        return Err(invalid("goal query too large"));
-                    }
+                    query.validate(host, &self.execution_payload_fields)?;
                 }
                 (CapabilityContract::Observe { emits }, None)
                     if emits.contains(&source.schema_id) => {}
@@ -437,6 +471,17 @@ impl GoalConfig {
             {
                 return Err(invalid(
                     "each goal action must emit the configured execution export schema",
+                ));
+            }
+            if self
+                .sources
+                .iter()
+                .filter_map(|source| source.query.as_ref())
+                .flat_map(|query| query.after_from_execution.values())
+                .any(|binding| act.emits != std::slice::from_ref(&binding.schema_id))
+            {
+                return Err(invalid(
+                    "each goal action must emit the schema bound to its after-action queries",
                 ));
             }
             if act.fenced_resource != action.fenced_resource.as_deref()

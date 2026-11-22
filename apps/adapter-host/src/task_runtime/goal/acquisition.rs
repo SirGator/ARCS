@@ -45,7 +45,7 @@ impl TaskRuntime {
                 let query_capability =
                     self.journal
                         .goal_query_capability(task.sequence, &route.id, &source.id)?;
-                let (payload, parents) = self.bind_query_payload(host, task, query)?;
+                let (payload, parents) = self.bind_query_payload(host, task, query, after)?;
                 let query = InputService::new(
                     &self.journal.operator,
                     host.schemas(),
@@ -153,6 +153,57 @@ impl TaskRuntime {
     }
 
     fn bind_query_payload(
+        &self,
+        host: &Host,
+        task: &GoalTask,
+        query: &GoalQuery,
+        after: bool,
+    ) -> Result<(Value, Vec<VersionId>), HostError> {
+        let (mut payload, mut parents) = self.bind_dependency_query(host, task, query)?;
+        if !after || query.after_from_execution.is_empty() {
+            return Ok((payload, parents));
+        }
+        let version = task
+            .execution
+            .as_ref()
+            .ok_or_else(|| invalid("after-action query has no execution receipt"))?;
+        let action = task
+            .action
+            .as_ref()
+            .ok_or_else(|| invalid("after-action query has no materialized action"))?;
+        let receipt = super::engine::load(host, version)?;
+        let matches_action = ArtifactRelations::new(host.store())
+            .outgoing(version)
+            .map_err(HostError::Store)?
+            .iter()
+            .any(|edge| &edge.to == action && edge.kind == relation_kinds::result_of());
+        if receipt.artifact_type != "execution_result" || !matches_action {
+            return Err(invalid(
+                "after-action query receipt does not belong to its action",
+            ));
+        }
+        let fields = payload
+            .as_object_mut()
+            .ok_or_else(|| invalid("after-action query payload is not an object"))?;
+        for (target, binding) in &query.after_from_execution {
+            if receipt.schema_id != binding.schema_id {
+                return Err(invalid(
+                    "after-action query receipt schema differs from binding",
+                ));
+            }
+            let value = receipt
+                .payload
+                .pointer(&binding.pointer)
+                .ok_or_else(|| invalid("after-action query receipt pointer is missing"))?;
+            fields.insert(target.clone(), value.clone());
+        }
+        if !parents.contains(version) {
+            parents.push(version.clone());
+        }
+        Ok((payload, parents))
+    }
+
+    fn bind_dependency_query(
         &self,
         host: &Host,
         task: &GoalTask,

@@ -601,6 +601,12 @@
 > Der begrenzte Gedächtnisabruf kann daraus früheren Fortschritt
 > in eine neue Zielrunde übernehmen.
 >
+> Sechzigster Schritt gemäß v3 §8.2 LNG-07/LNG-09 und TEST-01.
+> Eine Nachher-Abfrage kann die bestätigte Zustandsrevision aus
+> der eigenen Ausführungsquittung in den Request übernehmen.
+> Der Beleg des Requests verknüpft beide Versionen. Die vorhandene
+> externe Drohnenkamera nimmt damit zur bestätigten Revision auf.
+>
 **Leitbild:** ARCS ist ein universeller Agent. Es soll sich einfach bedienen lassen, beliebige kompatible Systeme verbinden, eigenständig Probleme lösen und langfristige Aufgaben über Monate verfolgen.
 
 ## 1. Verbindliche Architekturregeln

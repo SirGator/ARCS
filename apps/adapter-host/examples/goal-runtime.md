@@ -172,6 +172,39 @@ Der Request erhält eine `based_on`-Relation zur verwendeten
 Artefaktversion. Abhängigkeitsexporte und Berechtigungen der
 Request-Capability gelten weiterhin.
 
+### Nachher-Abfragen an die Ausführungsquittung binden
+
+`query.after_from_execution` übernimmt ausgewählte Werte aus der
+persistierten Quittung der Aktion dieser Runde. Das Beispiel bindet
+`expected_revision` einer Kameraabfrage an die bestätigte Zustandsrevision.
+Vor der Aktion wird weiter der konfigurierte `payload` verwendet.
+
+```json
+"query": {
+  "schema_id": "arcs.request.drone_camera.v1",
+  "payload": {"drone_id": "drone-1", "camera_id": "front"},
+  "after_from_execution": {
+    "expected_revision": {
+      "schema_id": "arcs.execution_result.drone.v1",
+      "pointer": "/result/revision"
+    }
+  }
+}
+```
+
+Das Zielfeld muss im Abfrageschema deklariert sein. Optionale Felder dürfen
+im Vorher-Payload fehlen. Das Wurzelfeld des Pointers muss in
+`execution_payload_fields` freigegeben sein. Jede für das Ziel zugelassene
+Aktion muss die angegebene Quittungsschema-ID ausgeben. Ein Feld kann
+entweder aus einem Abhängigkeitsergebnis oder aus der Quittung gebunden
+werden. Die fertige Anfrage wird vor dem Dispatch gegen ihr Schema geprüft.
+
+Die Nachher-Abfrage erhält eine `based_on`-Beziehung zur Quittung.
+Beide Versionen bleiben beim Wiederanlauf erhalten. Bei einem fehlenden
+Wert oder Schemafehler endet die Runde mit Fehler vor dem Nachher-Request.
+Der angefragte Adapter entscheidet anhand seines Vertrags, ob er den
+angeforderten Zustand noch bereitstellen kann.
+
 ## Externe Wirkungs- und Zielbewertung
 
 Der Bewertungs-Reasoner emittiert `arcs.goal_assessment_candidate.v1`:
