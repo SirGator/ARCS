@@ -613,6 +613,12 @@
 > jeweiligen Aufnahme. Bei fehlendem Ziel endet er am Rundenbudget.
 > Der Quellstand der Suchanwendung liegt in `drone-sim`.
 >
+> Zweiundsechzigster Schritt gemäß v3 §8.2 LNG-09, §10.1 SEC-03
+> und TEST-01. Das Drohnenprojekt lädt die Aufnahme des bestätigten
+> Funds anhand ihrer gespeicherten Version und prüft den Farbtreffer
+> erneut. Die Abschlussbewertung kann über den vorhandenen
+> Output-Vertrag gesondert zur Zustellung freigegeben werden.
+>
 **Leitbild:** ARCS ist ein universeller Agent. Es soll sich einfach bedienen lassen, beliebige kompatible Systeme verbinden, eigenständig Probleme lösen und langfristige Aufgaben über Monate verfolgen.
 
 ## 1. Verbindliche Architekturregeln

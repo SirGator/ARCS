@@ -221,5 +221,9 @@ in `camera.capture` und wertete die zurückgegebenen Bildbytes aus.
 Die [startbare Farbsuche](../../drone-sim/apps/drone-demo/README.md#wiederholbare-farbsuche)
 wiederholt diesen Ablauf bis zum bestätigten Fund oder Rundenbudget. Ein
 separater Test bestätigt den Abschluss bei einem schon sichtbaren Ziel.
+Der [Fundbeleg](../../drone-sim/apps/drone-demo/README.md#fundbeleg-und-lokale-bilddatei)
+wertet die gespeicherte Aufnahme erneut aus und kann ihre Originalbytes lokal
+exportieren. Die Abschlussbewertung kann der vorhandene ARCS-Output-Manager
+nach separater Freigabe als Textbericht zustellen.
 Als nächste Etappen bleiben die freie Erkundung mit Hindernissen und die
 semantische Objekterkennung.
