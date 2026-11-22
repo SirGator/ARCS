@@ -631,6 +631,11 @@
 > inkompatible Option kann die Bindung eines geeigneten Planers nicht
 > mehr verhindern. Der vorhandene Dispatch prüft erneut vor dem Aufruf.
 >
+> Fünfundsechzigster Schritt gemäß v3 §8.1, §8.2 LNG-05, LNG-07 und LNG-08
+> sowie §9.2. Zielrouten können die Planerauswahl an eine Runde binden.
+> ARCS nutzt beim Eintritt in die Planung die aktuelle Verfügbarkeit
+> und verknüpft Freigabe und Recovery mit dem Beleg dieser Runde.
+>
 **Leitbild:** ARCS ist ein universeller Agent. Es soll sich einfach bedienen lassen, beliebige kompatible Systeme verbinden, eigenständig Probleme lösen und langfristige Aufgaben über Monate verfolgen.
 
 ## 1. Verbindliche Architekturregeln

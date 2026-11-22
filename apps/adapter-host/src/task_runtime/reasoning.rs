@@ -116,9 +116,15 @@ impl TaskRuntime {
         memory: Option<&arcs::reasoning::context::MemoryPolicy>,
         now_unix_ms: u64,
     ) -> Result<Option<arcs::reasoning::general::ReasoningResult>, HostError> {
-        if let Some(selection) = self.saved_reasoner_for_task(host, sequence)? {
+        if let Some(binding) = self.saved_reasoner_for_task(host, sequence)? {
+            let matches_phase = binding.round.is_none()
+                || self
+                    .saved_goal(sequence)?
+                    .is_some_and(|goal| request.request_id == self.goal_request_id(&goal, "plan"));
+            let selection = binding.selection;
             let choice = selection.choice();
-            if choice.capability == request.capability
+            if matches_phase
+                && choice.capability == request.capability
                 && choice.method == request.method
                 && choice.budget == request.budget
                 && selection.record.policy.target_schema_id == request.target_schema_id

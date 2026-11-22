@@ -1,4 +1,4 @@
-# Dauerhafte Reasoner-Auswahl pro Aufgabe
+# Dauerhafte Reasoner-Auswahl
 
 Dieser Slice setzt Teile von `ARCHITECTURE.md`, v3 §9.2/§9.3 um: Eine Route
 kann zwischen ausdrücklich zugelassenen Reasonern wählen. Der Core speichert
@@ -156,12 +156,11 @@ Konkurrierende SQLite-Verbindungen einigen sich atomar auf den zuerst
 gespeicherten Beleg. Ein verlorener Queue-Checkpoint kann ihn nicht ersetzen.
 Aktuelle Grants und die unveränderte Auswahlpolitik werden beim Laden geprüft.
 
-Nach dem Speichern bleibt die Auswahl über Neustarts und Goal-Runden fest.
-Ein inzwischen freier anderer Reasoner übernimmt nicht stillschweigend.
-Ohne zusätzliche Policy verändert auch ein Ausfall diese Bindung nicht.
-Die optionale [begrenzte Recovery](reasoning-recovery.md) kann nach belegten
-technischen Fehlern einen neuen Request an eine erlaubte Alternative richten;
-die ursprüngliche Auswahl bleibt dabei erhalten. Allgemeine versionierte
+Standardmäßig gilt der erste Auswahlbeleg für die gesamte Aufgabe, einschließlich
+späterer Zielrunden und Neustarts. Die optionale
+[begrenzte Recovery](reasoning-recovery.md) kann nach belegten technischen
+Fehlern einen neuen Request an eine erlaubte Alternative richten. Der
+ursprüngliche Auswahlbeleg bleibt dabei erhalten. Allgemeine versionierte
 Neuplanung bleibt weitere Arbeit.
 
 Die Anfrage referenziert nur die Belegversion im reservierten Constraint
@@ -175,6 +174,16 @@ Der Publisher `arcs.reasoning.selection` ist für den Core reserviert.
 Goals wählen erst beim tatsächlichen Eintritt in `Planning`, nach Datenerfassung
 und einem gegebenenfalls bereits erfolgreichen initialen Zielcheck. Wartende
 Goals binden dadurch keinen unnötigen Planer. Der feste Assessor bleibt separat.
+
+Auf Zielrouten aktiviert `"reselect_each_round": true` innerhalb von
+`reasoner_selection` einen eigenen Auswahlbeleg je Zielrunde. Beim ersten
+Planungsaufruf dieser Runde werden aktuelle Verfügbarkeit, Binäreingaben und
+Ressourcen geprüft. Wiederholungen, Freigabe und Wiederanlauf innerhalb der
+Runde verwenden denselben Beleg. Bei der Freigabe prüft ARCS, ob der
+Ursprungsrequest des Vorschlags den Beleg dieser Runde trägt. Für eine
+Zielrunde mit Recovery wird zusätzlich der Ursprung des Recovery-Requests
+geprüft.
+
 Alle wählbaren Goal-Planer benötigen ein Ein-Kandidaten-Budget und genügend
 Kontextplätze. Bei deklarierten Binäreingaben brauchen sie außerdem einen
 ausreichenden Receiver-Grant für die Objektzahl; Bytes und konkrete Referenzen
@@ -188,22 +197,28 @@ Laufzeit- und Tokenbudgets aller Optionen, auch bei mehrfachen Goal-Runden.
 
 CLI und Monitor zeigen unter `reasoner_selections` höchstens 50 aktuelle oder
 zuletzt bearbeitete Auswahlen mit Aufgabe, Route, Belegversion, Capability,
-Methode, Budget und Relevanz. Suchtext und private Werte werden dort nicht
-ausgegeben. Bestehende Routen ohne Auswahlpolitik behalten ihre bisherige
-Identität und ihr Verhalten.
+Methode, Budget und Relevanz. Der Rundenmodus ergänzt das Feld `round`.
+Während eine neue Runde auf die Planung wartet, kann der Status vorübergehend
+keinen Auswahlbeleg für diese Aufgabe enthalten. Die Belege früherer Runden
+bleiben im Artifact-Netz erhalten. Das Statusformat beschränkt sich auf die
+angegebenen Metadaten. Die Option gehört zur gespeicherten Runtime-Definition.
+Für eine bereits initialisierte Runtime gilt weiterhin ihre bisherige
+Konfiguration.
 
 ## Prüfung und offene Arbeit
 
 ```bash
 cargo test --locked --offline -p arcs-core reasoning::selection
-cargo test --locked --offline -p arcs-host --test reasoner_selection
+cargo test --locked --offline -p arcs-host --test reasoner_selection --test reasoning_recovery
 ```
 
 Die Tests prüfen konkurrierende Auswahl, Recovery zwischen Core- und
 Queue-Commit, blockierte Optionen, private Daten, isolierte Fehler, Cache-Replay,
 alternative Root-/Schritt-/Goal-Planer, falsche Belege und konservative Budgets.
 Der Goal-Prozesstest verlangt eine manuelle Freigabe und prüft anschließend
-die bestätigte Wirkung am simulierten Gerät.
+die bestätigte Wirkung am simulierten Gerät. Ein weiterer Test prüft zwei
+Zielrunden mit wechselnder Planerverfügbarkeit, Neustart und getrennten
+Freigaben.
 
 Fachliche Erfolgsquoten, Kostenoptimierung, semantische Eignungsprüfung,
 automatische Fähigkeitszertifizierung, Mehrfachbeauftragung mit Ergebnisvergleich

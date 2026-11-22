@@ -83,6 +83,24 @@ fn describe(f: &Fixture, id: &str, purpose: &str) {
 }
 
 #[test]
+fn round_selection_requires_a_goal_route() {
+    let f = simple("normal", "normal");
+    let mut config = f.read("runtime.json");
+    config["routes"][0]["reasoner_selection"]["reselect_each_round"] = json!(true);
+    f.write("runtime.json", config);
+    let mut host = Host::open(f.directory.join("host.json")).unwrap();
+    let result = TaskRuntime::open(
+        &host,
+        RuntimeConfig::load(f.directory.join("runtime.json")).unwrap(),
+    );
+    let Err(error) = result else {
+        panic!("round selection accepted on an ordinary route");
+    };
+    assert!(error.to_string().contains("requires a goal route"));
+    host.shutdown().unwrap();
+}
+
+#[test]
 fn occupied_named_capacity_selects_an_alternative_and_replay_keeps_its_binding() {
     let f = simple("normal", "normal");
     f.peer("blocker", "gate", false);
@@ -321,6 +339,7 @@ fn a_goal_selected_planner_still_needs_manual_approval_and_confirmed_effect() {
     let mut config = f.read("runtime.json");
     select(&mut config["routes"][0], "goal.alternative");
     config["routes"][0]["reasoner_selection"]["search_text"] = json!("alternative");
+    config["routes"][0]["reasoner_selection"]["reselect_each_round"] = json!(true);
     config["routes"][0]["goal"]["max_rounds"] = json!(1);
     f.write("runtime.json", config);
     let mut input = f.read("input-profile.json");
@@ -342,6 +361,11 @@ fn a_goal_selected_planner_still_needs_manual_approval_and_confirmed_effect() {
         .unwrap()
         .unwrap();
     assert_eq!(candidate.created_by.id, "goal.alternative");
+    let selections = runtime.reasoner_selections(&host).unwrap();
+    assert_eq!(selections[0].round, Some(1));
+    let receipt = records(&host).remove(0);
+    assert_eq!(receipt.version_id, selections[0].selection_version_id);
+    assert_eq!(receipt.payload["owner"]["task_id"], json!("1:round:1"));
     assert_eq!(
         f.db("fan")
             .query_row("SELECT actuation_count FROM fan_state", [], |r| r

@@ -1,4 +1,4 @@
-//! Per-task Reason bindings. Selection is an existing Core/Reason concern;
+//! Per-task and per-goal-round Reason bindings. Selection is an existing Core/Reason concern;
 //! task orchestration only binds its operator policy and immutable input.
 use super::{ReasoningRoute, TaskRuntime, config::invalid};
 use crate::{Host, HostError};
@@ -23,6 +23,8 @@ pub struct ReasonerRouting {
     pub search_input_fields: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub history: Option<HistoryRanking>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub reselect_each_round: bool,
 }
 
 impl ReasonerRouting {
@@ -32,6 +34,11 @@ impl ReasonerRouting {
         route: &ReasoningRoute,
         manifests: &mut BTreeMap<String, AdapterManifest>,
     ) -> Result<(), HostError> {
+        if self.reselect_each_round && route.goal.is_none() {
+            return Err(invalid(
+                "per-round reasoner selection requires a goal route",
+            ));
+        }
         let mut fields = HashSet::new();
         if self.alternatives.is_empty()
             || self.alternatives.len() > 7
@@ -103,11 +110,24 @@ impl ReasoningRoute {
 pub struct ReasonerSelectionReport {
     pub sequence: u64,
     pub route_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub round: Option<u32>,
     pub selection_version_id: VersionId,
     pub selected: ReasonerChoice,
     pub relevance_score: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub history: Option<HistoryEvidence>,
+}
+
+pub(super) struct SavedBinding {
+    pub(super) round: Option<u32>,
+    pub(super) selection: SelectedReasoner,
+}
+
+#[derive(Clone, Copy)]
+enum BindingScope {
+    Task,
+    GoalRound(u32),
 }
 
 impl TaskRuntime {
@@ -116,19 +136,43 @@ impl TaskRuntime {
         sequence: u64,
         input_version: VersionId,
     ) -> Result<SelectionOwner, HostError> {
+        self.binding_owner(sequence, input_version, BindingScope::Task)
+    }
+
+    fn binding_owner(
+        &self,
+        sequence: u64,
+        input_version: VersionId,
+        scope: BindingScope,
+    ) -> Result<SelectionOwner, HostError> {
         Ok(SelectionOwner {
             definition_version: self.journal.definition_version()?,
             input_version,
-            task_id: sequence.to_string(),
+            task_id: match scope {
+                BindingScope::Task => sequence.to_string(),
+                BindingScope::GoalRound(round) => format!("{sequence}:round:{round}"),
+            },
         })
     }
-    fn selection_identity(
+
+    fn binding_scope(
         &self,
-        host: &Host,
         sequence: u64,
+        routing: &ReasonerRouting,
+    ) -> Result<Option<BindingScope>, HostError> {
+        if !routing.reselect_each_round {
+            return Ok(Some(BindingScope::Task));
+        }
+        Ok(self
+            .saved_goal(sequence)?
+            .map(|goal| BindingScope::GoalRound(goal.round)))
+    }
+
+    fn selection_policy(
+        host: &Host,
         route: &ReasoningRoute,
         input: &Artifact,
-    ) -> Result<(SelectionOwner, SelectionPolicy), HostError> {
+    ) -> Result<SelectionPolicy, HostError> {
         let routing = route
             .reasoner_selection
             .as_ref()
@@ -149,11 +193,6 @@ impl TaskRuntime {
             }
             query.push_str(value);
         }
-        let owner = SelectionOwner {
-            definition_version: self.journal.definition_version()?,
-            input_version: input.version_id.clone(),
-            task_id: sequence.to_string(),
-        };
         let policy = SelectionPolicy {
             target_schema_id: route.target_schema_id.clone(),
             query_text: query,
@@ -163,7 +202,7 @@ impl TaskRuntime {
         policy
             .validate(host.registry(), host.schemas())
             .map_err(HostError::Reasoning)?;
-        Ok((owner, policy))
+        Ok(policy)
     }
 
     pub(super) fn bind_reasoner_route(
@@ -175,10 +214,14 @@ impl TaskRuntime {
         context: &[ContextSelection],
         inputs: &[InputDataSelection],
     ) -> Result<ReasoningRoute, HostError> {
-        if route.reasoner_selection.is_none() {
+        let Some(routing) = &route.reasoner_selection else {
             return Ok(route.clone());
-        }
-        let (owner, policy) = self.selection_identity(host, sequence, route, input)?;
+        };
+        let scope = self
+            .binding_scope(sequence, routing)?
+            .ok_or_else(|| invalid("per-round selection needs a saved goal checkpoint"))?;
+        let owner = self.binding_owner(sequence, input.version_id.clone(), scope)?;
+        let policy = Self::selection_policy(host, route, input)?;
         match host.select_reasoner(&owner, &policy, context, inputs)? {
             SelectionPreparation::Selected(selection) => Ok(apply(route.clone(), &selection)),
             SelectionPreparation::Waiting => Err(HostError::ResourceBusy {
@@ -199,17 +242,8 @@ impl TaskRuntime {
             return Ok(route);
         }
         let (_, input) = self.journal.selection_job(sequence)?;
-        if !host.has_reasoner_selection(&self.selection_owner(sequence, input.clone())?)? {
-            return Ok(route);
-        }
-        let input = host
-            .store()
-            .get(&input)
-            .map_err(HostError::Store)?
-            .ok_or_else(|| invalid("selection input is missing"))?;
-        let (owner, policy) = self.selection_identity(host, sequence, &route, &input)?;
-        match host.load_reasoner_selection(&owner, &policy)? {
-            Some(selection) => Ok(apply(route, &selection)),
+        match self.load_binding(host, sequence, &route, input)? {
+            Some(binding) => Ok(apply(route, &binding.selection)),
             None => Ok(route),
         }
     }
@@ -218,16 +252,30 @@ impl TaskRuntime {
         &self,
         host: &Host,
         sequence: u64,
-    ) -> Result<Option<SelectedReasoner>, HostError> {
+    ) -> Result<Option<SavedBinding>, HostError> {
         if !self.has_reasoner_selection {
             return Ok(None);
         }
         let (id, input) = self.journal.selection_job(sequence)?;
         let route = self.raw_route_for_job(host, sequence, &id)?;
-        if route.reasoner_selection.is_none() {
+        self.load_binding(host, sequence, &route, input)
+    }
+
+    fn load_binding(
+        &self,
+        host: &Host,
+        sequence: u64,
+        route: &ReasoningRoute,
+        input: VersionId,
+    ) -> Result<Option<SavedBinding>, HostError> {
+        let Some(routing) = &route.reasoner_selection else {
             return Ok(None);
-        }
-        if !host.has_reasoner_selection(&self.selection_owner(sequence, input.clone())?)? {
+        };
+        let Some(scope) = self.binding_scope(sequence, routing)? else {
+            return Ok(None);
+        };
+        let owner = self.binding_owner(sequence, input.clone(), scope)?;
+        if !host.has_reasoner_selection(&owner)? {
             return Ok(None);
         }
         let input = host
@@ -235,8 +283,16 @@ impl TaskRuntime {
             .get(&input)
             .map_err(HostError::Store)?
             .ok_or_else(|| invalid("selection input is missing"))?;
-        let (owner, policy) = self.selection_identity(host, sequence, &route, &input)?;
-        host.load_reasoner_selection(&owner, &policy)
+        let policy = Self::selection_policy(host, route, &input)?;
+        Ok(host
+            .load_reasoner_selection(&owner, &policy)?
+            .map(|selection| SavedBinding {
+                selection,
+                round: match scope {
+                    BindingScope::Task => None,
+                    BindingScope::GoalRound(round) => Some(round),
+                },
+            }))
     }
 
     /// Bounded status view with no private query text or availability snapshot.
@@ -254,10 +310,13 @@ impl TaskRuntime {
         }
         let mut result = Vec::new();
         for (sequence, id) in self.journal.selection_report_jobs()? {
-            if let Some(selection) = self.saved_reasoner_for_task(host, sequence)? {
+            if let Some(SavedBinding { selection, round }) =
+                self.saved_reasoner_for_task(host, sequence)?
+            {
                 result.push(ReasonerSelectionReport {
                     sequence,
                     route_id: id,
+                    round,
                     selection_version_id: selection.version_id.clone(),
                     selected: selection.choice().clone(),
                     relevance_score: selection.record.observations[selection.record.selected_index]

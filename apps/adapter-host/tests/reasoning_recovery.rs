@@ -480,6 +480,15 @@ fn a_crash_between_core_failure_and_recovery_publication_keeps_one_failed_backen
 
 #[test]
 fn recovered_goal_rounds_keep_their_own_evidence_approvals_and_confirmed_effects() {
+    recovered_goal_rounds(false);
+}
+
+#[test]
+fn round_selection_uses_current_availability_and_preserves_recovery_evidence() {
+    recovered_goal_rounds(true);
+}
+
+fn recovered_goal_rounds(reselect_each_round: bool) {
     let f = goal_support::Fixture::new();
     f.manual();
     let mut host_config = f.read("host.json");
@@ -515,7 +524,14 @@ for line in sys.stdin:
     let mut config = f.read("runtime.json");
     config["max_concurrent_reasoning"] = json!(2);
     config["routes"][0]["goal"]["max_rounds"] = json!(2);
-    recover(&mut config["routes"][0], "goal.backup", 0);
+    let route = &mut config["routes"][0];
+    recover(route, "goal.backup", 0);
+    if reselect_each_round {
+        route["reasoner_selection"] = json!({
+            "alternatives":[choice(route, "goal.backup")],
+            "reselect_each_round":true
+        });
+    }
     f.write("runtime.json", config);
     let mut input = f.read("input-profile.json");
     input["events"][0]["payload"] =
@@ -534,6 +550,12 @@ for line in sys.stdin:
         .unwrap()
         .unwrap();
     assert_eq!(candidate.created_by.id, "goal.backup");
+    let first_receipt = runtime.reasoner_selections(&host).unwrap().pop();
+    if reselect_each_round {
+        let selection = first_receipt.as_ref().unwrap();
+        assert_eq!(selection.round, Some(1));
+        assert_eq!(selection.selected.capability.adapter_id.0, "goal.planner");
+    }
     let count = || {
         f.db("fan")
             .query_row("SELECT actuation_count FROM fan_state", [], |row| {
@@ -596,6 +618,41 @@ for line in sys.stdin:
     assert_eq!(count(), 1);
     let next = runtime.goals_after(0, 1).unwrap().remove(0);
     assert_ne!(next.candidate, goal.candidate);
+    let second_receipt = runtime.reasoner_selections(&host).unwrap().pop();
+    if reselect_each_round {
+        let selection = second_receipt.as_ref().unwrap();
+        assert_eq!(selection.round, Some(2));
+        assert_eq!(selection.selected.capability.adapter_id.0, "goal.backup");
+        assert_ne!(
+            selection.selection_version_id,
+            first_receipt.unwrap().selection_version_id,
+        );
+    }
+    host.shutdown().unwrap();
+    drop(runtime);
+    drop(host);
+    let mut host = f.host();
+    let mut runtime = f.runtime(&host);
+    if let Some(receipt) = second_receipt {
+        let restored = runtime.reasoner_selections(&host).unwrap().pop().unwrap();
+        assert_eq!(restored.selection_version_id, receipt.selection_version_id);
+    }
+    assert!(
+        runtime
+            .review_goal(
+                &host,
+                next.sequence,
+                goal.candidate.as_ref().unwrap(),
+                ApprovalDecision::Approved,
+                Actor {
+                    actor_type: ActorType::Human,
+                    id: "test.operator".into()
+                },
+                "old candidate cannot release the second round".into()
+            )
+            .is_err()
+    );
+    assert_eq!(count(), 1);
     runtime
         .review_goal(
             &host,
@@ -618,6 +675,8 @@ for line in sys.stdin:
         2,
         "only planning rounds should have recovery definitions"
     );
+    let selections = artifacts(&host, arcs::reasoning::selection::SCHEMA);
+    assert_eq!(selections.len(), if reselect_each_round { 2 } else { 0 });
     host.shutdown().unwrap();
     drop(runtime);
     drop(host);

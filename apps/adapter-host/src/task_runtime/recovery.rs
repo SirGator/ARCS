@@ -1,6 +1,7 @@
 //! Operational ownership of Core recovery decisions; no second truth store.
 use super::*;
 use arcs::adapters::input_data::InputDataSelection;
+use arcs::core::ActorType;
 use arcs::reasoning::recovery::{RecoveryCall, RecoveryDefinition, RecoveryPreparation};
 use arcs::reasoning::{ReasoningRequestV2, selection::ReasonerChoice};
 
@@ -27,8 +28,14 @@ impl TaskRuntime {
         let Some(policy) = route.reasoning_recovery else {
             return Ok(None);
         };
-        // A goal's assessor remains independent. Only its planning request
-        // inherits this policy; checks and post-action assessment do not.
+        // Only the planning request inherits recovery on a goal route.
+        if route.goal.is_some()
+            && self
+                .saved_goal(sequence)?
+                .is_none_or(|task| request.request_id != self.goal_request_id(&task, "plan"))
+        {
+            return Ok(None);
+        }
         if request.capability != route.reasoner
             || request.method != route.method
             || request.budget != route.budget
@@ -155,13 +162,26 @@ impl TaskRuntime {
         task: &super::goal::GoalTask,
         candidate: &Artifact,
     ) -> Result<ReasonerChoice, HostError> {
-        let Some(policy) = &route.reasoning_recovery else {
-            return Ok(ReasonerChoice {
-                capability: route.reasoner.clone(),
-                method: route.method,
-                budget: route.budget.clone(),
-            });
+        let binding = self
+            .saved_reasoner_for_task(host, task.sequence)?
+            .filter(|binding| binding.round.is_some());
+        if binding.is_none()
+            && route
+                .reasoner_selection
+                .as_ref()
+                .is_some_and(|routing| routing.reselect_each_round)
+        {
+            return Err(invalid("missing reasoner selection for this goal round"));
+        }
+        let direct = ReasonerChoice {
+            capability: route.reasoner.clone(),
+            method: route.method,
+            budget: route.budget.clone(),
         };
+        let recovery = route.reasoning_recovery.as_ref();
+        if binding.is_none() && recovery.is_none() {
+            return Ok(direct);
+        }
         let generated = arcs::store::ArtifactRelations::new(host.store())
             .outgoing(&candidate.version_id)
             .map_err(HostError::Store)?
@@ -169,20 +189,42 @@ impl TaskRuntime {
             .filter(|edge| edge.kind == arcs::store::relation_kinds::generated_by())
             .map(|edge| edge.to)
             .collect::<Vec<_>>();
-        if generated.len() != 1 {
-            return Err(invalid(
-                "recovered goal candidate needs one originating request",
-            ));
+        let [origin] = generated.as_slice() else {
+            return Err(invalid("goal candidate needs one originating request"));
+        };
+        let request_id = self.goal_request_id(task, "plan");
+        if let Some(binding) = binding {
+            let request = host
+                .store()
+                .get(origin)
+                .map_err(HostError::Store)?
+                .ok_or_else(|| invalid("missing originating goal request"))?;
+            if request.schema_id.0 != "arcs.reasoning_request.v2"
+                || request.created_by.id != "arcs.reasoning.v2"
+                || request.created_by.actor_type != ActorType::System
+                || request
+                    .provenance
+                    .as_ref()
+                    .is_none_or(|p| !p.parents.contains(&binding.selection.version_id.0))
+                || (recovery.is_none() && request.payload["invocation"]["request_id"] != request_id)
+            {
+                return Err(invalid(
+                    "goal candidate does not belong to this round's reasoner selection",
+                ));
+            }
         }
+        let Some(policy) = recovery else {
+            return Ok(direct);
+        };
         let owner = self.selection_owner(task.sequence, task.input_version_id.clone())?;
         arcs::reasoning::recovery::completed_choice(
             host.registry(),
             host.schemas(),
             host.store(),
-            &generated[0],
+            origin,
             &owner,
             policy,
-            &self.goal_request_id(task, "plan"),
+            &request_id,
         )
         .map_err(HostError::Reasoning)
     }
