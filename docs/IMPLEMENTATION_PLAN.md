@@ -561,6 +561,12 @@
 > und der Test des neu veröffentlichten Commits behalten ihre
 > getrennten Freigaben.
 >
+> Vierundfünfzigster Schritt gemäß v3 §10.1 SEC-03/SEC-04/SEC-09
+> und TEST-02. Betreiber können Aktionsfelder an Werte aus
+> festgehaltenen Vorher-Quellen binden. Der Reparaturablauf prüft
+> Pfad und Basis-Commit vor Freigabe und Act. Prozess- und Modelltests
+> decken passenden und abweichenden Quellbezug ab.
+>
 **Leitbild:** ARCS ist ein universeller Agent. Es soll sich einfach bedienen lassen, beliebige kompatible Systeme verbinden, eigenständig Probleme lösen und langfristige Aufgaben über Monate verfolgen.
 
 ## 1. Verbindliche Architekturregeln

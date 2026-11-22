@@ -206,6 +206,42 @@ Check erhält `goal_runtime.phase: "check"` und ausschließlich Vorher-Daten.
 Er muss alle frischen Quellen belegen. Ohne Ausführung wird kein Outcome
 erfunden. Ein Beispiel steht im [Textaufgaben-Nachweis](text-tasks.md).
 
+## Aktionsfelder an die erfasste Quelle binden
+
+Ein Betreiber kann in einem Eintrag von `goal.actions` zusätzlich
+`source_matches` setzen. Jeder Eintrag vergleicht den Kandidatenwert
+mit dem entsprechenden Wert in der eingefrorenen Vorher-Quelle.
+
+```json
+{
+  "source_matches": [
+    {
+      "source_id": "failed-source",
+      "candidate_pointer": "/base_commit",
+      "source_pointer": "/revision"
+    },
+    {
+      "source_id": "failed-source",
+      "candidate_pointer": "/path",
+      "source_pointer": "/path"
+    }
+  ]
+}
+```
+
+`source_id` bezeichnet eine konfigurierte Goal-Quelle. Beide Pfade
+sind JSON Pointer relativ zum jeweiligen Payload. Der erste
+Abschnitt muss beim Kandidaten im Verification-Schema deklariert
+und bei der Quelle in `payload_fields` enthalten sein. Die
+Runtime prüft die Herkunft des gespeicherten Quellenartefakts.
+Fehlende oder abweichende Werte lassen die Verification scheitern.
+Der Verification-Bericht enthält die betroffenen Felder und
+die Quellen-ID. Er speichert für diesen Check keine Feldwerte.
+
+Der Abgleich läuft vor der Freigabe und erneut vor dem Versand
+der Action. Die bestehende Prüfung der Kandidatenversion,
+ihrer Belege und der Freigaberechte gilt weiterhin.
+
 ## Manuelle Entscheidungen und Abbruch
 
 Eine Route ohne ausdrückliche `policy` hält bei `awaiting_approval` an.

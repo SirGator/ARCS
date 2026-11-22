@@ -434,6 +434,10 @@ fn configure_retry(f: &Fixture, failure_fields: &[&str]) {
             "from_dependencies":{"revision":{"schema_id":DIAGNOSTIC_RECEIPT,"pointer":"/result/revision"}}
         }
     }]);
+    retries[0]["route"]["goal"]["actions"][0]["source_matches"] = json!([
+        {"source_id":"failed-source","candidate_pointer":"/base_commit","source_pointer":"/revision"},
+        {"source_id":"failed-source","candidate_pointer":"/path","source_pointer":"/path"}
+    ]);
     templates.extend(retries);
     f.write("runtime.json", runtime);
 }
@@ -538,6 +542,18 @@ fn verify_repair(f: &Fixture, live_model: bool) {
                     goal.route_id == "p1.r1.edit" && goal.state == GoalState::AwaitingApproval
                 })
         },
+    );
+    let report = result(&host, retry.verification.as_ref());
+    assert_eq!(report["verdict"], "pass");
+    let findings = report["findings"].as_array().unwrap();
+    assert_eq!(
+        findings
+            .iter()
+            .filter(|finding| {
+                finding["check"] == "goal.action_source_match" && finding["verdict"] == "pass"
+            })
+            .count(),
+        2
     );
     let source = host.store().get(&retry.before[0]).unwrap().unwrap();
     assert_eq!(source.schema_id.0, SOURCE);
@@ -844,5 +860,89 @@ fn failure_evidence_needs_separate_authorization_for_the_replacement_step() {
             .as_str()
             .unwrap()
     );
+    host.shutdown().unwrap();
+}
+
+#[test]
+fn a_retry_edit_must_match_the_path_and_revision_of_its_pinned_source() {
+    for (variant, candidate_pointer) in [("stale-base", "/base_commit"), ("other-path", "/path")] {
+        let f = Fixture::new();
+        configure_retry(&f, &["result", "diagnostics"]);
+        let mut host_config = f.read("host.json");
+        host_config["adapters"]
+            .as_array_mut()
+            .unwrap()
+            .last_mut()
+            .unwrap()["args"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!(variant));
+        f.write("host.json", host_config);
+        let mut profile = f.read("check-profile.json");
+        profile["edit"]["files"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!("test_calculator.py"));
+        f.write("check-profile.json", profile);
+        let (mut host, mut runtime) = f.open();
+        let failed = run_failed_revision(&mut host, &mut runtime);
+        let bad_revision = result(&host, failed.execution.as_ref())["result"]["revision"].clone();
+        host.shutdown().unwrap();
+        drop((host, runtime));
+
+        let (mut host, mut runtime) = f.open();
+        let rejected = advance(&mut host, &mut runtime, NOW + MONTH, |runtime| {
+            runtime
+                .goals_after(0, 10)
+                .unwrap()
+                .into_iter()
+                .find(|goal| goal.route_id == "p1.r1.edit" && goal.state.terminal())
+        });
+        assert_eq!(rejected.state, GoalState::Blocked);
+        assert!(rejected.approval.is_none() && rejected.action.is_none());
+        let report = result(&host, rejected.verification.as_ref());
+        assert_eq!(report["verdict"], "fail");
+        let findings = report["findings"].as_array().unwrap();
+        assert_eq!(findings[0]["check"], "goal.configured_action_contract");
+        assert_eq!(findings[0]["verdict"], "pass");
+        let failed_matches: Vec<_> = findings
+            .iter()
+            .filter(|finding| {
+                finding["check"] == "goal.action_source_match" && finding["verdict"] == "fail"
+            })
+            .collect();
+        assert_eq!(failed_matches.len(), 1);
+        assert!(
+            failed_matches[0]["detail"]
+                .as_str()
+                .unwrap()
+                .starts_with(&format!("candidate {candidate_pointer} "))
+        );
+        let rejected_candidate = rejected.candidate.as_ref().unwrap();
+        assert!(approval(&host, &mut runtime, &rejected, rejected_candidate).is_err());
+        assert_eq!(f.checks(), 1);
+        assert_eq!(
+            git(&f, &["rev-parse", REF]).trim(),
+            bad_revision.as_str().unwrap()
+        );
+        host.shutdown().unwrap();
+    }
+}
+
+#[test]
+fn source_match_policy_must_name_an_exported_source_field() {
+    let f = Fixture::new();
+    configure_retry(&f, &["result", "diagnostics"]);
+    let mut runtime = f.read("runtime.json");
+    runtime["routes"][0]["plan"]["templates"][2]["route"]["goal"]["sources"][0]["payload_fields"] =
+        json!(["revision", "text"]);
+    f.write("runtime.json", runtime);
+
+    let mut host = Host::open(f.path("host.json")).unwrap();
+    let error = TaskRuntime::open(&host, RuntimeConfig::load(f.path("runtime.json")).unwrap())
+        .err()
+        .expect("invalid source match must be rejected");
+    assert!(error.to_string().contains("action source matches require"));
+    assert!(!f.path("runtime.sqlite").exists());
     host.shutdown().unwrap();
 }

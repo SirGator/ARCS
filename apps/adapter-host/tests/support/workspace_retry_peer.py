@@ -85,6 +85,14 @@ def propose(inv):
             operation.op = ast.Add()
             payload = {"path": source["path"], "base_commit": source["revision"],
                        "replacement": ast.unparse(tree) + "\n"}
+            if len(sys.argv) > 2:
+                variant = sys.argv[2]
+                if variant == "stale-base":
+                    payload["base_commit"] = task["base_commit"]
+                elif variant == "other-path":
+                    payload["path"] = "test_calculator.py"
+                else:
+                    raise AssertionError(variant)
         elif target == CHECK:
             result = dependency(inv)["payload"]["result"]
             assert result["status"] == "applied"

@@ -260,8 +260,10 @@ Modelladapter für `arcs.workspace_edit_candidate.v1`.
 Die reparierende Goal-Vorlage verwendet `method: "llm"`.
 Sie erhält den Quelltext über `source.read` sowie die fehlgeschlagene
 Testquittung über eine autorisierte `previous_failure`-Kante.
-Das Modell schlägt die Textänderung vor. Der Host prüft den
-Kandidaten und wartet auf die Freigabe.
+Das Modell schlägt die Textänderung vor. Die Action vergleicht über
+`source_matches` den vorgeschlagenen Pfad und Basis-Commit mit
+der gespeicherten Quelltextversion. Erst nach bestandener
+Verification wartet der Host auf die Freigabe.
 
 Der Prozess-Test verwendet die bereits installierte lokale
 Ollama-Instanz und den externen Adapter aus dem Nachbarprojekt

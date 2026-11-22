@@ -33,6 +33,53 @@ fn service_error(error: impl std::fmt::Debug) -> HostError {
     invalid(format!("goal gate: {error:?}"))
 }
 
+fn verdict(passed: bool) -> VerificationVerdict {
+    if passed {
+        VerificationVerdict::Pass
+    } else {
+        VerificationVerdict::Fail
+    }
+}
+
+fn match_action_source(
+    host: &Host,
+    config: &GoalConfig,
+    task: &GoalTask,
+    candidate: &Artifact,
+    rule: &ActionSourceMatch,
+) -> Result<VerificationFinding, HostError> {
+    let (index, source) = config
+        .sources
+        .iter()
+        .enumerate()
+        .find(|(_, source)| source.id == rule.source_id)
+        .ok_or_else(|| invalid("action source match has no configured source"))?;
+    let artifact = task
+        .before
+        .get(index)
+        .map(|version| load(host, version))
+        .transpose()?;
+    let expected = artifact
+        .as_ref()
+        .filter(|artifact| {
+            artifact.schema_id == source.schema_id
+                && artifact.created_by.id == source.capability.adapter_id.0
+                && artifact
+                    .tags
+                    .contains(&format!("capability:{}", source.capability.capability_id.0))
+        })
+        .and_then(|artifact| artifact.payload.pointer(&rule.source_pointer));
+    let found = candidate.payload.pointer(&rule.candidate_pointer);
+    Ok(VerificationFinding {
+        check: "goal.action_source_match".into(),
+        verdict: verdict(expected.is_some() && expected == found),
+        detail: format!(
+            "candidate {} must equal {} in pre-action source {}",
+            rule.candidate_pointer, rule.source_pointer, rule.source_id,
+        ),
+    })
+}
+
 impl TaskRuntime {
     pub(super) fn recover_goal_review(
         &self,
@@ -114,23 +161,28 @@ impl TaskRuntime {
                 .schemas()
                 .validate(&rule.verification_schema_id, &candidate.payload)
                 .is_ok();
-        let verdict = if passed {
-            VerificationVerdict::Pass
-        } else {
-            VerificationVerdict::Fail
-        };
+        let mut findings = vec![VerificationFinding {
+            check: "goal.configured_action_contract".into(),
+            verdict: verdict(passed),
+            detail: format!(
+                "check planner origin, selected goal evidence, capability and operator payload contract {}",
+                rule.verification_schema_id.0
+            ),
+        }];
+        for comparison in &rule.source_matches {
+            findings.push(match_action_source(
+                host, config, task, &candidate, comparison,
+            )?);
+        }
         Ok(Gate {
             fenced_resource: rule.fenced_resource.as_deref(),
             result: VerificationResult {
-                verdict,
-                findings: vec![VerificationFinding {
-                    check: "goal.configured_action_contract".into(),
-                    verdict,
-                    detail: format!(
-                        "check planner origin, selected goal evidence, capability and operator payload contract {}",
-                        rule.verification_schema_id.0
-                    ),
-                }],
+                verdict: verdict(
+                    findings
+                        .iter()
+                        .all(|finding| finding.verdict == VerificationVerdict::Pass),
+                ),
+                findings,
             },
         })
     }

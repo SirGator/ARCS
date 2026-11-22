@@ -78,13 +78,18 @@ pub struct QueryField {
 
 impl QueryField {
     fn root_field(&self) -> Option<&str> {
-        self.pointer
-            .strip_prefix('/')?
-            .split('/')
-            .next()
-            .filter(|name| !name.is_empty() && !name.contains('~'))
+        exported_root(&self.pointer)
     }
 }
+
+fn exported_root(pointer: &str) -> Option<&str> {
+    pointer
+        .strip_prefix('/')?
+        .split('/')
+        .next()
+        .filter(|name| !name.is_empty() && !name.contains('~'))
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GoalBinary {
@@ -103,6 +108,17 @@ pub struct ActionRule {
     /// The resource revision to carry for a controller that requires fencing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fenced_resource: Option<String>,
+    /// Match candidate payload values against the frozen pre-action sources.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub source_matches: Vec<ActionSourceMatch>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ActionSourceMatch {
+    pub source_id: String,
+    pub candidate_pointer: String,
+    pub source_pointer: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -427,6 +443,9 @@ impl GoalConfig {
                 ));
             }
             validate_required_object(host, &action.verification_schema_id, "action verification")?;
+            if !action.source_matches.is_empty() {
+                self.validate_action_source_matches(host, action)?;
+            }
         }
         let assessment = &self.assessment;
         if !matches!(contract(&assessment.capability)?, CapabilityContract::Reason {emits} if emits.contains(&SchemaId(ASSESSMENT_SCHEMA.into())))
@@ -453,6 +472,38 @@ impl GoalConfig {
             || !assessment.budget.fits_within(&limits.resources)
         {
             return Err(invalid("assessment exceeds reasoner grant"));
+        }
+        Ok(())
+    }
+
+    fn validate_action_source_matches(
+        &self,
+        host: &Host,
+        action: &ActionRule,
+    ) -> Result<(), HostError> {
+        let schema = host
+            .schemas()
+            .get(&action.verification_schema_id)
+            .ok_or_else(|| invalid("missing action verification schema"))?;
+        if action.source_matches.len() > 16
+            || action.source_matches.iter().any(|rule| {
+                let candidate = exported_root(&rule.candidate_pointer);
+                let source = exported_root(&rule.source_pointer);
+                rule.candidate_pointer.len() > 512
+                    || rule.source_pointer.len() > 512
+                    || !candidate
+                        .is_some_and(|key| schema.document["properties"].get(key).is_some())
+                    || !self.sources.iter().any(|configured| {
+                        configured.id == rule.source_id
+                            && source.is_some_and(|key| {
+                                configured.payload_fields.iter().any(|field| field == key)
+                            })
+                    })
+            })
+        {
+            return Err(invalid(
+                "action source matches require declared candidate pointers and exported fields of known goal sources",
+            ));
         }
         Ok(())
     }
