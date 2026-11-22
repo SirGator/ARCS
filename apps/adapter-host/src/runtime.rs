@@ -8,9 +8,11 @@ mod reconnect;
 mod request;
 mod resources;
 mod sessions;
+mod transform;
 pub use reconnect::AdapterReconnectReport;
 pub use request::RequestWorkerReport;
 pub use resources::ResourcePoolReport;
+pub use transform::TransformWorkerReport;
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -98,6 +100,8 @@ pub struct HostReport {
     pub estimates: Vec<EstimateReport>,
     pub resource_pools: Vec<ResourcePoolReport>,
     pub request_workers: Vec<RequestWorkerReport>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub transform_workers: Vec<TransformWorkerReport>,
 }
 
 struct RunningAdapter {
@@ -117,6 +121,7 @@ pub struct Host {
     polling: PollingConfig,
     reasoning_jobs: HashMap<String, reason::PendingReasoning>,
     request_jobs: HashMap<String, request::PendingRequest>,
+    transform_jobs: HashMap<String, transform::PendingTransform>,
     retiring_request_jobs: Vec<request::RetiringRequest>,
     act_workers: HashMap<AdapterId, execution::ExecutionWorker>,
     output_workers: HashMap<String, output::OutputWorker>,
@@ -460,6 +465,7 @@ impl Host {
             polling: config.polling,
             reasoning_jobs: HashMap::new(),
             request_jobs: HashMap::new(),
+            transform_jobs: HashMap::new(),
             retiring_request_jobs: Vec::new(),
             act_workers: HashMap::new(),
             output_workers: HashMap::new(),
@@ -869,6 +875,7 @@ impl Host {
         let reconnect_error = self.cancel_reconnections().err();
         let mut cancelled = self.cancel_reasoning_jobs();
         cancelled.extend(self.cancel_request_jobs());
+        cancelled.extend(self.cancel_transform_jobs());
         cancelled.extend(self.cancel_controller_closures());
         cancelled.extend(self.cancel_execution_workers());
         cancelled.extend(self.cancel_output_workers());
@@ -898,6 +905,7 @@ impl Host {
         Ok(HostReport {
             resource_pools: self.resource_usage(),
             request_workers: self.request_workers(),
+            transform_workers: self.transform_workers(),
             stored_artifacts: self.store.len().map_err(HostError::Store)?,
             world_revision: self.world.revision().get(),
             adapters: self

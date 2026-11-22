@@ -387,6 +387,59 @@ fn result_is_derived_audited_and_replayed_without_new_artifacts_or_current_state
 }
 
 #[test]
+fn worker_preparation_defers_endpoint_and_finish_persists_for_synchronous_replay() {
+    let fixture = Fixture::new();
+    let registry = fixture.registry();
+    let initial_count = fixture.store.len().unwrap();
+    let mut ids = SequenceIdGenerator::new("transform-worker-test");
+    let mut service = TransformService::new(
+        &registry,
+        &fixture.schemas,
+        &fixture.store,
+        &mut ids,
+        &SystemClock,
+    );
+
+    let preparation = service
+        .prepare_for_worker(
+            &fixture.endpoint,
+            &capability(),
+            &VersionId("input-v1".into()),
+            &SchemaId(OUTPUT.into()),
+        )
+        .unwrap();
+    let prepared = match preparation {
+        TransformPreparation::Dispatch(prepared) => prepared,
+        TransformPreparation::Complete(_) => panic!("first request must dispatch"),
+    };
+    assert!(fixture.endpoint.calls.lock().unwrap().is_empty());
+    assert!(
+        fixture
+            .store
+            .committed_after(initial_count)
+            .unwrap()
+            .iter()
+            .all(|entry| entry.artifact.schema_id.0 != OUTPUT)
+    );
+
+    let response = fixture.endpoint.transform(prepared.invocation()).unwrap();
+    let result = service.finish(*prepared, Ok(response)).unwrap();
+    assert_eq!(result.payload, json!({"value": 24.0}));
+    assert!(
+        fixture
+            .store
+            .committed_after(initial_count)
+            .unwrap()
+            .iter()
+            .any(|entry| entry.artifact.schema_id.0 == OUTPUT)
+    );
+    drop(service);
+
+    assert_eq!(fixture.run("input-v1").unwrap(), result);
+    assert_eq!(fixture.endpoint.calls.lock().unwrap().len(), 1);
+}
+
+#[test]
 fn missing_input_wrong_endpoint_and_input_limit_fail_before_dispatch() {
     let mut fixture = Fixture::new();
     let count = fixture.store.len().unwrap();

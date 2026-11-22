@@ -1,18 +1,59 @@
 use crate::adapters::{
-    AdapterCallError, AdapterRegistry, CapabilityContract, CapabilityRef, ProducerClass,
+    AdapterCallError, AdapterGrant, AdapterRegistry, CapabilityContract, CapabilityRef,
+    ProducerClass,
 };
 use crate::core::{
     Actor, ActorType, Artifact, ArtifactFactory, ArtifactFactoryInput, ArtifactIdGenerator, Clock,
-    Provenance, SchemaId, SchemaRegistry, Source, SourceClass, SourceKind, SubjectId, Trust,
-    TrustLevel, VersionId, validate_artifact,
+    Provenance, SchemaDefinition, SchemaId, SchemaRegistry, Source, SourceClass, SourceKind,
+    SubjectId, Trust, TrustLevel, VersionId, validate_artifact,
 };
 use crate::runtime::{
-    InvocationKind, InvocationService, InvocationSpec, InvocationStatus,
+    InvocationKind, InvocationService, InvocationSpec, InvocationState, InvocationStatus,
     deterministic_invocation_id,
 };
 use crate::store::{SqliteArtifactStore, relation_kinds};
 
-use super::{TransformAdapter, TransformError, TransformInvocation};
+use super::{TransformAdapter, TransformError, TransformInvocation, TransformResponse};
+
+pub struct PreparedTransform {
+    invocation: TransformInvocation,
+    state: InvocationState,
+    input: Artifact,
+    output_definition: SchemaDefinition,
+    trust: Trust,
+    actor_type: ActorType,
+    grant: AdapterGrant,
+    adapter_version: String,
+}
+
+impl PreparedTransform {
+    pub fn invocation(&self) -> &TransformInvocation {
+        &self.invocation
+    }
+}
+
+pub enum TransformPreparation {
+    Complete(Box<Artifact>),
+    Dispatch(Box<PreparedTransform>),
+}
+
+pub fn transform_invocation_id(
+    capability: &CapabilityRef,
+    input: &VersionId,
+    output_schema: &SchemaId,
+    adapter_version: &str,
+) -> String {
+    deterministic_invocation_id(
+        InvocationKind::Transform,
+        &[
+            &capability.adapter_id.0,
+            &capability.capability_id.0,
+            &input.0,
+            &output_schema.0,
+            adapter_version,
+        ],
+    )
+}
 
 pub struct TransformService<'a> {
     registry: &'a AdapterRegistry,
@@ -39,8 +80,6 @@ impl<'a> TransformService<'a> {
         }
     }
 
-    /// Validiert den gesamten gespeicherten Input vor jedem Aufruf, auch beim
-    /// Replay. Resultat, Relation und erfolgreicher Invocation-State committen atomar.
     pub fn execute(
         &mut self,
         endpoint: &dyn TransformAdapter,
@@ -48,6 +87,24 @@ impl<'a> TransformService<'a> {
         input_version: &VersionId,
         output_schema: &SchemaId,
     ) -> Result<Artifact, TransformError> {
+        match self.prepare_for_worker(endpoint, capability, input_version, output_schema)? {
+            TransformPreparation::Complete(artifact) => Ok(*artifact),
+            TransformPreparation::Dispatch(prepared) => {
+                let response = endpoint.transform(prepared.invocation());
+                self.finish(*prepared, response)
+            }
+        }
+    }
+
+    /// Validate and reserve a call or return its validated persisted result.
+    /// Workers receive only the invocation, with completion committed by the caller.
+    pub fn prepare_for_worker(
+        &mut self,
+        endpoint: &dyn TransformAdapter,
+        capability: &CapabilityRef,
+        input_version: &VersionId,
+        output_schema: &SchemaId,
+    ) -> Result<TransformPreparation, TransformError> {
         let (registered, descriptor) = self
             .registry
             .authorized_capability(&capability.adapter_id, &capability.capability_id)?;
@@ -96,16 +153,9 @@ impl<'a> TransformService<'a> {
             ProducerClass::Adapter => ActorType::Adapter,
             ProducerClass::Model => unreachable!("models rejected before dispatch"),
         };
-        let invocation_id = deterministic_invocation_id(
-            InvocationKind::Transform,
-            &[
-                &capability.adapter_id.0,
-                &capability.capability_id.0,
-                &input_version.0,
-                &output_schema.0,
-                &endpoint.manifest().adapter_version,
-            ],
-        );
+        let adapter_version = &endpoint.manifest().adapter_version;
+        let invocation_id =
+            transform_invocation_id(capability, input_version, output_schema, adapter_version);
         // Vollständige Identität zusätzlich zum kurzen Routing-Schlüssel. Ein
         // Schlüsselkonflikt darf niemals ein fremdes Cache-Ergebnis liefern.
         let fingerprint = serde_json::to_string(&(
@@ -149,7 +199,7 @@ impl<'a> TransformService<'a> {
                 {
                     return Err(TransformError::CachedResultNotPermitted);
                 }
-                return Ok(result);
+                return Ok(TransformPreparation::Complete(Box::new(result)));
             }
             service.dispatch(&service.recover(&state)?)?
         };
@@ -162,9 +212,41 @@ impl<'a> TransformService<'a> {
             output_schema_id: output_schema.clone(),
             max_output_bytes: grant.max_payload_bytes,
         };
+        Ok(TransformPreparation::Dispatch(Box::new(
+            PreparedTransform {
+                invocation,
+                state: dispatched,
+                input,
+                output_definition: definition,
+                trust: result_trust,
+                actor_type,
+                grant: grant.clone(),
+                adapter_version: adapter_version.clone(),
+            },
+        )))
+    }
+
+    /// Validate the response and atomically persist the result and invocation state.
+    pub fn finish(
+        &mut self,
+        prepared: PreparedTransform,
+        response: Result<TransformResponse, AdapterCallError>,
+    ) -> Result<Artifact, TransformError> {
+        let PreparedTransform {
+            invocation,
+            state,
+            input,
+            output_definition,
+            trust,
+            actor_type,
+            grant,
+            adapter_version,
+        } = prepared;
+        let capability = &invocation.capability;
+        let invocation_id = &invocation.invocation_id;
         let outcome = (|| {
-            let response = endpoint.transform(&invocation)?;
-            if response.invocation_id != invocation_id {
+            let response = response?;
+            if response.invocation_id != *invocation_id {
                 return Err(TransformError::InvocationResponseMismatch);
             }
             if response.external_reference.trim().is_empty()
@@ -177,11 +259,11 @@ impl<'a> TransformService<'a> {
                 return Err(TransformError::OutputTooLarge);
             }
             self.schemas
-                .validate(output_schema, &response.payload)
+                .validate(&invocation.output_schema_id, &response.payload)
                 .map_err(TransformError::InvalidOutput)?;
             let artifact =
                 ArtifactFactory::new(self.clock, self.ids).create(ArtifactFactoryInput {
-                    schema: definition,
+                    schema: output_definition,
                     created_by: Actor {
                         actor_type,
                         id: capability.adapter_id.0.clone(),
@@ -194,7 +276,7 @@ impl<'a> TransformService<'a> {
                         },
                         reference: response.external_reference,
                     },
-                    trust: result_trust,
+                    trust,
                     stream_key: format!("transform:{invocation_id}"),
                     subject: input
                         .subject
@@ -217,14 +299,12 @@ impl<'a> TransformService<'a> {
                         models_used: vec![],
                         transform: Some(format!(
                             "{}/{}@{}",
-                            capability.adapter_id.0,
-                            capability.capability_id.0,
-                            endpoint.manifest().adapter_version
+                            capability.adapter_id.0, capability.capability_id.0, adapter_version
                         )),
                     }),
                 })?;
             InvocationService::new(self.store, self.schemas, self.clock).succeed_with_event(
-                &dispatched,
+                &state,
                 &artifact,
                 &[(input.version_id.clone(), relation_kinds::derived_from())],
             )?;
@@ -238,7 +318,7 @@ impl<'a> TransformService<'a> {
                 )
             );
             InvocationService::new(self.store, self.schemas, self.clock).fail(
-                &dispatched,
+                &state,
                 format!("{error:?}"),
                 retryable,
             )?;

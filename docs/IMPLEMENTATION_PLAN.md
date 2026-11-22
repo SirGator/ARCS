@@ -656,6 +656,11 @@
 > projizieren. Transform verwendet die Projektionsversion und ihr Schema.
 > Die Projektion bleibt über Provenienz mit der Quelle verbunden.
 >
+> Siebzigster Schritt gemäß v3 §5.2 MGR-04/MGR-07 und §7.2 PAR-04/PAR-11.
+> Der Host kann Transform parallel über begrenzte Worker ausführen.
+> Adapter-Sitzungen und benannte Kapazitäten werden mit den anderen
+> Aufrufen geteilt. Der Core prüft und speichert jedes Ergebnis.
+>
 **Leitbild:** ARCS ist ein universeller Agent. Es soll sich einfach bedienen lassen, beliebige kompatible Systeme verbinden, eigenständig Probleme lösen und langfristige Aufgaben über Monate verfolgen.
 
 ## 1. Verbindliche Architekturregeln

@@ -137,6 +137,21 @@ behält deren Trust-Obergrenze. Eine Wiederaufnahme verwendet dieselbe
 Projektionsversion. In der Zustellung bezeichnet `input_version_id` die
 ursprüngliche Observation und `projection_version_id` ihre Projektion.
 
+## Transform im Host abfragen
+
+Für eigene Host-Anwendungen bietet `Host::poll_transform` einen
+nichtblockierenden Aufruf mit Capability, Eingabeversion, Zielschema und
+Worker-Limit von 1 bis 32. `Ok(None)` bedeutet, dass der Aufruf wartet oder
+läuft. Wiederholtes Polling derselben Anfrage liefert das geprüfte Artefakt
+als `Ok(Some(artifact))`. Bereits gespeicherte Ergebnisse brauchen keinen
+Worker.
+
+Ein laufender Worker belegt seine Adapter-Sitzung und gegebenenfalls
+benannte Kapazitäten aus `reasoning_resources`. Der Host schreibt die
+Ergebnisse in den Core-Store. Eine Anwendung pollt bis zum Ergebnis oder
+Fehler. Beim Shutdown beendet der Host ausstehende Worker. Der
+Pipeline-Runner nutzt weiterhin den synchronen Transform-Aufruf.
+
 ## Dauerhafter Fortschritt
 
 Der Runner speichert Definition und Checkpoints über den bestehenden

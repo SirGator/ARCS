@@ -15,6 +15,11 @@ impl Host {
                     .iter()
                     .map(|j| j.report.capability.adapter_id.clone()),
             )
+            .chain(
+                self.transform_jobs
+                    .values()
+                    .map(|job| job.adapter_id().clone()),
+            )
             .chain(self.reconnect_jobs.keys().cloned())
             .chain(self.controller_worker_adapters())
             .chain(self.act_workers.keys().cloned())

@@ -10,7 +10,9 @@ mod service;
 pub use error::TransformError;
 pub use projection::{PROJECTION_PUBLISHER, TransformInputProjection};
 pub use routing::{TransformHop, TransformRouting};
-pub use service::TransformService;
+pub use service::{
+    PreparedTransform, TransformPreparation, TransformService, transform_invocation_id,
+};
 
 /// Ein Transform verarbeitet Daten ohne externe Effekte. Identische Aufrufe
 /// müssen dasselbe Ergebnis liefern, auch nach verlorenen Antworten.

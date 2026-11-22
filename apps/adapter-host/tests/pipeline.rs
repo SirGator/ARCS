@@ -777,6 +777,205 @@ fn routed_transform_only_receives_projected_data_and_reuses_its_version() {
 }
 
 #[test]
+fn transform_workers_share_capacity_and_recover_a_lost_response() {
+    let mut fixture = Fixture::new("arcs.measurement.temperature.v1", "Cel");
+    fixture.sensor["samples"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"id":"sample-3","raw":{"raw":270}}));
+    fixture.save_sensor();
+    let mut config: Value =
+        serde_json::from_slice(&std::fs::read(fixture.directory.join("host.json")).unwrap())
+            .unwrap();
+    config["resource_pools"] = json!({"slot":1});
+    config["adapters"][1] = json!({
+        "program":"/usr/bin/python3","args":[{"path":"gated-transform.py"}],
+        "grant_file":"formatter-grant.json","reasoning_resources":{"slot":1},"timeout_ms":15000
+    });
+    let mut grant: Value =
+        serde_json::from_str(include_str!("../config/grants/report.json")).unwrap();
+    grant["enabled_capabilities"] = json!(["json.report"]);
+    fixture.write("formatter-grant.json", &grant);
+    std::fs::write(
+        fixture.directory.join("gated-transform.py"),
+        r#"import json, pathlib, sys, time
+root = pathlib.Path(__file__).parent
+for line in sys.stdin:
+    packet = json.loads(line)
+    msg = packet['message']
+    kind = msg['type']
+    if kind == 'hello':
+        reply = {'type':'manifest','manifest':{'protocol_version':1,'adapter_id':'example.report','adapter_version':'1','capabilities':[{'id':'json.report','contract':{'kind':'transform','accepts':['arcs.measurement.temperature.v1'],'emits':['arcs.report.v1']},'required_permissions':['data.transform']}]}}
+    elif kind == 'transform':
+        inv = msg['invocation']
+        with (root / 'started').open('a') as started:
+            started.write(inv['invocation_id'] + '\n')
+        while not (root / 'release').exists():
+            time.sleep(.003)
+        reply = {'type':'transform_result','response':{'invocation_id':inv['invocation_id'],'external_reference':'transformed','payload':{'title':'Observation','body':json.dumps(inv['input_payload'])}}}
+    elif kind == 'shutdown':
+        reply = {'type':'bye'}
+    else:
+        raise RuntimeError(kind)
+    print(json.dumps({'protocol_version':1,'request_id':packet['request_id'],'message':reply}),flush=True)
+    if kind == 'shutdown':
+        break
+"#,
+    )
+    .unwrap();
+    for (id, claim) in [
+        ("example.shared", json!({"slot":1})),
+        ("example.free", json!({})),
+    ] {
+        grant["adapter_id"] = json!(id);
+        fixture.write(&format!("{id}-grant.json"), &grant);
+        fixture.write(
+            &format!("{id}.json"),
+            &json!({
+                "adapter_id":id,"accepts":["arcs.measurement.temperature.v1"]
+            }),
+        );
+        config["adapters"].as_array_mut().unwrap().push(json!({
+            "program":support::adapter_binary("arcs-json-report"),
+            "profile":format!("{id}.json"),"grant_file":format!("{id}-grant.json"),
+            "reasoning_resources":claim
+        }));
+    }
+    fixture.write("host.json", &config);
+    let mut host = fixture.open();
+    host.poll_round().unwrap();
+    let inputs = ObservationLog::new(host.store()).after(None).unwrap();
+    let first = inputs[0].artifact().version_id.clone();
+    let second = inputs[1].artifact().version_id.clone();
+    let third = inputs[2].artifact().version_id.clone();
+    let gated = CapabilityRef::new("example.report", "json.report");
+    let shared = CapabilityRef::new("example.shared", "json.report");
+    let free = CapabilityRef::new("example.free", "json.report");
+    let output = SchemaId("arcs.report.v1".into());
+    let started = || {
+        std::fs::read_to_string(fixture.directory.join("started"))
+            .unwrap_or_default()
+            .lines()
+            .map(str::to_owned)
+            .collect::<Vec<_>>()
+    };
+    let until_started = |count| {
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while started().len() < count {
+            assert!(std::time::Instant::now() < end);
+            std::thread::sleep(std::time::Duration::from_millis(3));
+        }
+    };
+    let collect = |host: &mut Host, capability: &CapabilityRef, input: &arcs::core::VersionId| {
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            if let Some(result) = host.poll_transform(capability, input, &output, 2).unwrap() {
+                break result;
+            }
+            assert!(std::time::Instant::now() < end);
+            std::thread::sleep(std::time::Duration::from_millis(3));
+        }
+    };
+    assert!(host.poll_transform(&gated, &first, &output, 0).is_err());
+    assert!(
+        host.poll_transform(&gated, &first, &output, 2)
+            .unwrap()
+            .is_none()
+    );
+    until_started(1);
+    assert!(
+        host.poll_transform(&gated, &first, &output, 2)
+            .unwrap()
+            .is_none()
+    );
+    assert!(matches!(
+        host.transform(&gated, &second, &output),
+        Err(arcs_host::HostError::AdapterBusy(_))
+    ));
+    assert!(
+        host.poll_transform(&shared, &first, &output, 2)
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        host.poll_transform(&free, &first, &output, 1)
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(host.transform_workers().len(), 1);
+    assert_eq!(host.report().unwrap().resource_pools[0].used, 1);
+    assert_eq!(
+        collect(&mut host, &free, &first).created_by.id,
+        "example.free"
+    );
+    assert_eq!(started().len(), 1);
+    assert_eq!(host.transform_workers().len(), 1);
+
+    std::fs::write(fixture.directory.join("release"), "").unwrap();
+    let completed = collect(&mut host, &gated, &first);
+    assert_eq!(host.report().unwrap().resource_pools[0].used, 0);
+    assert_eq!(
+        collect(&mut host, &shared, &first).created_by.id,
+        "example.shared"
+    );
+    std::fs::remove_file(fixture.directory.join("release")).unwrap();
+
+    assert!(
+        host.poll_transform(&gated, &second, &output, 2)
+            .unwrap()
+            .is_none()
+    );
+    until_started(2);
+    let interrupted = host.transform_workers().remove(0).invocation_id;
+    assert_eq!(
+        host.poll_transform(&gated, &first, &output, 1).unwrap(),
+        Some(completed)
+    );
+    host.shutdown().unwrap();
+    drop(host);
+
+    std::fs::write(fixture.directory.join("release"), "").unwrap();
+    let mut host = fixture.open();
+    let resumed = collect(&mut host, &gated, &second);
+    assert_eq!(resumed.stream_key, format!("transform:{interrupted}"));
+    let calls = started();
+    assert_eq!(calls.len(), 3);
+    assert_eq!(calls[1], calls[2]);
+    assert_eq!(collect(&mut host, &gated, &second), resumed);
+    assert_eq!(started().len(), 3);
+    assert!(host.transform_workers().is_empty());
+    host.shutdown().unwrap();
+
+    drop(host);
+
+    // A real timeout retires the worker and releases the shared pool.
+    std::fs::remove_file(fixture.directory.join("release")).unwrap();
+    config["adapters"][1]["timeout_ms"] = json!(1000);
+    fixture.write("host.json", &config);
+    let mut host = fixture.open();
+    let end = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        match host.poll_transform(&gated, &third, &output, 2) {
+            Ok(None) => {
+                assert!(std::time::Instant::now() < end);
+                std::thread::sleep(std::time::Duration::from_millis(3));
+            }
+            Err(arcs_host::HostError::Transform {
+                source:
+                    arcs::transform::TransformError::AdapterCall(
+                        arcs::adapters::AdapterCallError::Timeout,
+                    ),
+                ..
+            }) => break,
+            result => panic!("unexpected timeout result: {result:?}"),
+        }
+    }
+    assert!(host.transform_workers().is_empty());
+    assert_eq!(host.report().unwrap().resource_pools[0].used, 0);
+    host.shutdown().unwrap();
+}
+
+#[test]
 fn compatible_input_is_delivered_with_approval_and_no_transform() {
     let schema = "arcs.report.v1";
     let mut fixture = Fixture::new(schema, "Cel");
