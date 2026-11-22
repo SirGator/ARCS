@@ -17,6 +17,7 @@ use crate::store::{ArtifactRelations, SqliteArtifactStore, relation_kinds};
 use serde_json::json;
 
 const INPUT: &str = "arcs.raw.transform_test.v1";
+const MID: &str = "arcs.mid.transform_test.v1";
 const OUTPUT: &str = "arcs.normalized.transform_test.v1";
 
 struct Endpoint {
@@ -143,6 +144,66 @@ impl Fixture {
 fn capability() -> CapabilityRef {
     CapabilityRef::new("transform.test", "double")
 }
+
+fn register_route_capability(
+    fixture: &Fixture,
+    registry: &mut AdapterRegistry,
+    adapter_id: &str,
+    capability_id: &str,
+    accepts: &[&str],
+    emits: &[&str],
+) {
+    let manifest = AdapterManifest {
+        protocol_version: 1,
+        adapter_id: AdapterId(adapter_id.into()),
+        adapter_version: "1.0.0".into(),
+        capabilities: vec![CapabilityDescriptor {
+            description: None,
+            id: CapabilityId(capability_id.into()),
+            contract: CapabilityContract::Transform {
+                accepts: accepts.iter().map(|id| SchemaId((*id).into())).collect(),
+                emits: emits.iter().map(|id| SchemaId((*id).into())).collect(),
+            },
+            required_permissions: vec![],
+        }],
+    };
+    let grant = AdapterGrant {
+        adapter_id: manifest.adapter_id.clone(),
+        producer_class: ProducerClass::Adapter,
+        enabled_capabilities: vec![CapabilityId(capability_id.into())],
+        granted_permissions: vec![],
+        assigned_trust: TrustLevel::High,
+        ingress_source_kind: None,
+        max_payload_bytes: 4096,
+        max_external_reference_bytes: 256,
+        input_data_limits: None,
+        reasoning_limits_v2: None,
+        reasoning_limits: None,
+        data_limits: None,
+    };
+    registry
+        .register(manifest, grant, &fixture.schemas, &fixture.store)
+        .unwrap();
+}
+
+fn routing_fixture() -> Fixture {
+    let mut fixture = Fixture::new();
+    fixture
+        .schemas
+        .register_json(
+            &json!({
+                "$id": MID,
+                "type":"object",
+                "required":["value"],
+                "properties":{"value":{"type":"number"}},
+                "additionalProperties":false
+            })
+            .to_string(),
+        )
+        .unwrap();
+    fixture
+}
+
 fn input(version: &str, level: TrustLevel) -> Artifact {
     Artifact::new(
         format!("artifact-{version}"),
@@ -395,4 +456,120 @@ fn invocation_identity_conflict_does_not_return_another_cached_result() {
         Err(TransformError::Invocation(_))
     ));
     assert!(fixture.endpoint.calls.lock().unwrap().is_empty());
+}
+
+#[test]
+fn routing_is_deterministic_for_equal_successors_even_when_allowlist_is_reversed() {
+    let fixture = routing_fixture();
+    let mut registry = AdapterRegistry::new();
+    register_route_capability(&fixture, &mut registry, "z.route", "step", &[INPUT], &[MID]);
+    register_route_capability(&fixture, &mut registry, "a.route", "step", &[INPUT], &[MID]);
+    register_route_capability(
+        &fixture,
+        &mut registry,
+        "finish.route",
+        "step",
+        &[MID],
+        &[OUTPUT],
+    );
+    let first = TransformRouting {
+        output_schema_id: SchemaId(OUTPUT.into()),
+        allowed_capabilities: vec![
+            CapabilityRef::new("z.route", "step"),
+            CapabilityRef::new("finish.route", "step"),
+            CapabilityRef::new("a.route", "step"),
+        ],
+        max_steps: 2,
+    }
+    .resolve(&registry, &fixture.schemas, &SchemaId(INPUT.into()))
+    .unwrap()
+    .unwrap();
+    let second = TransformRouting {
+        output_schema_id: SchemaId(OUTPUT.into()),
+        allowed_capabilities: vec![
+            CapabilityRef::new("a.route", "step"),
+            CapabilityRef::new("finish.route", "step"),
+            CapabilityRef::new("z.route", "step"),
+        ],
+        max_steps: 2,
+    }
+    .resolve(&registry, &fixture.schemas, &SchemaId(INPUT.into()))
+    .unwrap()
+    .unwrap();
+    assert_eq!(first, second);
+    assert_eq!(first[0].capability, CapabilityRef::new("a.route", "step"));
+}
+
+#[test]
+fn routing_prefers_shortest_path_and_enforces_zero_hop_limits_and_grants() {
+    let fixture = routing_fixture();
+    let mut registry = AdapterRegistry::new();
+    register_route_capability(
+        &fixture,
+        &mut registry,
+        "long.route",
+        "step",
+        &[INPUT],
+        &[MID],
+    );
+    register_route_capability(
+        &fixture,
+        &mut registry,
+        "finish.route",
+        "step",
+        &[MID],
+        &[OUTPUT],
+    );
+    register_route_capability(
+        &fixture,
+        &mut registry,
+        "direct.route",
+        "step",
+        &[INPUT],
+        &[OUTPUT],
+    );
+    let shortest = TransformRouting {
+        output_schema_id: SchemaId(OUTPUT.into()),
+        allowed_capabilities: vec![
+            CapabilityRef::new("long.route", "step"),
+            CapabilityRef::new("finish.route", "step"),
+            CapabilityRef::new("direct.route", "step"),
+        ],
+        max_steps: 2,
+    }
+    .resolve(&registry, &fixture.schemas, &SchemaId(INPUT.into()))
+    .unwrap()
+    .unwrap();
+    assert_eq!(shortest.len(), 1);
+    assert_eq!(
+        shortest[0].capability,
+        CapabilityRef::new("direct.route", "step")
+    );
+
+    let zero_hop = TransformRouting {
+        output_schema_id: SchemaId(INPUT.into()),
+        allowed_capabilities: vec![],
+        max_steps: 1,
+    }
+    .resolve(&registry, &fixture.schemas, &SchemaId(INPUT.into()))
+    .unwrap();
+    assert_eq!(zero_hop, Some(vec![]));
+    assert!(matches!(
+        TransformRouting {
+            output_schema_id: SchemaId(OUTPUT.into()),
+            allowed_capabilities: vec![],
+            max_steps: 0,
+        }
+        .resolve(&registry, &fixture.schemas, &SchemaId(INPUT.into())),
+        Err(TransformError::InvalidRoutingPolicy(_))
+    ));
+    assert!(matches!(
+        TransformRouting {
+            output_schema_id: SchemaId(OUTPUT.into()),
+            allowed_capabilities: vec![CapabilityRef::new("transform.test", "missing")],
+            max_steps: 1,
+        }
+        .resolve(&registry, &fixture.schemas, &SchemaId(INPUT.into())),
+        Err(TransformError::Authorization(_))
+    ));
 }

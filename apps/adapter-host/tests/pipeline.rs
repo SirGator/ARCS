@@ -94,6 +94,43 @@ impl Fixture {
             .collect()
     }
 
+    fn observation_peer(&self, host: &mut Value, schema: &str, payload: Value) {
+        host["adapters"][0] = json!({
+            "program":"/usr/bin/python3",
+            "args":[{"path":"routing-observer.py"},{"path":"routing-observer.json"}],
+            "grant_file":"sensor-grant.json"
+        });
+        self.write(
+            "routing-observer.json",
+            &json!({"schema":schema,"payload":payload}),
+        );
+        std::fs::write(
+        self.directory.join("routing-observer.py"),
+        r#"import json, sys
+profile = json.load(open(sys.argv[1]))
+sent = False
+for line in sys.stdin:
+    packet = json.loads(line)
+    kind = packet['message']['type']
+    if kind == 'hello':
+        reply = {'type':'manifest','manifest':{'protocol_version':1,'adapter_id':'demo.sensor','adapter_version':'1','capabilities':[{'id':'temperature.observe','contract':{'kind':'observe','emits':[profile['schema']]},'required_permissions':['sensor.read']}]}}
+    elif kind == 'poll':
+        reply = {'type':'idle'} if sent else {'type':'observation','message_id':'reading-1','observation':{'capability_id':'temperature.observe','external_subject':'source-1','external_reference':'reading-1','payload':profile['payload']}}
+        sent = True
+    elif kind == 'ack':
+        reply = {'type':'acknowledged','message_id':packet['message']['message_id']}
+    elif kind == 'shutdown':
+        reply = {'type':'bye'}
+    else:
+        raise RuntimeError(kind)
+    print(json.dumps({'protocol_version':1,'request_id':packet['request_id'],'message':reply}),flush=True)
+    if kind == 'shutdown':
+        break
+"#,
+    )
+    .unwrap();
+    }
+
     fn two_steps(&mut self, maximum: usize) {
         let mut host: Value =
             serde_json::from_slice(&std::fs::read(self.directory.join("host.json")).unwrap())
@@ -527,6 +564,139 @@ fn second_step_failure_persists_the_first_result_and_resumes_after_limit_fix() {
     assert_eq!(resumed.deliveries[0].steps.len(), 2);
     assert!(checkpoint(&host)["error"].is_null());
     assert!(checkpoint(&host)["active"].is_null());
+    assert_eq!(fixture.files().len(), 1);
+    host.shutdown().unwrap();
+}
+
+#[test]
+fn discovered_two_hop_route_replays_the_same_result_after_restart() {
+    let raw = "arcs.number.raw.v1";
+    let normalized = "arcs.number.normalized.v1";
+    let mut fixture = Fixture::new(raw, "Cel");
+    let mut config: Value =
+        serde_json::from_slice(&std::fs::read(fixture.directory.join("host.json")).unwrap())
+            .unwrap();
+    config["schemas"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(
+            "../../adapters/normalize-number/schemas/raw-number.schema.json"
+        )));
+    fixture.observation_peer(
+        &mut config,
+        raw,
+        json!({"value":250,"scale":0.1,"offset":0,"unit":"Cel"}),
+    );
+    config["adapters"].as_array_mut().unwrap().push(json!({
+        "program":support::adapter_binary("arcs-normalize-number"),
+        "grant_file":"normalize-grant.json"
+    }));
+    fixture.write("host.json", &config);
+    fixture.write(
+        "normalize-grant.json",
+        &serde_json::from_str(include_str!("../config/grants/normalize.json")).unwrap(),
+    );
+    fixture.write(
+        "formatter.json",
+        &json!({"adapter_id":"example.report","accepts":[normalized]}),
+    );
+    let grant: Value = serde_json::from_str(include_str!("../config/grants/report.json")).unwrap();
+    let mut limited_grant = grant.clone();
+    limited_grant["max_payload_bytes"] = json!(1);
+    fixture.write("formatter-grant.json", &limited_grant);
+    fixture.pipeline["transform_routing"] = json!({
+        "output_schema_id":"arcs.report.v1",
+        "allowed_capabilities":[
+            {"adapter_id":"example.report","capability_id":"json.report"},
+            {"adapter_id":"example.normalize","capability_id":"number.normalize"}
+        ],
+        "max_steps":1
+    });
+    let mut host = fixture.open();
+    let error = pipeline::run(&mut host, &fixture.config()).unwrap_err();
+    assert!(error.to_string().contains("mutually exclusive"));
+    fixture.pipeline.as_object_mut().unwrap().remove("steps");
+    let error = pipeline::run(&mut host, &fixture.config()).unwrap_err();
+    assert!(error.to_string().contains("no authorized transform path"));
+    assert_eq!(host.report().unwrap().stored_artifacts, 0);
+
+    fixture.pipeline["transform_routing"]["max_steps"] = json!(2);
+    let error = pipeline::run(&mut host, &fixture.config()).unwrap_err();
+    let failed = checkpoint(&host);
+    assert!(
+        failed["error"]
+            .as_str()
+            .unwrap()
+            .starts_with("transform:transform-2:"),
+        "{error:?}, {failed}",
+    );
+    let first = failed["active"]["step_versions"][0].clone();
+    assert!(fixture.files().is_empty());
+    host.shutdown().unwrap();
+    drop(host);
+
+    fixture.write("formatter-grant.json", &grant);
+    let mut host = fixture.open();
+    let report = pipeline::run(&mut host, &fixture.config()).unwrap();
+    assert_eq!(report.deliveries.len(), 1);
+    let delivery = &report.deliveries[0];
+    assert_eq!(delivery.steps.len(), 2);
+    assert_eq!(delivery.steps[0].schema_id.0, normalized);
+    assert_eq!(json!(delivery.steps[0].version_id), first);
+    assert_eq!(delivery.steps[1].schema_id.0, "arcs.report.v1");
+    assert_eq!(
+        delivery.steps[1].input_version_id,
+        delivery.steps[0].version_id
+    );
+    assert_eq!(delivery.transformed_trust.level, TrustLevel::Low);
+    assert_eq!(fixture.files().len(), 1);
+    assert!(
+        pipeline::run(&mut host, &fixture.config())
+            .unwrap()
+            .deliveries
+            .is_empty()
+    );
+    assert_eq!(fixture.files().len(), 1);
+
+    fixture.pipeline["transform_routing"]["max_steps"] = json!(3);
+    assert!(pipeline::run(&mut host, &fixture.config()).is_err());
+    assert_eq!(fixture.files().len(), 1);
+    host.shutdown().unwrap();
+}
+
+#[test]
+fn compatible_input_is_delivered_with_approval_and_no_transform() {
+    let schema = "arcs.report.v1";
+    let mut fixture = Fixture::new(schema, "Cel");
+    let mut config: Value =
+        serde_json::from_slice(&std::fs::read(fixture.directory.join("host.json")).unwrap())
+            .unwrap();
+    fixture.observation_peer(
+        &mut config,
+        schema,
+        json!({"title":"Status","body":"Observed"}),
+    );
+    fixture.write("host.json", &config);
+    fixture.pipeline.as_object_mut().unwrap().remove("steps");
+    fixture.pipeline["transform_routing"] = json!({
+        "output_schema_id":schema, "allowed_capabilities":[], "max_steps":1
+    });
+    let mut host = fixture.open();
+    let report = pipeline::run(&mut host, &fixture.config()).unwrap();
+    let [delivery] = report.deliveries.as_slice() else {
+        panic!("expected the original observation to be delivered once");
+    };
+    assert!(delivery.steps.is_empty());
+    assert_eq!(delivery.input_version_id, delivery.transformed_version_id);
+    let approval = host
+        .store()
+        .get(&delivery.approval_version_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        approval.payload["target_version"],
+        delivery.request_version_id.0
+    );
     assert_eq!(fixture.files().len(), 1);
     host.shutdown().unwrap();
 }

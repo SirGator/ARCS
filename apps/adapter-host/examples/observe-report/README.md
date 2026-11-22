@@ -2,8 +2,8 @@
 
 Der allgemeine Host bietet mit `arcs_host::pipeline::run_pipeline` eine
 wiederverwendbare Ausführung linearer Pipelines. Die Anwendung liefert
-Konfiguration und Freigabepolicy; der Runner enthält keine Geräte- oder
-Berichtsregeln. Der Core bleibt unverändert.
+Konfiguration und Freigabepolicy. Der Runner nutzt die vorhandenen
+Transform- und Output-Dienste.
 
 Das mitgelieferte Beispiel verwendet drei getrennte Prozesse und zwei
 Transform-Schritte im selben JSON-Berichtsadapter:
@@ -73,6 +73,37 @@ Quelle, Schema-IDs aller Übergänge, Transform-Rollen und eine idempotente
 Output-Capability mit Executor-Grant. Es gibt keine automatische Schema-
 konvertierung oder Auswahl fachlich passender Geräte. Aktuelle Grants und
 Größenlimits werden zusätzlich bei jedem Core-Aufruf geprüft.
+
+### Optionales Transform-Routing
+
+Statt `steps` kann die Pipeline den optionalen Modus `transform_routing`
+verwenden. Das Konfigurationsobjekt benennt das Zielschema, eine explizite
+Liste von 0 bis 64 Adapter-/Capability-Refs und ein Limit von 1 bis 32
+Schritten.
+
+```json
+"transform_routing": {
+  "output_schema_id": "arcs.report.v1",
+  "allowed_capabilities": [
+    {"adapter_id":"example.report","capability_id":"json.report"}
+  ],
+  "max_steps": 1
+}
+```
+
+Für das bestehende Demo ersetzt dieses Objekt die manuellen `steps` und
+findet den kürzesten passenden Transformationspfad von
+`arcs.measurement.temperature.v1` nach `arcs.report.v1` über
+`example.report/json.report`. Berücksichtigt werden nur registrierte
+`accepts`-/`emits`-Verträge und erteilte Grants. Bei gleicher Pfadlänge ist
+die Auswahl deterministisch nach Adapter-ID, Capability-ID und Schema
+sortiert. Identische Eingabe- und Ausgabeschemas ergeben einen Pfad mit null
+Transform-Schritten. Änderungen innerhalb desselben Schemas wie
+`report.compact` lassen sich explizit unter `steps` konfigurieren. Die ausgewählte Pfad- und Vertragsidentität wird im bestehenden
+Pipeline-Journal gespeichert. Änderungen an der gespeicherten Topologie
+erfordern eine neue Pipeline-ID.
+
+Die Ausgabe verwendet die vorhandene Verification und Freigabe-Policy.
 
 Eine Pipeline-ID bindet dauerhaft Quelle, Schritte und deren Reihenfolge,
 Ziel, Schema-IDs und die vollständigen Manifeste der beteiligten Adapter.

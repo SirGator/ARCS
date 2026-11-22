@@ -646,6 +646,11 @@
 > vorgeben. Der Planer sieht die Exportverträge und der Host prüft
 > sie vor Aufnahme des Plans sowie beim Laden einer gespeicherten Revision.
 >
+> Achtundsechzigster Schritt gemäß v3 §5.2 MGR-07 und §9.2, CAP-03.
+> Die bestehende Pipeline findet passende Transform-Pfade zwischen
+> registrierten Schemas. Sie begrenzt die Suche auf Betreiber-Grants
+> und bindet die ausgewählten Schritte an ihre gespeicherte Definition.
+>
 **Leitbild:** ARCS ist ein universeller Agent. Es soll sich einfach bedienen lassen, beliebige kompatible Systeme verbinden, eigenständig Probleme lösen und langfristige Aufgaben über Monate verfolgen.
 
 ## 1. Verbindliche Architekturregeln
@@ -882,5 +887,6 @@ Die erste Entwicklungsrunde sollte diese Reihenfolge haben:
 - Keine ungeprüfte Ausführung von Modellvorschlägen.
 - Jede neue Architekturabstraktion braucht einen nachvollziehbaren praktischen Nutzen.
 - Jede neue Funktion muss mindestens einen positiven, einen negativen und einen Wiederaufnahmetest bestehen.
+- Für delegierte Doku und Routinecode gelten die [Metaprompts](METAPROMPTS.md) mit einem Nachweis im jeweiligen Zwischenbericht.
 
 **Langfristige Definition des Erfolgs:** ARCS versteht eine Aufgabe, findet oder entwickelt passende Fähigkeiten, plant, handelt, überprüft, erinnert sich an Ergebnisse und verfolgt seine Ziele über längere Zeiträume – mit möglichst wenig notwendiger Benutzerkonfiguration.

@@ -12,6 +12,7 @@ pub enum TransformError {
     Invocation(InvocationError),
     AdapterCall(AdapterCallError),
     EndpointMismatch,
+    InvalidRoutingPolicy(&'static str),
     CapabilityIsNotTransform(CapabilityRef),
     ModelMustUseReasoning,
     MissingInput(VersionId),

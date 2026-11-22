@@ -24,6 +24,13 @@ impl Verifier for ExportPolicy<'_> {
         &self,
         artifact: &Artifact,
     ) -> std::result::Result<VerificationResult, VerificationError> {
+        let expected_result = match self.output.resolved_steps.last() {
+            Some(step) => {
+                self.output.transformed.created_by.id == step.capability.adapter_id.0
+                    && self.output.transformed.schema_id == step.output_schema_id
+            }
+            None => self.output.transformed.version_id == self.output.input.version_id,
+        };
         let passed = serde_json::from_value::<OutputRequest>(artifact.payload.clone()).is_ok_and(
             |request| {
                 artifact.schema_id.0 == "arcs.output_request.v1"
@@ -31,18 +38,7 @@ impl Verifier for ExportPolicy<'_> {
                     && request.artifact_schema_id == self.output.transformed.schema_id
                     && request.capability == self.output.config.output
                     && request.result_schema_id == self.output.config.receipt_schema_id
-                    && self.output.transformed.created_by.id
-                        == self
-                            .output
-                            .config
-                            .steps
-                            .last()
-                            .unwrap()
-                            .capability
-                            .adapter_id
-                            .0
-                    && self.output.transformed.schema_id
-                        == self.output.config.steps.last().unwrap().output_schema_id
+                    && expected_result
             },
         );
         let verdict = if passed {

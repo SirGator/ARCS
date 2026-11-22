@@ -10,7 +10,7 @@ use arcs::input::{InputMessage, InputService};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use super::{PipelineConfig, Result, invalid};
+use super::{Result, invalid};
 use crate::config::PIPELINE_ID;
 use crate::{Host, HostError};
 
@@ -69,7 +69,12 @@ pub(super) struct Journal {
 }
 
 impl Journal {
-    pub fn open(host: &Host, config: &PipelineConfig, identity: Value) -> Result<Self> {
+    pub fn open(
+        host: &Host,
+        pipeline_id: &str,
+        step_count: usize,
+        identity: Value,
+    ) -> Result<Self> {
         let mut registry = AdapterRegistry::new();
         registry
             .register(
@@ -108,12 +113,26 @@ impl Journal {
             .store()
             .durable_id_generator("pipeline-journal")
             .map_err(HostError::Store)?;
-        let definition = InputService::new(&registry,host.schemas(),host.store(),&mut ids,&SystemClock)
-            .ingest(&AdapterId(PIPELINE_ID.into()), InputMessage {
-                capability_id:CapabilityId(CAPABILITY.into()), external_subject:Some(config.pipeline_id.clone()),
-                external_reference:format!("pipeline:{}:definition", config.pipeline_id),
-                payload:json!({"kind":"definition","pipeline_id":config.pipeline_id,"data":identity}),
-            }).map_err(|source| HostError::Input {request:config.pipeline_id.clone(),source})?;
+        let definition = InputService::new(
+            &registry,
+            host.schemas(),
+            host.store(),
+            &mut ids,
+            &SystemClock,
+        )
+        .ingest(
+            &AdapterId(PIPELINE_ID.into()),
+            InputMessage {
+                capability_id: CapabilityId(CAPABILITY.into()),
+                external_subject: Some(pipeline_id.to_owned()),
+                external_reference: format!("pipeline:{}:definition", pipeline_id),
+                payload: json!({"kind":"definition","pipeline_id":pipeline_id,"data":identity}),
+            },
+        )
+        .map_err(|source| HostError::Input {
+            request: pipeline_id.to_owned(),
+            source,
+        })?;
         validate_record(host, &definition)?;
         let history = host
             .store()
@@ -130,7 +149,7 @@ impl Journal {
             if artifact.payload["kind"] == "definition" {
                 continue;
             }
-            if artifact.payload["pipeline_id"] != config.pipeline_id {
+            if artifact.payload["pipeline_id"] != pipeline_id {
                 return Err(invalid("checkpoint belongs to another pipeline"));
             }
             let checkpoint: Checkpoint =
@@ -150,9 +169,9 @@ impl Journal {
         }
         if let Some(active) = &state.active
             && (active.cursor <= state.cursor
-                || active.step_versions.len() > config.steps.len()
+                || active.step_versions.len() > step_count
                 || (active.request_version_id.is_some()
-                    && active.step_versions.len() != config.steps.len())
+                    && active.step_versions.len() != step_count)
                 || (active.approval_version_id.is_some() && active.request_version_id.is_none())
                 || (active.receipt_version_id.is_some() && active.approval_version_id.is_none()))
         {
@@ -161,7 +180,7 @@ impl Journal {
         Ok(Self {
             registry,
             ids,
-            pipeline_id: config.pipeline_id.clone(),
+            pipeline_id: pipeline_id.to_owned(),
             revision,
             saved: state.clone(),
             definition,

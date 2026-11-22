@@ -4,8 +4,10 @@ use crate::adapters::{AdapterCallError, AdapterManifest};
 pub use arcs_adapter_protocol::{TransformInvocation, TransformResponse};
 
 mod error;
+mod routing;
 mod service;
 pub use error::TransformError;
+pub use routing::{TransformHop, TransformRouting};
 pub use service::TransformService;
 
 /// Ein Transform verarbeitet Daten ohne externe Effekte. Identische Aufrufe

@@ -7,6 +7,7 @@ use std::fmt;
 
 use arcs::adapters::{AdapterManifest, CapabilityContract, CapabilityRef, ProducerClass};
 use arcs::core::{Artifact, SchemaId, Trust, VersionId};
+use arcs::transform::TransformRouting;
 use arcs::world::observation::ObservationLog;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -52,7 +53,10 @@ pub struct PipelineConfig {
     pub pipeline_id: String,
     pub source: CapabilityRef,
     pub input_schema_id: SchemaId,
+    #[serde(default)]
     pub steps: Vec<TransformStep>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transform_routing: Option<TransformRouting>,
     pub output: CapabilityRef,
     pub receipt_schema_id: SchemaId,
     /// Budget neuer oder unterbrochener Eingaben pro Lauf, nicht der Historie.
@@ -98,6 +102,8 @@ pub struct PipelineOutput<'a> {
     pub input: &'a Artifact,
     pub transformed: &'a Artifact,
     pub steps: &'a [StepReport],
+    /// Effective Transform contracts selected for this run, in execution order.
+    pub resolved_steps: &'a [TransformStep],
     pub request: &'a Artifact,
     /// Bei Wiederaufnahme muss dieselbe Freigabe erneut bewertet werden.
     pub approval_version_id: Option<&'a VersionId>,
@@ -122,14 +128,44 @@ fn identifier(value: &str) -> bool {
 }
 
 impl PipelineConfig {
-    fn identity(&self, host: &Host) -> Result<Value> {
+    fn resolve_steps(&self, host: &Host) -> Result<Vec<TransformStep>> {
+        let Some(routing) = &self.transform_routing else {
+            if !(1..=32).contains(&self.steps.len()) {
+                return Err(invalid(
+                    "requires 1..32 explicitly configured transform steps",
+                ));
+            }
+            return Ok(self.steps.clone());
+        };
+        if !self.steps.is_empty() {
+            return Err(invalid(
+                "transform_routing and explicit steps are mutually exclusive",
+            ));
+        }
+        let path = routing
+            .resolve(host.registry(), host.schemas(), &self.input_schema_id)
+            .map_err(|error| invalid(format!("invalid transform routing: {error:?}")))?
+            .ok_or_else(|| {
+                invalid("no authorized transform path to the requested output schema")
+            })?;
+        Ok(path
+            .into_iter()
+            .enumerate()
+            .map(|(index, hop)| TransformStep {
+                id: format!("transform-{}", index + 1),
+                capability: hop.capability,
+                output_schema_id: hop.output_schema_id,
+            })
+            .collect())
+    }
+
+    fn identity(&self, host: &Host, resolved_steps: &[TransformStep]) -> Result<Value> {
         if self.config_version != 2
             || !identifier(&self.pipeline_id)
             || !(1..=1000).contains(&self.max_observations)
-            || !(1..=32).contains(&self.steps.len())
         {
             return Err(invalid(
-                "requires config_version 2, a valid pipeline_id, 1..32 steps and max_observations 1..1000",
+                "requires config_version 2, a valid pipeline_id and max_observations 1..1000",
             ));
         }
         let mut step_ids = HashSet::new();
@@ -158,7 +194,7 @@ impl PipelineConfig {
             ));
         }
         let mut input_schema = &self.input_schema_id;
-        for step in &self.steps {
+        for step in resolved_steps {
             if !identifier(&step.id) || !step_ids.insert(&step.id) {
                 return Err(invalid("step IDs must be valid and unique"));
             }
@@ -188,10 +224,14 @@ impl PipelineConfig {
         }
         // Grants und Laufbudget sind veränderbar; Topologie und Manifeste
         // bilden die dauerhafte Identität. Schema-Drift prüft bereits der Store.
-        Ok(
-            json!({"source":self.source,"input_schema_id":self.input_schema_id,"steps":self.steps,
-            "output":self.output,"receipt_schema_id":self.receipt_schema_id,"manifests":manifests}),
-        )
+        let mut identity = json!({
+            "source":self.source,"input_schema_id":self.input_schema_id,"steps":resolved_steps,
+            "output":self.output,"receipt_schema_id":self.receipt_schema_id,"manifests":manifests
+        });
+        if let Some(routing) = &self.transform_routing {
+            identity["transform_routing"] = json!(routing);
+        }
+        Ok(identity)
     }
 }
 
@@ -204,8 +244,9 @@ pub fn run_pipeline(
     config: &PipelineConfig,
     policy: &mut dyn PipelineApproval,
 ) -> Result<PipelineReport> {
-    let identity = config.identity(host)?;
-    let mut journal = Journal::open(host, config, identity)?;
+    let resolved_steps = config.resolve_steps(host)?;
+    let identity = config.identity(host, &resolved_steps)?;
+    let mut journal = Journal::open(host, &config.pipeline_id, resolved_steps.len(), identity)?;
     if let Err(error) = host.poll_round() {
         journal.state.error = Some(format!("polling: {error}").chars().take(2000).collect());
         journal.save(host)?;
@@ -245,7 +286,14 @@ pub fn run_pipeline(
             ));
             journal.save(host)?;
         }
-        match advance(host, config, recorded.artifact(), &mut journal, policy) {
+        match advance(
+            host,
+            config,
+            &resolved_steps,
+            recorded.artifact(),
+            &mut journal,
+            policy,
+        ) {
             Ok(delivery) => deliveries.push(delivery),
             Err(error) => {
                 journal.state.error = Some(
@@ -273,13 +321,14 @@ pub fn run_pipeline(
 fn advance(
     host: &mut Host,
     config: &PipelineConfig,
+    resolved_steps: &[TransformStep],
     input: &Artifact,
     journal: &mut Journal,
     policy: &mut dyn PipelineApproval,
 ) -> Result<Delivery> {
     let mut transformed = input.clone();
     let mut steps = Vec::new();
-    for (index, step) in config.steps.iter().enumerate() {
+    for (index, step) in resolved_steps.iter().enumerate() {
         journal.phase = format!("transform:{}", step.id);
         // Bereits abgeschlossene Schritte gehen durch den Core-Cache: aktuelle
         // Grants, Trust-Limits und Identität werden vor Wiederverwendung geprüft.
@@ -333,6 +382,7 @@ fn advance(
             input,
             transformed: &transformed,
             steps: &steps,
+            resolved_steps,
             request: &request,
             approval_version_id: journal
                 .state
