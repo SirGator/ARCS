@@ -211,7 +211,11 @@ impl TaskRuntime {
             .map(|b| b.context.len())
             .sum::<usize>();
         let limit = minimum
-            .saturating_sub(3 + dependency_items + route.memory.as_ref().map_or(0, |p| p.max_items))
+            .saturating_sub(
+                3 + usize::from(config.include_template_availability)
+                    + dependency_items
+                    + route.memory.as_ref().map_or(0, |p| p.max_items),
+            )
             .min(128);
         let tasks = self
             .journal

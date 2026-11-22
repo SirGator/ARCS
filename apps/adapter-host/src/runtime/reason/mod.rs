@@ -40,7 +40,7 @@ impl Host {
         arcs::reasoning::attempts::history(&self.registry, &self.schemas, &self.store, query)
             .map_err(HostError::Reasoning)
     }
-    fn reasoner_choice_availability(
+    pub(crate) fn reasoner_choice_availability(
         &self,
         choice: &arcs::reasoning::selection::ReasonerChoice,
         inputs: &[InputDataDescriptor],

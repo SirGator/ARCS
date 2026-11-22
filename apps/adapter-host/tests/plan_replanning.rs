@@ -106,6 +106,7 @@ fn a_failed_step_yields_a_new_plan_without_replacing_the_original_task_or_old_ar
     );
     assert_eq!(artifacts(&host, "arcs.plan.v2").len(), 2);
     assert_eq!(artifacts(&host, "arcs.plan_replanning.v1").len(), 1);
+    assert!(artifacts(&host, arcs::reasoning::plan_availability::SCHEMA).is_empty());
     assert_eq!(f.count("a", "attempts"), 1);
     assert_eq!(f.count("b", "attempts"), 1);
     assert_eq!(f.count("planner", "attempts"), 2);
@@ -208,8 +209,13 @@ fn an_unsupported_replacement_and_a_no_solution_reply_never_create_new_steps() {
 #[test]
 fn losing_a_replanning_response_preserves_the_exact_request_and_generation() {
     let f = fixture();
+    let mut config = f.read("runtime.json");
+    config["routes"][0]["plan"]["include_template_availability"] = json!(true);
+    f.write("runtime.json", config);
     let mut model = f.read("planner.json");
     model["gate_revision"] = json!(1);
+    model["select_available_template"] = json!(true);
+    model.as_object_mut().unwrap().remove("revisions");
     f.write("planner.json", model);
     let (mut host, mut runtime) = f.open();
     until(&mut host, &mut runtime, |_| {
@@ -218,6 +224,18 @@ fn losing_a_replanning_response_preserves_the_exact_request_and_generation() {
     let context = artifacts(&host, "arcs.plan_replanning.v1")
         .remove(0)
         .version_id;
+    let schema = arcs::reasoning::plan_availability::SCHEMA;
+    let availability = artifacts(&host, schema);
+    assert_eq!(availability.len(), 2);
+    for (revision, first_reasoner) in [(0, "ready"), (1, "unavailable")] {
+        let snapshot = &availability[revision];
+        assert_eq!(snapshot.payload["revision"], revision);
+        let templates = snapshot.payload["templates"].as_array().unwrap();
+        assert_eq!(templates.len(), 3);
+        assert_eq!(templates[0]["id"], "a");
+        assert_eq!(templates[0]["reasoners"][0]["availability"], first_reasoner);
+        assert_eq!(templates[1]["reasoners"][0]["availability"], "ready");
+    }
     host.shutdown().unwrap();
     drop(runtime);
     drop(host);
@@ -236,8 +254,73 @@ fn losing_a_replanning_response_preserves_the_exact_request_and_generation() {
         context
     );
     assert_eq!(f.count("b", "attempts"), 1);
+    assert_eq!(artifacts(&host, schema), availability);
+    let requests = artifacts(&host, "arcs.reasoning_request.v2");
+    for (index, input) in planner_inputs(&f).iter().enumerate() {
+        let snapshot = &availability[index];
+        let context = input["context"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["schema_id"] == schema)
+            .unwrap();
+        assert_eq!(context["version_id"], snapshot.version_id.0);
+        assert_eq!(
+            context["payload"],
+            json!({"revision":index,"templates":snapshot.payload["templates"]})
+        );
+        let request = requests
+            .iter()
+            .find(|artifact| artifact.payload["invocation"]["request_id"] == input["request_id"])
+            .unwrap();
+        assert!(
+            request
+                .provenance
+                .as_ref()
+                .unwrap()
+                .parents
+                .contains(&snapshot.version_id.0)
+        );
+    }
+    assert_no_authority(&host);
     host.shutdown().unwrap();
 }
+#[test]
+fn template_availability_needs_an_extra_slot_alongside_replanning_and_dependencies() {
+    for with_dependency in [false, true] {
+        let f = fixture();
+        if with_dependency {
+            f.peer("precheck", "normal", false);
+            f.route("precheck", "precheck");
+        }
+        let mut config = f.read("runtime.json");
+        let owner = &mut config["routes"][0];
+        owner["plan"]["include_template_availability"] = json!(true);
+        owner["budget"]["max_context_items"] = json!(if with_dependency { 4 } else { 3 });
+        if with_dependency {
+            owner["dependencies"] = json!([{"route_id":"precheck","payload_fields":["value"]}]);
+            config["max_pending_jobs"] = json!(5);
+        }
+        f.write("runtime.json", config);
+        let mut host = Host::open(f.directory.join("host.json")).unwrap();
+        let opened = TaskRuntime::open(
+            &host,
+            RuntimeConfig::load(f.directory.join("runtime.json")).unwrap(),
+        );
+        let Err(error) = opened else {
+            panic!("planner with no room for availability was opened");
+        };
+        let required = if with_dependency { 5 } else { 4 };
+        assert!(
+            error
+                .to_string()
+                .contains(&format!("at least {required} planner context slots")),
+            "{error}"
+        );
+        host.shutdown().unwrap();
+    }
+}
+
 #[test]
 fn reasoning_request_limit_survives_checkpoint_rollback_replanning_and_restart() {
     use arcs_host::task_runtime::queue::{TaskQueueQuery, TaskQueueScope};

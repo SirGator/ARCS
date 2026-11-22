@@ -69,6 +69,21 @@ pub(in crate::task_runtime) fn validate(routes: &[ReasoningRoute]) -> Result<(),
                     "goal context budgets must reserve room for all dependency results",
                 ));
             }
+        } else if let Some(plan) = route
+            .plan
+            .as_ref()
+            .filter(|plan| plan.include_template_availability)
+        {
+            let minimum = items + if plan.replanning.is_some() { 4 } else { 2 };
+            if route
+                .permitted_reasoner_choices()
+                .iter()
+                .any(|choice| choice.budget.max_context_items < minimum)
+            {
+                return Err(invalid(format!(
+                    "template availability and dependencies need at least {minimum} planner context slots"
+                )));
+            }
         } else if route.budget.max_context_items < 1 + items {
             return Err(invalid(
                 "context budget must reserve room for task input and dependency results",

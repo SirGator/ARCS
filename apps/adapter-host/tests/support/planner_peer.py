@@ -20,6 +20,11 @@ for line in sys.stdin:
     pool=inv['constraints']['task_planning']['templates']
     selected=next(t for t in pool if c['select_tag'] in t.get('reasoner_description_claim',{}).get('description',{}).get('tags',[]))
     payload={'steps':[{'id':'selected','template':selected['id']}]}
+   if c.get('select_available_template'):
+    availability=next(i['payload'] for i in inv['context'] if i['schema_id']=='arcs.plan_template_availability.v1')
+    assert availability['revision']==revision
+    selected=next(t for t in availability['templates'] if any(option['availability']=='ready' for option in t['reasoners']))
+    payload={'steps':[{'id':'work','template':selected['id']}]}
    if c.get('copy_assessment'):
     payload['evidence_version_ids']=[i['version_id'] for i in inv['context'] if i['schema_id']=='arcs.goal_assessment_candidate.v1']
     assert any(i['payload']=={'goal_status':'achieved','effect':'success'} for i in inv['context']),'goal assessment fields were not selectively exported'

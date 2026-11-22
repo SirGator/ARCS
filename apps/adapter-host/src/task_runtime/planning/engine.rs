@@ -155,7 +155,7 @@ impl TaskRuntime {
         } else {
             constraints = serde_json::json!({"operator_constraints":constraints,"task_planning":config.catalog(host)?});
         }
-        let (revision, context, meta) = if let Some(pending) = &pending {
+        let (revision, mut context, meta) = if let Some(pending) = &pending {
             self.validate_replanning_context(host, input, route, &pending.context)?;
             let artifact = self.publish_replanning_context(host, &pending.context)?;
             if pending
@@ -220,6 +220,15 @@ impl TaskRuntime {
                 }),
             )
         };
+        if config.include_template_availability {
+            context.push(self.template_availability(
+                host,
+                config,
+                sequence,
+                &input.version_id,
+                revision,
+            )?);
+        }
         let request = ReasoningRequestV2 {
             request_id: self.task_request_id(route, &input.version_id, revision),
             capability: route.reasoner.clone(),

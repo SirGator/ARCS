@@ -127,6 +127,23 @@ Worker-Verfügbarkeit wird deshalb nicht in diesen statischen Katalog gemischt.
 Die vorhandenen Grenzen für Manifest-, Definitions- und Anfragegrößen gelten
 zusätzlich zur einzelnen Beschreibungsgrenze.
 
+Eine Planungsroute kann `include_template_availability` in ihrem
+`plan`-Block auf `true` setzen. ARCS speichert dann beim Vorbereiten des
+ersten Planeraufrufs je Revision einen Beleg
+`arcs.plan_template_availability.v1`. Der Planer erhält `revision` und
+`templates` daraus. Für jede erlaubte Vorlage stehen die ursprünglichen
+Reasoner-Optionen mit ihrem Zustand in Konfigurationsreihenfolge bereit
+(`ready`, `busy`, `unavailable`, `incompatible`).
+
+Der Beleg erfasst Host-Sitzungsbelegung, bekannte Ausfälle und benannte
+Reasoner-Pools. Er bleibt beim Wiederanlauf derselben Revision gültig. Der
+eigentliche Aufruf prüft später wieder die aktuellen Ressourcen und die
+konkreten Binärquellen. Der Planer arbeitet weiterhin mit seinen erlaubten
+Vorlagen. Die Option belegt einen zusätzlichen Kontextplatz im bestehenden
+Bytebudget. Planer benötigen dafür mindestens zwei Kontextplätze bei reiner
+Ausgangsplanung und mindestens vier bei aktivierter Neuplanung. Feste
+Abhängigkeiten benötigen ihre eigenen Plätze.
+
 ## Kompatibilität und offene Arbeit
 
 Ohne Beschreibung bleiben serialisierte Manifeste und bestehende
@@ -141,8 +158,8 @@ Beschreibung aus seinem Profil; bei Änderung wird ein neues Journal benötigt.
 Die Suche ist lexikalisch. Sie erzeugt keine Synonyme, semantischen Embeddings,
 Erfolgswahrscheinlichkeiten oder Kostenbelege. Voraussetzungen und Wirkungen
 werden durch die Suche nicht ausgewertet oder bestätigt. Vollständig autonomes
-Reasoner-Routing, Verfügbarkeitssnapshots für Neuplanung, Fähigkeitsprüfungen,
-gemessene Zuverlässigkeit und freie Werkzeugkomposition bleiben offen.
+Reasoner-Routing, Fähigkeitsprüfungen, gemessene Zuverlässigkeit und freie
+Werkzeugkomposition bleiben offen.
 
 ## Prüfung
 

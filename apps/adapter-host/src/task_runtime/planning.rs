@@ -1,4 +1,5 @@
 //! Begrenzte Reasoning-Pläne aus Betreiber-Vorlagen; keine neuen Berechtigungen.
+mod availability;
 mod budgets;
 mod cancellation;
 mod config;
@@ -89,6 +90,8 @@ pub struct PlanningConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_total_actions: Option<usize>,
     pub templates: Vec<StepTemplate>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub include_template_availability: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub replanning: Option<ReplanningPolicy>,
 }

@@ -636,6 +636,11 @@
 > ARCS nutzt beim Eintritt in die Planung die aktuelle Verfügbarkeit
 > und verknüpft Freigabe und Recovery mit dem Beleg dieser Runde.
 >
+> Sechsundsechzigster Schritt gemäß v3 §9.2 und §7.2 PAR-04.
+> Der Planer kann pro Revision einen Beleg über die Verfügbarkeit
+> der anfänglichen Reasoner-Optionen seiner Vorlagen erhalten.
+> Nach einem Neustart verwendet dieselbe Revision denselben Beleg.
+>
 **Leitbild:** ARCS ist ein universeller Agent. Es soll sich einfach bedienen lassen, beliebige kompatible Systeme verbinden, eigenständig Probleme lösen und langfristige Aufgaben über Monate verfolgen.
 
 ## 1. Verbindliche Architekturregeln

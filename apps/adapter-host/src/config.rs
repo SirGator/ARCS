@@ -347,6 +347,7 @@ impl PreparedConfig {
                 arcs::reasoning::selection::PUBLISHER,
                 arcs::reasoning::attempts::PUBLISHER,
                 arcs::reasoning::recovery::PUBLISHER,
+                arcs::reasoning::plan_availability::PUBLISHER,
                 arcs::adapters::reconnect::PUBLISHER,
                 arcs::memory::PUBLISHER,
             ]

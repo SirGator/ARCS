@@ -10,6 +10,7 @@
 
 pub mod context;
 pub mod general;
+pub mod plan_availability;
 pub mod recovery;
 pub mod routing;
 pub mod selection;
