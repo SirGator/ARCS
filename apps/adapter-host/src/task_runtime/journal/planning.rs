@@ -115,7 +115,11 @@ impl Journal {
             transaction.execute("INSERT INTO runtime_jobs(route_id,input_version,source_sequence,state) VALUES(?1,?2,?3,'pending')",params![step.route.id,plan.input_version_id.0,source]).map_err(db)?;
             let sequence = transaction.last_insert_rowid();
             if !step.previous_dependencies.is_empty() {
-                previous_dependencies.push((sequence as u64, &step.previous_dependencies));
+                previous_dependencies.push((
+                    sequence as u64,
+                    &step.previous_dependencies,
+                    !step.route.dependency_transforms.is_empty(),
+                ));
             }
             Self::assign_priority(&transaction, sequence as u64, step.route.priority)?;
             Self::assign_deadline(
@@ -160,8 +164,8 @@ impl Journal {
         }
         let routes: Vec<_> = plan.steps.iter().map(|s| &s.route).collect();
         Self::bind_dependencies(&transaction, &routes, &plan.input_version_id)?;
-        for (sequence, bindings) in previous_dependencies {
-            Self::seed_previous_dependencies(&transaction, sequence, bindings)?;
+        for (sequence, bindings, needs_transform) in previous_dependencies {
+            Self::seed_previous_dependencies(&transaction, sequence, bindings, needs_transform)?;
         }
         if plan.revision.is_none() {
             transaction

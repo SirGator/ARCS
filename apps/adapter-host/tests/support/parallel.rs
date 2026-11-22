@@ -34,7 +34,7 @@ for line in sys.stdin:
     payload={'value':v,'distance':abs(v-task['target'])}
     if c.get('mode')=='invalid': payload={'untrusted':'wrong schema'}
     if c.get('mode')=='join':
-     parents=[i['payload'] for i in inv['context'] if i['schema_id']=='arcs.solution_candidate.nearest.v1']
+     parents=[i['payload'] for i in inv['context'] if i['schema_id']==c.get('parent_schema_id','arcs.solution_candidate.nearest.v1')]
      assert parents and all(set(p)=={'value'} for p in parents),'unexpected dependency payload fields'
      payload={'value':sum(p['value'] for p in parents),'distance':0}
     reply={'type':'reasoning_result_v2','response':{'invocation_id':key,'request_id':inv['request_id'],'status':'solved','candidates':[{'schema_id':inv['target_schema_id'],'required_capabilities':[],'referenced_versions':[i['version_id'] for i in inv['context']],'payload':payload}],'trace':{'method':inv['method'],'implementation':'parallel-test-peer','version':'1','iterations':None,'output_tokens':None,'details':{}}}}

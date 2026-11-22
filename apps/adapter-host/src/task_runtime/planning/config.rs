@@ -90,6 +90,22 @@ impl PlanningConfig {
                     "accepted dependency schemas must be at most 32 distinct registered schemas",
                 ));
             }
+            let mut source_schemas = HashSet::new();
+            if template.dependency_transforms.len() > 32 {
+                return Err(invalid("at most 32 dependency transforms per template"));
+            }
+            for transform in &template.dependency_transforms {
+                if !source_schemas.insert(&transform.source_schema_id)
+                    || !valid_export_fields(&transform.output_fields)
+                {
+                    return Err(invalid(
+                        "dependency transforms need distinct source schemas and explicit output fields",
+                    ));
+                }
+                template.validate_dependency_schema(&transform.output_schema_id)?;
+                let manifest = transform.validate(host)?;
+                manifests.insert(manifest.adapter_id.0.clone(), manifest);
+            }
             if !template.replanning_failure_receipt_fields.is_empty()
                 && (self.replanning.is_none()
                     || !valid_export_fields(&template.replanning_failure_receipt_fields)
@@ -170,10 +186,10 @@ impl PlanningConfig {
     }
 
     pub(super) fn catalog(&self, host: &Host) -> Result<Value, HostError> {
-        let typed_dependencies = self
-            .templates
-            .iter()
-            .any(|template| template.accepted_dependency_schemas.is_some());
+        let typed_dependencies = self.templates.iter().any(|template| {
+            template.accepted_dependency_schemas.is_some()
+                || !template.dependency_transforms.is_empty()
+        });
         let mut catalog = json!({"max_steps":self.max_steps,"max_total_runtime_ms":self.max_total_runtime_ms,
             "max_total_output_tokens":self.max_total_output_tokens,
             "templates":self.templates.iter().map(|template| {
@@ -187,6 +203,9 @@ impl PlanningConfig {
                 }
                 if let Some(schemas) = &template.accepted_dependency_schemas {
                     entry["accepted_dependency_schemas"] = json!(schemas);
+                }
+                if !template.dependency_transforms.is_empty() {
+                    entry["dependency_transforms"] = json!(template.dependency_transforms);
                 }
                 if let Some(goal) = &template.route.goal {
                     entry["kind"] = json!("goal");
@@ -352,7 +371,12 @@ impl PlanningConfig {
                         })
                     })?;
                     let (binding, source_route) = previous_dependency(edge, previous, &templates)?;
-                    consumer.validate_dependency_schema(&source_route)?;
+                    consumer.bind_dependency_transform(
+                        &mut route,
+                        &source_route,
+                        &source_route.id,
+                        &edge.payload_fields,
+                    )?;
                     previous_edges.push(TaskDependency {
                         route_id: binding.route_id.clone(),
                         payload_fields: edge.payload_fields.clone(),
@@ -367,7 +391,6 @@ impl PlanningConfig {
                     .get(edge.step_id.as_str())
                     .ok_or_else(|| invalid("plan references an unknown step"))?;
                 let producer = templates[upstream.template.as_str()];
-                consumer.validate_dependency_schema(&producer.route)?;
                 if edge
                     .payload_fields
                     .iter()
@@ -377,11 +400,15 @@ impl PlanningConfig {
                         "plan requests a field outside the template exports",
                     ));
                 }
-                route.dependencies.push(dependency(
-                    parent,
-                    edge,
-                    self.replanning.as_ref().map(|_| revision),
-                ));
+                let dependency =
+                    dependency(parent, edge, self.replanning.as_ref().map(|_| revision));
+                consumer.bind_dependency_transform(
+                    &mut route,
+                    &producer.route,
+                    &dependency.route_id,
+                    &edge.payload_fields,
+                )?;
+                route.dependencies.push(dependency);
             }
             let mut validation_route = route.clone();
             validation_route.dependencies.extend(previous_edges);
@@ -400,15 +427,43 @@ impl PlanningConfig {
 }
 
 impl StepTemplate {
-    fn validate_dependency_schema(&self, producer: &ReasoningRoute) -> Result<(), HostError> {
-        if let Some(schemas) = &self.accepted_dependency_schemas {
-            let schema = producer.dependency_result_schema();
-            if !schemas.contains(&schema) {
-                return Err(invalid(format!(
-                    "template {} does not accept dependency schema {}",
-                    self.route.id, schema.0
-                )));
-            }
+    fn bind_dependency_transform(
+        &self,
+        route: &mut ReasoningRoute,
+        producer: &ReasoningRoute,
+        parent_route_id: &str,
+        fields: &[String],
+    ) -> Result<(), HostError> {
+        let source = producer.dependency_result_schema();
+        let Some(transform) = self
+            .dependency_transforms
+            .iter()
+            .find(|item| item.source_schema_id == source)
+        else {
+            return self.validate_dependency_schema(&source);
+        };
+        if !transform.matches_fields(fields) {
+            return Err(invalid(format!(
+                "template {} dependency fields must match its transform projection",
+                self.route.id,
+            )));
+        }
+        route
+            .dependency_transforms
+            .insert(parent_route_id.into(), transform.clone());
+        Ok(())
+    }
+
+    fn validate_dependency_schema(&self, schema: &SchemaId) -> Result<(), HostError> {
+        if self
+            .accepted_dependency_schemas
+            .as_ref()
+            .is_some_and(|schemas| !schemas.contains(schema))
+        {
+            return Err(invalid(format!(
+                "template {} does not accept dependency schema {}",
+                self.route.id, schema.0
+            )));
         }
         Ok(())
     }

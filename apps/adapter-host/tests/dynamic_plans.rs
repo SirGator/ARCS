@@ -188,6 +188,147 @@ fn accepted_dependency_schemas_must_be_distinct_and_registered() {
 }
 
 #[test]
+fn dependency_transform_capability_must_match_its_registered_contract() {
+    let f = fixture("normal", "normal");
+    let mut config = f.read("runtime.json");
+    add_dependency_transform(&f, &mut config);
+    let input_capability = config["routes"][0]["source"].clone();
+    config["routes"][0]["plan"]["templates"][2]["dependency_transforms"][0]["capability"] =
+        input_capability;
+    f.write("runtime.json", config);
+
+    let mut host = Host::open(f.directory.join("host.json")).unwrap();
+    let opened = TaskRuntime::open(
+        &host,
+        RuntimeConfig::load(f.directory.join("runtime.json")).unwrap(),
+    );
+    assert!(opened.is_err());
+    assert!(!f.directory.join("runtime.sqlite").exists());
+    host.shutdown().unwrap();
+}
+
+#[test]
+fn transformed_plan_edge_waits_for_its_worker_and_replays_after_restart() {
+    let f = fixture("normal", "normal");
+    let mut config = f.read("runtime.json");
+    add_dependency_transform(&f, &mut config);
+    f.write("runtime.json", config);
+    f.write("planner.json", json!({"proposal":{"steps":[
+        {"id":"left","template":"a"},{"id":"other","template":"b"},
+        {"id":"total","template":"join","dependencies":[{"step_id":"left","payload_fields":["value"]}]}
+    ]}}));
+    let (mut host, mut runtime) = f.open();
+    until(&mut host, &mut runtime, |r| {
+        f.started("convert") && r.report(0).unwrap().ready_for_review == 2
+    });
+    assert!(!f.started("join"));
+    assert_eq!(host.transform_workers().len(), 1);
+    assert_eq!(artifacts(&host, "arcs.projection.plan_test.v1").len(), 1);
+    let invocation = host.transform_workers()[0].invocation_id.clone();
+    host.shutdown().unwrap();
+    drop((host, runtime));
+
+    f.release("convert");
+    let (mut host, mut runtime) = f.open();
+    until(&mut host, &mut runtime, |r| {
+        r.plans_after(0, 1).unwrap()[0].state == PlanState::ReadyForReview
+    });
+    let results = artifacts(&host, CONVERTED);
+    assert_eq!(results.len(), 1);
+    let converted = &results[0];
+    assert_eq!(converted.stream_key, format!("transform:{invocation}"));
+    let bindings = runtime.dependencies_after(0, 10).unwrap();
+    let context = &bindings[0].bindings[0].context[0];
+    assert_eq!(context.version_id, converted.version_id);
+    assert_eq!(context.payload_fields, ["value"]);
+    assert_eq!(f.count("join", "attempts"), 1);
+    let calls = std::fs::read_to_string(f.directory.join("convert.started")).unwrap();
+    assert_eq!(
+        calls.lines().collect::<Vec<_>>(),
+        [invocation.as_str(), invocation.as_str()]
+    );
+    assert_eq!(artifacts(&host, "arcs.projection.plan_test.v1").len(), 1);
+    assert_no_authority(&host);
+    host.shutdown().unwrap();
+}
+
+#[test]
+fn transformed_plan_edge_cannot_choose_extra_projection_fields() {
+    let f = fixture("normal", "normal");
+    let mut config = f.read("runtime.json");
+    add_dependency_transform(&f, &mut config);
+    config["routes"][0]["plan"]["templates"][0]["export_fields"] = json!(["value", "distance"]);
+    f.write("runtime.json", config);
+    let mut proposal = proposal();
+    proposal["steps"][2]["dependencies"][0]["payload_fields"] = json!(["value", "distance"]);
+    f.write("planner.json", json!({"proposal":proposal}));
+    let (mut host, mut runtime) = f.open();
+    until(&mut host, &mut runtime, |r| {
+        r.plans_after(0, 1)
+            .unwrap()
+            .first()
+            .is_some_and(|p| p.state == PlanState::Rejected)
+    });
+    let plan = runtime.plans_after(0, 1).unwrap().remove(0);
+    assert!(plan.steps.is_empty());
+    assert!(
+        plan.detail
+            .unwrap()
+            .contains("fields must match its transform projection")
+    );
+    assert!(!f.started("a") && !f.started("convert"));
+    host.shutdown().unwrap();
+}
+
+#[test]
+fn transform_waits_for_activation_and_cancelled_tasks_never_receive_its_result() {
+    const NOW: u64 = 1_800_000_000_000;
+    const WAKE: u64 = NOW + 1000;
+    let f = fixture("normal", "normal");
+    let mut config = f.read("runtime.json");
+    add_dependency_transform(&f, &mut config);
+    config["routes"][0]["plan"]["templates"][2]["route"]["activation"] =
+        json!({"kind":"at_time","unix_ms":WAKE});
+    f.write("runtime.json", config);
+    f.write("planner.json", json!({"proposal":{"steps":[
+        {"id":"left","template":"a"},
+        {"id":"total","template":"join","dependencies":[{"step_id":"left","payload_fields":["value"]}]}
+    ]}}));
+    let (mut host, mut runtime) = f.open();
+    let end = Instant::now() + Duration::from_secs(25);
+    while runtime.report(0).unwrap().ready_for_review != 1 {
+        runtime.tick_at(&mut host, NOW).unwrap();
+        assert!(Instant::now() < end);
+        std::thread::sleep(Duration::from_millis(3));
+    }
+    runtime.tick_at(&mut host, WAKE - 1).unwrap();
+    assert!(!f.started("convert"));
+    assert!(artifacts(&host, "arcs.projection.plan_test.v1").is_empty());
+    while !f.started("convert") {
+        runtime.tick_at(&mut host, WAKE).unwrap();
+        assert!(Instant::now() < end);
+        std::thread::sleep(Duration::from_millis(3));
+    }
+    let plan = runtime.plans_after(0, 1).unwrap().remove(0);
+    runtime
+        .cancel_plan(&mut host, plan.sequence, "stop before successor".into())
+        .unwrap();
+    f.release("convert");
+    while !host.transform_workers().is_empty() {
+        runtime.tick_at(&mut host, WAKE).unwrap();
+        assert!(Instant::now() < end);
+        std::thread::sleep(Duration::from_millis(3));
+    }
+    assert_eq!(
+        runtime.plans_after(0, 1).unwrap()[0].state,
+        PlanState::Cancelled
+    );
+    assert!(!f.started("join"));
+    assert!(artifacts(&host, CONVERTED).is_empty());
+    host.shutdown().unwrap();
+}
+
+#[test]
 fn schema_overrides_and_no_solution_never_create_an_executable_plan() {
     for schema_override in [false, true] {
         let f = fixture("normal", "normal");

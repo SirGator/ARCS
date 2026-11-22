@@ -59,6 +59,7 @@ impl Journal {
         transaction: &Transaction<'_>,
         sequence: u64,
         bindings: &[DependencyBinding],
+        needs_transform: bool,
     ) -> Result<(), HostError> {
         let encoded =
             serde_json::to_string(bindings).map_err(|error| invalid(error.to_string()))?;
@@ -66,10 +67,14 @@ impl Journal {
         // inputs are all frozen is immediately eligible for the scheduler.
         let changed = transaction
             .execute(
-                "INSERT INTO runtime_job_joins(sequence,state,bindings_json) VALUES(?1,'ready',?2)
+                "INSERT INTO runtime_job_joins(sequence,state,bindings_json) VALUES(?1,?2,?3)
              ON CONFLICT(sequence) DO UPDATE SET bindings_json=excluded.bindings_json
              WHERE runtime_job_joins.state='waiting'",
-                params![sequence as i64, encoded],
+                params![
+                    sequence as i64,
+                    if needs_transform { "waiting" } else { "ready" },
+                    encoded
+                ],
             )
             .map_err(db)?;
         if changed != 1 {
@@ -96,6 +101,22 @@ impl Journal {
             Ok((sequence as u64, bindings))
         })
         .transpose()
+    }
+
+    pub(in crate::task_runtime) fn dependency_transform_runnable(
+        &self,
+        sequence: u64,
+    ) -> Result<bool, HostError> {
+        self.connection.query_row(
+            &format!("SELECT EXISTS(
+                SELECT 1 FROM runtime_jobs j JOIN runtime_job_joins d ON d.sequence=j.sequence
+                WHERE j.sequence=?1 AND j.state='pending' AND d.state='waiting'
+                AND NOT {paused}
+                AND NOT EXISTS (SELECT 1 FROM runtime_job_schedules s WHERE s.sequence=j.sequence AND s.released_at IS NULL)
+            )", paused=super::suspension::PAUSED),
+            [sequence as i64],
+            |row| row.get(0),
+        ).map_err(db)
     }
 
     pub(in crate::task_runtime) fn dependency_parents(

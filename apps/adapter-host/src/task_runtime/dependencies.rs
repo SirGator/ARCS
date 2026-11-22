@@ -1,5 +1,7 @@
 //! Explizite DAG-Voraussetzungen derselben Eingabe; keine zusätzliche Autorität.
 mod config;
+mod transform;
+pub use transform::DependencyTransform;
 
 use arcs::core::{ActorType, Artifact, SchemaId, VersionId};
 use arcs::execution::execution_invocation_id;
@@ -81,7 +83,12 @@ pub(super) enum ParentResult {
 }
 
 impl TaskRuntime {
-    pub(super) fn advance_dependencies(&mut self, host: &Host) -> Result<(), HostError> {
+    pub(super) fn advance_dependencies(
+        &mut self,
+        host: &mut Host,
+        has_deadlines: bool,
+        report: &mut super::TickReport,
+    ) -> Result<(), HostError> {
         let mut visited = std::collections::HashSet::new();
         for _ in 0..self.config.max_jobs_per_tick {
             let Some((sequence, mut bindings)) = self.journal.next_dependency_wait()? else {
@@ -91,7 +98,7 @@ impl TaskRuntime {
                 break;
             }
             let parents = self.journal.dependency_parents(sequence)?;
-            if parents.is_empty() {
+            if parents.is_empty() && bindings.is_empty() {
                 return Err(invalid("dependency edges are missing"));
             }
             let mut waiting = false;
@@ -104,6 +111,32 @@ impl TaskRuntime {
                         break;
                     }
                     ParentResult::Ready(binding) => bindings.push(binding),
+                }
+            }
+            if self.has_dependency_transforms && !waiting && blocked.is_none() {
+                let (route_id, _) = self.journal.selection_job(sequence)?;
+                let route = self.raw_route_for_job(host, sequence, &route_id)?;
+                if !route.dependency_transforms.is_empty() {
+                    if has_deadlines && self.live_clock {
+                        self.journal
+                            .advance_deadline_clock(super::scheduler::now_unix_ms()?)?;
+                    }
+                    if has_deadlines && self.expire_task(host, sequence, report)? {
+                        continue;
+                    }
+                    if self.journal.dependency_transform_runnable(sequence)? {
+                        match self.transform_dependencies(host, sequence, &route, &mut bindings) {
+                            Ok(ready) => waiting = !ready,
+                            Err(error) if super::job_failure::is_core_failure(&error) => {
+                                return Err(error);
+                            }
+                            Err(error) => {
+                                blocked = Some(format!("dependency transform failed: {error}"))
+                            }
+                        }
+                    } else {
+                        waiting = true;
+                    }
                 }
             }
             self.journal.finish_dependency_scan(

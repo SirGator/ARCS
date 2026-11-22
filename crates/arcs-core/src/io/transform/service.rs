@@ -133,16 +133,7 @@ impl<'a> TransformService<'a> {
                 output_schema.clone(),
             ));
         }
-        let definition = self
-            .schemas
-            .get(output_schema)
-            .ok_or_else(|| TransformError::MissingSchema(output_schema.clone()))?
-            .clone();
-        if super::super::control_types::is_control_type(&definition.artifact_type) {
-            return Err(TransformError::ControlOutputForbidden(
-                output_schema.clone(),
-            ));
-        }
+        let definition = super::validate_output_schema(self.schemas, output_schema)?.clone();
         if serde_json::to_vec(&input.payload)?.len() > grant.max_payload_bytes {
             return Err(TransformError::InputTooLarge);
         }

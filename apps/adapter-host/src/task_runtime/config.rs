@@ -44,6 +44,8 @@ pub struct RuntimeConfig {
     /// Host-wide admission limit for nonblocking goal-source queries.
     #[serde(default = "concurrency")]
     pub max_concurrent_requests: usize,
+    #[serde(default = "concurrency")]
+    pub max_concurrent_transforms: usize,
     #[serde(default = "capacity")]
     pub max_pending_jobs: usize,
     pub routes: Vec<ReasoningRoute>,
@@ -82,6 +84,9 @@ pub struct ReasoningRoute {
     /// für vorhandene Routen auch in der gespeicherten Identität unsichtbar.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dependencies: Vec<super::dependencies::TaskDependency>,
+    /// Generated during plan compilation, never accepted in operator routes.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub dependency_transforms: BTreeMap<String, super::dependencies::DependencyTransform>,
     /// Optionale, dauerhafte Aktivierungsbedingung vor dem ersten Schritt.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub activation: Option<super::scheduler::Activation>,
@@ -143,6 +148,7 @@ impl RuntimeConfig {
             || !(1..=1000).contains(&self.max_jobs_per_tick)
             || !(1..=32).contains(&self.max_concurrent_reasoning)
             || !(1..=32).contains(&self.max_concurrent_requests)
+            || !(1..=32).contains(&self.max_concurrent_transforms)
             || !(1..=32).contains(&self.routes.len())
             || !(self.routes.len()..=100_000).contains(&self.max_pending_jobs)
         {
@@ -201,6 +207,11 @@ pub(super) fn validate_route_contract(
 ) -> Result<(), HostError> {
     if let Some(activation) = &route.activation {
         activation.validate(host, manifests)?;
+    }
+    if !route.dependency_transforms.is_empty() {
+        return Err(invalid(
+            "route dependency transforms are reserved for compiled plans",
+        ));
     }
     let mut fields = HashSet::new();
     if !identifier(&route.id)

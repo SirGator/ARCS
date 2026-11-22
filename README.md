@@ -89,7 +89,8 @@ dokumentiert Slice 66. Der [Bericht zu Schema-Verträgen für Plan-Schritte](doc
 dokumentiert Slice 67. Der [Bericht zur Suche nach Transform-Pfaden](docs/ZWISCHENBERICHT_2026-11-22_TRANSFORM_ROUTING.md)
 dokumentiert Slice 68. Der [Bericht zu feldbeschränkten Transform-Eingaben](docs/ZWISCHENBERICHT_2026-11-22_TRANSFORM_INPUT_PROJECTION.md)
 dokumentiert Slice 69. Der [Bericht zu parallelen Transform-Aufrufen](docs/ZWISCHENBERICHT_2026-11-22_TRANSFORM_WORKERS.md)
-dokumentiert Slice 70. Die Berichte vom
+dokumentiert Slice 70. Der [Bericht zu Transform-Verträgen für Plan-Abhängigkeiten](docs/ZWISCHENBERICHT_2026-11-22_PLAN_DEPENDENCY_TRANSFORMS.md)
+dokumentiert Slice 71. Die Berichte vom
 [17. November](docs/ZWISCHENBERICHT_2026-11-17.md) und
 [16. November](docs/ZWISCHENBERICHT_2026-11-16.md) dokumentieren frühere
 Umsetzungsstände, Prüfergebnisse und offene Grenzen.

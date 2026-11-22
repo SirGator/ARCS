@@ -3,6 +3,13 @@ use super::scheduler::now_unix_ms;
 use super::*;
 impl TaskRuntime {
     pub(super) fn reap_abandoned_task_work(&self, host: &mut Host) -> Result<(), HostError> {
+        let mut abandoned_transforms = std::collections::HashSet::new();
+        for sequence in host.dependency_transform_tasks(&self.journal.path) {
+            if !self.journal.dependency_transform_runnable(sequence)? {
+                abandoned_transforms.insert(sequence);
+            }
+        }
+        host.release_dependency_transforms(&self.journal.path, &abandoned_transforms);
         let cancelled = self
             .journal
             .cancelled_reasoning(&host.pending_reasoning_request_ids())?;

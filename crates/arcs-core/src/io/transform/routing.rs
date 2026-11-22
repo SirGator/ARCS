@@ -45,14 +45,7 @@ impl TransformRouting {
         if schemas.get(input_schema_id).is_none() {
             return Err(TransformError::MissingSchema(input_schema_id.clone()));
         }
-        let target = schemas
-            .get(&self.output_schema_id)
-            .ok_or_else(|| TransformError::MissingSchema(self.output_schema_id.clone()))?;
-        if is_control_type(&target.artifact_type) {
-            return Err(TransformError::ControlOutputForbidden(
-                self.output_schema_id.clone(),
-            ));
-        }
+        super::validate_output_schema(schemas, &self.output_schema_id)?;
         let mut edges = HashMap::<&SchemaId, Vec<TransformHop>>::new();
         for capability in allowed {
             let (adapter, descriptor) = registry

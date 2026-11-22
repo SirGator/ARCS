@@ -566,6 +566,46 @@ fn export_reuse_fixture() -> Fixture {
 }
 
 #[test]
+fn a_pinned_only_dependency_is_transformed_before_the_replacement_step_runs() {
+    let f = export_reuse_fixture();
+    let mut config = f.read("runtime.json");
+    plans::add_dependency_transform(&f, &mut config);
+    f.write("runtime.json", config);
+    let mut model = f.read("planner.json");
+    model["revisions"]["1"]["steps"]
+        .as_array_mut()
+        .unwrap()
+        .truncate(1);
+    f.write("planner.json", model);
+    let (mut host, mut runtime) = f.open();
+    until(&mut host, &mut runtime, |_| f.started("convert"));
+    assert!(!f.started("join"));
+    f.release("convert");
+    until(&mut host, &mut runtime, terminal);
+    assert_eq!(
+        runtime.plans_after(0, 1).unwrap()[0].state,
+        PlanState::ReadyForReview
+    );
+    let converted = artifacts(&host, plans::CONVERTED);
+    assert_eq!(converted.len(), 1);
+    assert_eq!(f.count("b", "attempts"), 1);
+    assert_eq!(f.count("join", "attempts"), 1);
+    assert_eq!(
+        runtime
+            .dependencies_after(0, 10)
+            .unwrap()
+            .last()
+            .unwrap()
+            .bindings[0]
+            .context[0]
+            .version_id,
+        converted[0].version_id
+    );
+    assert_no_authority(&host);
+    host.shutdown().unwrap();
+}
+
+#[test]
 fn previous_revision_exports_feed_pinned_and_live_dependencies_after_admission_rollback() {
     let f = export_reuse_fixture();
     let (mut host, mut runtime) = f.open();

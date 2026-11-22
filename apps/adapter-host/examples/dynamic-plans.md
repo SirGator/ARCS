@@ -130,6 +130,40 @@ tatsächlich exportierte Artefakt. Mit `goal.export_execution_schema_id`
 ist das die geprüfte Ausführungsquittung. Die Freigabe des Nachfolgers
 bezieht sich weiterhin auf seinen eigenen Kandidaten.
 
+## Transform-Verträge für Abhängigkeiten
+
+Die empfangende Vorlage kann in `dependency_transforms` bis zu 32 Verträge
+für unterschiedliche Quellschemas konfigurieren. Das Beispiel setzt eine
+freigegebene Capability und registrierte Datenschemas voraus.
+
+```json
+"dependency_transforms": [{
+  "source_schema_id": "arcs.solution_candidate.nearest.v1",
+  "projection": {
+    "schema_id": "arcs.projection.reading.v1",
+    "payload_fields": ["value"]
+  },
+  "capability": {"adapter_id": "example.converter", "capability_id": "reading.convert"},
+  "output_schema_id": "arcs.measurement.converted.v1",
+  "output_fields": ["value"]
+}]
+```
+
+Wenn ein Vertrag für das Quellschema passt, muss der Planvorschlag genau
+`projection.payload_fields` für die Kante anfordern. Diese Felder müssen im
+Export des Vorgängers freigegeben sein. Der Converter erhält nur die
+schema-validierte Projektion. Beim Nachfolger gelten die
+`accepted_dependency_schemas` für das Ausgabeschema, und in den Kontext
+gelangen ausschließlich die konfigurierten `output_fields`. Das gilt auch für
+freigegebene Ergebnis- und Fehlerexporte aus der vorherigen Revision.
+
+Der Host wartet auf Aktivierung und fertige Voraussetzungen. Danach nutzt er
+die bestehenden Transform-Worker und deren gemeinsame Adapter- und
+Poolzulassung. `max_concurrent_transforms` begrenzt die Worker je Host beim
+Aufruf aus einer Runtime auf 1 bis 32. Standard ist 1. Der Monitor zeigt
+laufende Aufrufe unter `transform_workers`. Beim Abbruch gibt der Host die
+Kapazität frei, sobald der laufende Adapteraufruf endet.
+
 ## Grenzen vor der Aufnahme
 
 - 1–31 Schritte je Plan und 1–32 freigegebene Vorlagen je Planerroute.

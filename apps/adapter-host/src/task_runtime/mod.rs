@@ -128,6 +128,7 @@ pub struct TaskRuntime {
     has_reasoner_selection: bool,
     has_reasoning_recovery: bool,
     has_reasoning_request_limits: bool,
+    has_dependency_transforms: bool,
     has_recurrence: bool,
     live_clock: bool,
 }
@@ -155,6 +156,13 @@ impl TaskRuntime {
             .routes
             .iter()
             .any(|route| route.max_reasoning_requests.is_some());
+        let has_dependency_transforms = config.routes.iter().any(|route| {
+            route.plan.as_ref().is_some_and(|plan| {
+                plan.templates
+                    .iter()
+                    .any(|template| !template.dependency_transforms.is_empty())
+            })
+        });
         let has_recurrence = config.routes.iter().any(|route| route.recurrence.is_some());
         Ok(Self {
             config,
@@ -165,6 +173,7 @@ impl TaskRuntime {
             has_reasoner_selection,
             has_reasoning_recovery,
             has_reasoning_request_limits,
+            has_dependency_transforms,
             has_recurrence,
             live_clock: true,
         })
@@ -248,7 +257,7 @@ impl TaskRuntime {
             self.admit_recurring_checks(now, &mut report)?;
         }
         self.activate_scheduled(host, now)?;
-        self.advance_dependencies(host)?;
+        self.advance_dependencies(host, has_deadlines, &mut report)?;
         self.journal.begin_dispatch_tick()?;
         for _ in 0..self.config.max_jobs_per_tick {
             let Some((sequence, route_id, input_version_id, priority)) = self.journal.next()?

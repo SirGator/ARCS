@@ -661,6 +661,11 @@
 > Adapter-Sitzungen und benannte Kapazitäten werden mit den anderen
 > Aufrufen geteilt. Der Core prüft und speichert jedes Ergebnis.
 >
+> Einundsiebzigster Schritt gemäß v3 §5.2 MGR-07, §7.2 PAR-04 und §9.2, CAP-03.
+> Planvorlagen können pro Quellschema freigegebene Transform-Verträge nutzen.
+> Der Nachfolger wartet auf die Projektion, den Transform-Worker und das
+> schema-geprüfte Ergebnis.
+>
 **Leitbild:** ARCS ist ein universeller Agent. Es soll sich einfach bedienen lassen, beliebige kompatible Systeme verbinden, eigenständig Probleme lösen und langfristige Aufgaben über Monate verfolgen.
 
 ## 1. Verbindliche Architekturregeln

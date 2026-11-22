@@ -15,6 +15,8 @@ pub(super) struct PendingTransform {
     worker: JoinHandle<()>,
     deadline: Instant,
     timed_out: bool,
+    standalone: bool,
+    tasks: HashSet<(std::path::PathBuf, u64)>,
     pub(super) claims: resources::ResourceClaims,
 }
 
@@ -70,6 +72,28 @@ impl Host {
         output_schema: &SchemaId,
         limit: usize,
     ) -> Result<Option<Artifact>, HostError> {
+        self.poll_transform_for(capability, input, output_schema, limit, None)
+    }
+
+    pub(crate) fn poll_dependency_transform(
+        &mut self,
+        task: (&Path, u64),
+        capability: &CapabilityRef,
+        input: &VersionId,
+        output_schema: &SchemaId,
+        limit: usize,
+    ) -> Result<Option<Artifact>, HostError> {
+        self.poll_transform_for(capability, input, output_schema, limit, Some(task))
+    }
+
+    fn poll_transform_for(
+        &mut self,
+        capability: &CapabilityRef,
+        input: &VersionId,
+        output_schema: &SchemaId,
+        limit: usize,
+        task: Option<(&Path, u64)>,
+    ) -> Result<Option<Artifact>, HostError> {
         if !(1..=32).contains(&limit) {
             return Err(invalid("transform worker limit must be 1..32"));
         }
@@ -83,13 +107,18 @@ impl Host {
             output_schema,
             &adapter.manifest().adapter_version,
         );
-        if let Some(job) = self.transform_jobs.get(&key) {
+        if let Some(job) = self.transform_jobs.get_mut(&key) {
             let inv = job.prepared.invocation();
             if &inv.capability != capability
                 || &inv.input_version_id != input
                 || &inv.output_schema_id != output_schema
             {
                 return Err(invalid("running transform request identity changed"));
+            }
+            if let Some((journal, sequence)) = task {
+                job.tasks.insert((journal.to_path_buf(), sequence));
+            } else {
+                job.standalone = true;
             }
             return self.collect_transform(&key);
         }
@@ -154,6 +183,11 @@ impl Host {
                         worker,
                         deadline,
                         timed_out: false,
+                        standalone: task.is_none(),
+                        tasks: task
+                            .into_iter()
+                            .map(|(journal, sequence)| (journal.to_path_buf(), sequence))
+                            .collect(),
                         claims,
                     },
                 );
@@ -172,7 +206,52 @@ impl Host {
         }
     }
 
+    pub(crate) fn dependency_transform_tasks(&self, journal: &Path) -> HashSet<u64> {
+        self.transform_jobs
+            .values()
+            .flat_map(|job| &job.tasks)
+            .filter_map(|(path, sequence)| (path == journal).then_some(*sequence))
+            .collect()
+    }
+
+    pub(crate) fn release_dependency_transforms(
+        &mut self,
+        journal: &Path,
+        abandoned: &HashSet<u64>,
+    ) {
+        let mut orphaned = Vec::new();
+        for (key, job) in &mut self.transform_jobs {
+            job.tasks
+                .retain(|(path, sequence)| path != journal || !abandoned.contains(sequence));
+            if job.tasks.is_empty() && !job.standalone {
+                orphaned.push(key.clone());
+            }
+        }
+        for key in orphaned {
+            // Transform is pure. Don't attach its result to a stopped task.
+            // Keep its session busy until the adapter call has ended.
+            self.take_ready_transform(&key);
+        }
+    }
+
     fn collect_transform(&mut self, key: &str) -> Result<Option<Artifact>, HostError> {
+        let Some((prepared, response)) = self.take_ready_transform(key) else {
+            return Ok(None);
+        };
+        let adapter_id = prepared.invocation().capability.adapter_id.clone();
+        self.transform_service()
+            .finish(prepared, response)
+            .map(Some)
+            .map_err(|error| transform_error(&adapter_id, error))
+    }
+
+    fn take_ready_transform(
+        &mut self,
+        key: &str,
+    ) -> Option<(
+        PreparedTransform,
+        Result<TransformResponse, AdapterCallError>,
+    )> {
         let job = &self.transform_jobs[key];
         if !job.worker.is_finished() {
             if !job.timed_out && Instant::now() >= job.deadline {
@@ -180,7 +259,7 @@ impl Host {
                 self.abort_transform_adapter(&adapter_id);
                 self.transform_jobs.get_mut(key).unwrap().timed_out = true;
             }
-            return Ok(None);
+            return None;
         }
         let response = if job.timed_out {
             Err(AdapterCallError::Timeout)
@@ -205,10 +284,7 @@ impl Host {
         {
             self.abort_transform_adapter(&adapter_id);
         }
-        self.transform_service()
-            .finish(job.prepared, response)
-            .map(Some)
-            .map_err(|error| transform_error(&adapter_id, error))
+        Some((job.prepared, response))
     }
 
     fn abort_transform_adapter(&mut self, adapter_id: &AdapterId) {

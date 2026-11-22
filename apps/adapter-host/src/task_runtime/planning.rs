@@ -9,7 +9,7 @@ mod replanning;
 
 use super::{
     ReasoningRoute,
-    dependencies::{DependencyBinding, TaskDependency},
+    dependencies::{DependencyBinding, DependencyTransform, TaskDependency},
 };
 use arcs::{
     adapters::CapabilityRef,
@@ -102,6 +102,8 @@ pub struct StepTemplate {
     pub export_fields: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub accepted_dependency_schemas: Option<Vec<SchemaId>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dependency_transforms: Vec<DependencyTransform>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub replanning_failure_receipt_fields: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
