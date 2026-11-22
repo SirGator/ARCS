@@ -1,6 +1,7 @@
 mod diagnostics;
 mod git_edit;
 mod runner;
+mod sandbox;
 mod source_read;
 
 use std::io::{self, BufReader};

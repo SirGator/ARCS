@@ -776,3 +776,169 @@ fn source_request_rejects_files_outside_its_repository_scope_or_byte_budget() {
         );
     }
 }
+
+const ISOLATED_CAPABILITY: &str = "check.revision.isolated";
+
+fn configure_isolated_checks(f: &Fixture, program: &Path, definitions: Value) -> String {
+    let base = enable_edits(f, &f.0.join("project"));
+    let schemas = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("schemas");
+    let mut host = f.read("host.json");
+    host["adapters"][0]["inherit_env"] = json!(["ARCS_TEST_BWRAP"]);
+    host["schemas"].as_array_mut().unwrap().extend([
+        json!(schemas.join("revision-candidate.schema.json")),
+        json!(schemas.join("revision-diagnostic-execution.schema.json")),
+    ]);
+    f.write("host.json", host);
+    let mut grant = f.read("grant.json");
+    grant["enabled_capabilities"] = json!(["check.run", ISOLATED_CAPABILITY]);
+    grant["granted_permissions"] = json!(["workspace.check", "workspace.check_revision_isolated"]);
+    f.write("grant.json", grant);
+
+    let mut profile = f.read("profile.json");
+    let definitions = definitions.as_object().unwrap();
+    profile["checks"]
+        .as_object_mut()
+        .unwrap()
+        .extend(definitions.clone());
+    profile["isolated_revision_checks"] =
+        json!({"program":program,"checks":definitions.keys().collect::<Vec<_>>()});
+    f.write("profile.json", profile);
+    base
+}
+
+fn isolated_candidate(host: &Host, name: &str, revision: &str) -> Artifact {
+    propose(
+        host,
+        name,
+        REVISION_SCHEMA,
+        ISOLATED_CAPABILITY,
+        json!({"check":name,"revision":revision}),
+    )
+}
+
+#[test]
+fn a_missing_launcher_receipt_cannot_pass_or_fall_back_to_an_unisolated_check() {
+    let f = Fixture::new();
+    let marker = f.0.join("unsandboxed");
+    // A launcher that returns success without having started a sandbox.
+    let base = configure_isolated_checks(
+        &f,
+        Path::new("/usr/bin/true"),
+        json!({
+            "must-isolate":{"program":"/usr/bin/python3","timeout_ms":2000,
+                "args":["-I","-c","import pathlib,sys; pathlib.Path(sys.argv[1]).touch()",marker]}
+        }),
+    );
+
+    let mut host = f.open();
+    let adapter = AdapterId(ADAPTER.into());
+    let proposed = isolated_candidate(&host, "must-isolate", &base);
+    let action = approve_for(&host, &proposed, ISOLATED_CAPABILITY);
+    let receipt = host.execute_approved(&adapter, &action).unwrap();
+    assert_eq!(receipt.payload["result"]["status"], "runner_error");
+    assert!(!marker.exists());
+    let bypass = approve(&host, &candidate(&host, "legacy-bypass", "must-isolate"));
+    let error = host
+        .execute_approved(&adapter, &bypass)
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("isolated check requires a Git revision"),
+        "{error}"
+    );
+    assert!(!marker.exists());
+}
+
+#[test]
+#[ignore = "requires Bubblewrap and usable Linux user and network namespaces"]
+fn bubblewrap_isolates_the_revision_and_reports_workload_exit_and_timeout() {
+    let program = std::env::var_os("ARCS_TEST_BWRAP")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/usr/bin/bwrap"));
+    let f = Fixture::new();
+    let host_file = f.0.join("host-only");
+    fs::write(&host_file, "outside the sandbox").unwrap();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let host_port = listener.local_addr().unwrap().port();
+    let host_pid = std::process::id();
+    let probe = r#"
+import os
+from pathlib import Path
+import socket
+import sys
+import time
+assert Path.cwd() == Path('/workspace')
+assert Path('calculator.py').read_text().startswith('def add')
+assert not Path(sys.argv[1]).exists()
+assert os.environ.get('HOME') == '/tmp' and 'ARCS_TEST_BWRAP' not in os.environ
+assert not Path('/proc', sys.argv[3]).exists()
+assert int(next(line.split()[1] for line in Path('/proc/self/status').read_text().splitlines()
+                if line.startswith('CapEff:')), 16) == 0
+try:
+    Path('changed').write_text('no')
+except OSError as error:
+    import errno
+    assert error.errno == errno.EROFS
+else:
+    raise AssertionError('workspace was writable')
+Path('/tmp/scratch').write_text('yes')
+try:
+    with socket.create_connection(('127.0.0.1', int(sys.argv[2])), .2):
+        raise AssertionError('host listener was reachable')
+except OSError:
+    pass
+if sys.argv[4] == 'fail':
+    print('isolated check failed', file=sys.stderr, flush=True)
+    raise SystemExit(17)
+if sys.argv[4] == 'slow':
+    print('isolated check started', flush=True)
+    time.sleep(10)
+"#;
+    let definition = |mode, duration| {
+        json!({
+            "program":"/usr/bin/python3","timeout_ms":duration,
+            "args":["-I","-B","-c",probe,host_file,host_port.to_string(),host_pid.to_string(),mode]
+        })
+    };
+    let base = configure_isolated_checks(
+        &f,
+        &program,
+        json!({
+            "scope":definition("pass", 5000),
+            "failed":definition("fail", 5000),
+            "slow-isolated":definition("slow", 1000),
+        }),
+    );
+    let mut host = f.open();
+    let adapter = AdapterId(ADAPTER.into());
+    for (name, status) in [
+        ("scope", "passed"),
+        ("failed", "failed"),
+        ("slow-isolated", "timed_out_or_killed"),
+    ] {
+        let proposed = isolated_candidate(&host, name, &base);
+        let action = approve_for(&host, &proposed, ISOLATED_CAPABILITY);
+        let payload = host.execute_approved(&adapter, &action).unwrap().payload;
+        assert_eq!(payload["result"]["status"], status, "{payload:?}");
+        assert_eq!(payload["result"]["revision"], base);
+        if name == "failed" {
+            assert_eq!(payload["result"]["exit_code"], 17);
+            assert_eq!(
+                payload["diagnostics"]["stderr"]["text"],
+                "isolated check failed\n"
+            );
+        }
+        if name == "slow-isolated" {
+            assert_eq!(
+                payload["diagnostics"]["stdout"]["text"],
+                "isolated check started\n"
+            );
+        }
+    }
+    assert!(!f.0.join("project/changed").exists());
+    assert_eq!(
+        fs::read_to_string(&host_file).unwrap(),
+        "outside the sandbox"
+    );
+    host.shutdown().unwrap();
+}

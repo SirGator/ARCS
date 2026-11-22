@@ -247,7 +247,7 @@ fn output_text(output: Output, operation: &str) -> Result<String, String> {
 pub(crate) struct TemporaryDirectory(PathBuf);
 
 impl TemporaryDirectory {
-    pub(super) fn create(parent: &Path, purpose: &str) -> io::Result<Self> {
+    pub(crate) fn create(parent: &Path, purpose: &str) -> io::Result<Self> {
         static NEXT: AtomicU64 = AtomicU64::new(0);
         loop {
             let path = parent.join(format!(

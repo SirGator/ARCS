@@ -45,7 +45,11 @@ pub fn reason(invocation: &ReasoningInvocationV2) -> Result<ReasoningResponseV2,
         (CHECK, Some("plan")) => {
             required_capabilities.push(select_action(
                 invocation,
-                &["check.revision", "check.revision.diagnostic"],
+                &[
+                    "check.revision",
+                    "check.revision.diagnostic",
+                    "check.revision.isolated",
+                ],
             )?);
             let [binding] = invocation.constraints["task_dependencies"]
                 .as_array()

@@ -7,6 +7,7 @@ use std::time::Instant;
 
 use crate::diagnostics::{self, Diagnostics};
 use crate::git_edit::{self, RepositoryScope};
+use crate::sandbox::{self, Sandbox};
 use crate::source_read;
 
 use arcs_adapter_protocol::{
@@ -45,6 +46,8 @@ struct Profile {
     revision_checks: BTreeSet<String>,
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     diagnostic_revision_checks: BTreeSet<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    isolated_revision_checks: Option<Sandbox>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -119,6 +122,23 @@ impl Runner {
                 "revision checks require a configured Git edit ref and named checks".into(),
             );
         }
+        if let Some(sandbox) = &mut profile.isolated_revision_checks {
+            sandbox.program = base
+                .join(&sandbox.program)
+                .canonicalize()
+                .map_err(message)?;
+            if !sandbox.program.is_file()
+                || profile.edit.is_none()
+                || sandbox.checks.is_empty()
+                || sandbox.checks.iter().any(|name| {
+                    !profile.checks.contains_key(name)
+                        || profile.revision_checks.contains(name)
+                        || profile.diagnostic_revision_checks.contains(name)
+                })
+            {
+                return Err("isolated revision checks need Bubblewrap, a configured Git ref and exclusive named checks".into());
+            }
+        }
         for (name, check) in &mut profile.checks {
             // Keep aliases such as rustup's cargo proxy as the executable name.
             check.program = base.join(&check.program);
@@ -128,6 +148,13 @@ impl Runner {
                 || check.args.iter().any(|argument| argument.contains('\0'))
             {
                 return Err(format!("invalid check definition: {name}"));
+            }
+            if profile
+                .isolated_revision_checks
+                .as_ref()
+                .is_some_and(|sandbox| sandbox.checks.contains(name))
+            {
+                sandbox::validate_program(&check.program)?;
             }
         }
 
@@ -222,26 +249,29 @@ impl Runner {
     fn execute_named(&self, invocation: &ActInvocation) -> Result<ActResponse, AdapterError> {
         let action: CommandSelection =
             self.materialized(invocation, CAPABILITY, CANDIDATE, RESULT)?;
-        self.execute_check(invocation, &action.check, None, false)
+        if self.sandbox_for(&action.check).is_some() {
+            return Err(AdapterError::rejected(
+                "isolated check requires a Git revision",
+            ));
+        }
+        self.execute_check(invocation, &action.check, None)
     }
 
-    fn execute_revision(
-        &self,
-        invocation: &ActInvocation,
-        diagnostic: bool,
-    ) -> Result<ActResponse, AdapterError> {
-        let (capability, schema, allowed) = if diagnostic {
-            (
-                DIAGNOSTIC_CAPABILITY,
+    fn execute_revision(&self, invocation: &ActInvocation) -> Result<ActResponse, AdapterError> {
+        let capability = invocation.capability.capability_id.0.as_str();
+        let (schema, allowed) = match capability {
+            REVISION_CAPABILITY => (REVISION_RESULT, &self.profile.revision_checks),
+            DIAGNOSTIC_CAPABILITY => (DIAGNOSTIC_RESULT, &self.profile.diagnostic_revision_checks),
+            sandbox::CAPABILITY => (
                 DIAGNOSTIC_RESULT,
-                &self.profile.diagnostic_revision_checks,
-            )
-        } else {
-            (
-                REVISION_CAPABILITY,
-                REVISION_RESULT,
-                &self.profile.revision_checks,
-            )
+                &self
+                    .profile
+                    .isolated_revision_checks
+                    .as_ref()
+                    .ok_or_else(|| AdapterError::rejected("isolated checks are not configured"))?
+                    .checks,
+            ),
+            _ => return Err(AdapterError::rejected("unknown revision check capability")),
         };
         let action: RevisionSelection =
             self.materialized(invocation, capability, REVISION_CANDIDATE, schema)?;
@@ -250,12 +280,14 @@ impl Runner {
                 "workspace revision check requires a configured check and a full commit ID",
             ));
         }
-        self.execute_check(
-            invocation,
-            &action.check,
-            Some(&action.revision),
-            diagnostic,
-        )
+        self.execute_check(invocation, &action.check, Some(&action.revision))
+    }
+
+    fn sandbox_for(&self, name: &str) -> Option<&Sandbox> {
+        self.profile
+            .isolated_revision_checks
+            .as_ref()
+            .filter(|sandbox| sandbox.checks.contains(name))
     }
 
     fn execute_check(
@@ -263,8 +295,8 @@ impl Runner {
         invocation: &ActInvocation,
         name: &str,
         revision: Option<&str>,
-        diagnostic: bool,
     ) -> Result<ActResponse, AdapterError> {
+        let diagnostic = invocation.result_schema_id.0 == DIAGNOSTIC_RESULT;
         let check = self
             .profile
             .checks
@@ -319,7 +351,14 @@ impl Runner {
                     params![id, input],
                 )
                 .map_err(unavailable)?;
-            let (result, output) = run_check(working_dir, name, check, revision, diagnostic);
+            let (result, output) = run_check(
+                working_dir,
+                name,
+                check,
+                revision,
+                diagnostic,
+                self.sandbox_for(name),
+            );
             self.save_result(id, journal_result(result, output, diagnostic))?
         };
         let mut payload = if diagnostic {
@@ -359,7 +398,12 @@ impl Runner {
 impl Adapter for Runner {
     fn manifest(&self) -> AdapterManifest {
         let mut capabilities = Vec::new();
-        if !self.profile.checks.is_empty() {
+        if self
+            .profile
+            .checks
+            .keys()
+            .any(|name| self.sandbox_for(name).is_none())
+        {
             capabilities.push(act_capability(
                 CAPABILITY,
                 CANDIDATE,
@@ -391,6 +435,14 @@ impl Adapter for Runner {
                 DIAGNOSTIC_PERMISSION,
             ));
         }
+        if self.profile.isolated_revision_checks.is_some() {
+            capabilities.push(act_capability(
+                sandbox::CAPABILITY,
+                REVISION_CANDIDATE,
+                DIAGNOSTIC_RESULT,
+                sandbox::PERMISSION,
+            ));
+        }
         if self.profile.source.is_some() {
             capabilities.push(source_read::capability());
         }
@@ -420,8 +472,9 @@ impl Adapter for Runner {
     fn execute(&mut self, invocation: ActInvocation) -> Result<ActResponse, AdapterError> {
         match invocation.capability.capability_id.0.as_str() {
             CAPABILITY => return self.execute_named(&invocation),
-            REVISION_CAPABILITY => return self.execute_revision(&invocation, false),
-            DIAGNOSTIC_CAPABILITY => return self.execute_revision(&invocation, true),
+            REVISION_CAPABILITY | DIAGNOSTIC_CAPABILITY | sandbox::CAPABILITY => {
+                return self.execute_revision(&invocation);
+            }
             git_edit::CAPABILITY => {}
             _ => return Err(AdapterError::rejected("unknown workspace capability")),
         }
@@ -470,6 +523,7 @@ fn run_check(
     check: &Check,
     revision: Option<&str>,
     diagnostic: bool,
+    sandbox: Option<&Sandbox>,
 ) -> (Value, Option<Diagnostics>) {
     let started = Instant::now();
     // The supervisor maintains the deadline even if the adapter process is lost.
@@ -492,28 +546,34 @@ fn run_check(
     }
     command
         .args(["--signal=KILL", "--", &timeout])
-        .arg(&check.program)
-        .args(&check.args)
         .current_dir(workspace)
         .stdin(Stdio::null());
-    let process = if diagnostic {
-        diagnostics::run(&mut command).map(|(status, output)| (status, Some(output)))
+    let process = if let Some(sandbox) = sandbox {
+        sandbox
+            .run(&mut command, workspace, &check.program, &check.args)
+            .map(|(status, output, reported)| (status, Some(output), reported))
     } else {
-        command
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .map(|status| (status, None))
+        command.arg(&check.program).args(&check.args);
+        if diagnostic {
+            diagnostics::run(&mut command).map(|(status, output)| (status, Some(output), true))
+        } else {
+            command
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .map(|status| (status, None, true))
+        }
     };
-    let (process, output) = match process {
-        Ok((status, output)) => (Some(status), output),
-        Err(_) => (None, None),
+    let (process, output, reported_exit) = match process {
+        Ok((status, output, reported_exit)) => (Some(status), output, reported_exit),
+        Err(_) => (None, None, false),
     };
     let (status, exit_code) = match process {
-        Some(exit) if exit.success() => ("passed", exit.code()),
         Some(exit) if exit.code().is_none() || matches!(exit.code(), Some(124 | 137)) => {
             ("timed_out_or_killed", exit.code())
         }
+        Some(exit) if !reported_exit => ("runner_error", exit.code()),
+        Some(exit) if exit.success() => ("passed", exit.code()),
         Some(exit) if matches!(exit.code(), Some(125..=127)) => ("runner_error", exit.code()),
         Some(exit) => ("failed", exit.code()),
         None => ("runner_error", None),
@@ -523,7 +583,10 @@ fn run_check(
     if let Some(code) = exit_code {
         result["exit_code"] = json!(code);
     }
-    let output = output.filter(|_| matches!(status, "failed" | "timed_out_or_killed"));
+    let output = output.filter(|_| {
+        matches!(status, "failed" | "timed_out_or_killed")
+            || (sandbox.is_some() && status == "runner_error")
+    });
     (result, output)
 }
 

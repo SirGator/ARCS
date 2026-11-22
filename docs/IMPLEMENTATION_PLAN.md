@@ -567,6 +567,12 @@
 > Pfad und Basis-Commit vor Freigabe und Act. Prozess- und Modelltests
 > decken passenden und abweichenden Quellbezug ab.
 >
+> Fünfundfünfzigster Schritt gemäß v3 §4 Act, §10.1 SEC-06
+> und TEST-02. Freigegebene Git-Prüfungen können in einem eigenen
+> Bubblewrap-Namespace laufen. Die Git-Kopie ist schreibgeschützt.
+> Der Sandbox-Start erzeugt einen separaten Laufbeleg. Der
+> bestehende Reparaturplan verarbeitet auch diese Prüfergebnisse.
+>
 **Leitbild:** ARCS ist ein universeller Agent. Es soll sich einfach bedienen lassen, beliebige kompatible Systeme verbinden, eigenständig Probleme lösen und langfristige Aufgaben über Monate verfolgen.
 
 ## 1. Verbindliche Architekturregeln

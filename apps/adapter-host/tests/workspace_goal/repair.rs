@@ -946,3 +946,36 @@ fn source_match_policy_must_name_an_exported_source_field() {
     assert!(!f.path("runtime.sqlite").exists());
     host.shutdown().unwrap();
 }
+
+#[test]
+#[ignore = "requires Bubblewrap and usable Linux user and network namespaces"]
+fn a_workspace_repair_can_use_only_isolated_checks() {
+    let f = Fixture::new();
+    configure_retry(&f, &["result", "diagnostics"]);
+    let program = std::env::var_os("ARCS_TEST_BWRAP")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/usr/bin/bwrap"));
+    let mut checker = f.read("check-profile.json");
+    checker["diagnostic_revision_checks"] = json!([]);
+    checker["revision_checks"] = json!([]);
+    checker["isolated_revision_checks"] = json!({"program":program,"checks":["unit"]});
+    f.write("check-profile.json", checker);
+    let mut grant = f.read("check-grant.json");
+    grant["enabled_capabilities"] = json!(["edit.apply", "check.revision.isolated", "source.read"]);
+    grant["granted_permissions"] = json!([
+        "workspace.edit",
+        "workspace.check_revision_isolated",
+        "workspace.source_read"
+    ]);
+    f.write("check-grant.json", grant);
+    let mut runtime = f.read("runtime.json");
+    let capability =
+        json!({"adapter_id":"workspace.checker","capability_id":"check.revision.isolated"});
+    for index in [1, 3] {
+        let route = &mut runtime["routes"][0]["plan"]["templates"][index]["route"];
+        route["allowed_capabilities"] = json!([capability]);
+        route["goal"]["actions"][0]["capability"] = capability.clone();
+    }
+    f.write("runtime.json", runtime);
+    verify_repair(&f, false);
+}

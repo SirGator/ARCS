@@ -137,9 +137,9 @@ Ausführbarkeitsbit der Dateien. Git-Filter und Exportattribute werden
 dabei umgangen. Bäume mit Symlinks oder Submodulen werden abgewiesen.
 Das Limit beträgt 50.000 Dateien, 64 MiB je Datei, 512 MiB insgesamt
 und 8 MiB für die Baumliste. Das Prüfprogramm arbeitet als Benutzer
-des Adapters in der temporären Kopie. Eine Betriebssystem-Sandbox
-ist dafür weiterhin offen. Das Host-Zeitlimit muss den Kopiervorgang
-und das Prüfzeitlimit abdecken.
+des Adapters in der temporären Kopie. Für fremden oder generierten
+Code steht die isolierte Prüffähigkeit zur Verfügung. Das Host-Zeitlimit
+muss den Kopiervorgang und das Prüfzeitlimit abdecken.
 
 `arcs.execution_result.workspace_revision_check.v1` hält den Commit
 unter `result.revision` neben Prüfstatus und Exitcode fest. Bei
@@ -180,6 +180,56 @@ konfigurierten Prüfprogramm. Wähle Programme, deren Ausgabe
 für die freigegebenen Empfänger bestimmt ist.
 
 [Konfiguration der Neuplanung](plan-replanning.md#geprüfte-fehlerquittungen-für-den-ersatzplaner)
+
+## Eine Revision mit Bubblewrap isoliert prüfen
+
+Das Adapterprofil aktiviert `check.revision.isolated` für ausgewählte
+Prüfnamen. Die Fähigkeit braucht dieselbe Git-Arbeitsreferenz wie
+eine revisionsgenaue Prüfung und einen vertrauenswürdigen
+Bubblewrap-Launcher. Das getestete Linux-Profil benötigt
+Benutzer- und Netzwerk-Namespaces.
+
+```json
+{
+  "isolated_revision_checks": {
+    "program": "/usr/bin/bwrap",
+    "checks": ["unit"]
+  }
+}
+```
+
+Der Grant autorisiert `check.revision.isolated` mit
+`workspace.check_revision_isolated`. Der Host verwendet
+`arcs.workspace_revision_check_candidate.v1` und das Diagnose-
+Ausführungsschema `arcs.execution_result.workspace_revision_check.v2`.
+Die in `checks` genannten Programme behalten fest konfigurierte
+Argumente. Ein isoliert konfigurierter Prüfname ist für die anderen
+Prüffähigkeiten des Profils gesperrt.
+
+Bubblewrap bindet die Git-Kopie schreibgeschützt unter `/workspace` ein.
+Programme unter den gemounteten Systemverzeichnissen wie `/usr`
+und `/bin` stehen ebenfalls schreibgeschützt bereit. `/tmp` ist ein
+neues tmpfs mit 64 MiB. Das Profil verwendet eine leere
+Prozessumgebung mit fest gesetztem Pfad und temporärem Home-Verzeichnis.
+Der Prozess erhält eigene Netzwerk- und PID-Namespaces und startet
+ohne zusätzliche Linux-Capabilities.
+
+Der Adapter verlangt Bubblewraps separaten Exitbeleg. Ein fehlgeschlagener
+Start liefert `runner_error` mit begrenzter Diagnose, soweit vorhanden.
+Das Prüfprogramm wird in diesem Fall nicht außerhalb der Sandbox
+gestartet. Das vorhandene Zeitlimit bleibt wirksam. Das Profil
+setzt keine eigenen CPU-, RAM- oder Prozessquoten für den Prüfprozess.
+
+Die beiden Prozess-Tests benötigen ein nutzbares Bubblewrap. Für einen
+abweichenden Installationspfad kann der Tester `ARCS_TEST_BWRAP` setzen.
+
+```bash
+cargo test -p arcs-workspace-check --locked --offline bubblewrap_isolates -- --ignored
+cargo test -p arcs-host --locked --offline --test workspace_goal \
+  a_workspace_repair_can_use_only_isolated_checks -- --ignored
+```
+
+[Offizielle Bubblewrap-Dokumentation](https://github.com/containers/bubblewrap/blob/main/bwrap.xml)
 
 ## Quelltext einer Revision abrufen
 
