@@ -26,3 +26,6 @@ und weist nach, dass die zweite Runde den verfügbaren Planer selbst bindet.
 Er prüft nach Neustart den unveränderten Rundenbeleg und lehnt eine verspätete
 Freigabe für den Vorschlag der ersten Runde ab. Der simulierte Aktor bestätigt
 jeweils genau eine Wirkung pro freigegebener Runde.
+
+Der vollständige Rust-Workspace-Testlauf meldete 723 bestandene und
+5 als ignoriert markierte Tests (`cargo test --workspace --locked --offline`).

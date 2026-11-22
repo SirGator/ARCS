@@ -66,6 +66,11 @@ verlangt genau eine der erlaubten Act-Capabilities. Alle Aktionsziele einer
 Route müssen dieses Schema akzeptieren und idempotente Ausführung anbieten.
 Andere Aufgaben können andere Schemas und Ziele verwenden.
 
+Die [dauerhafte Planerauswahl](reasoner-routing.md) gilt standardmäßig für die
+gesamte Aufgabe. Mit `reasoner_selection.reselect_each_round` auf `true`
+wählt ARCS für jede Zielrunde einen Planer. Wiederholung, Freigabe und
+Wiederanlauf innerhalb der Runde verwenden denselben Beleg.
+
 [Wartepausen zwischen Zielrunden](goal-pauses.md) verwenden denselben
 Scheduler wie die anfängliche Aktivierung. Nach dem Wecken werden aktuelle
 Daten erfasst und neue Handlungsvorschläge erneut geprüft und freigegeben.
