@@ -471,6 +471,12 @@ fn run_failed_revision(host: &mut Host, runtime: &mut TaskRuntime) -> GoalTask {
 fn a_failed_revision_and_its_frozen_source_drive_the_repair_and_recheck() {
     let f = Fixture::new();
     configure_retry(&f, &["result", "diagnostics"]);
+    let mut runtime = f.read("runtime.json");
+    runtime["routes"][0]["plan"]["templates"][2]["accepted_dependency_schemas"] =
+        json!([DIAGNOSTIC_RECEIPT]);
+    runtime["routes"][0]["plan"]["templates"][3]["accepted_dependency_schemas"] =
+        json!([EDIT_RECEIPT]);
+    f.write("runtime.json", runtime);
     verify_repair(&f, false);
 }
 

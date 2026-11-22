@@ -79,6 +79,17 @@ impl PlanningConfig {
                     "plan templates must be distinct authorized routes for the same input, without nested plans or fixed dependencies, with explicit exports and action authority confined to goals",
                 ));
             }
+            if let Some(schemas) = &template.accepted_dependency_schemas
+                && (schemas.len() > 32
+                    || schemas.iter().collect::<HashSet<_>>().len() != schemas.len()
+                    || schemas
+                        .iter()
+                        .any(|schema| host.schemas().get(schema).is_none()))
+            {
+                return Err(invalid(
+                    "accepted dependency schemas must be at most 32 distinct registered schemas",
+                ));
+            }
             if !template.replanning_failure_receipt_fields.is_empty()
                 && (self.replanning.is_none()
                     || !valid_export_fields(&template.replanning_failure_receipt_fields)
@@ -159,6 +170,10 @@ impl PlanningConfig {
     }
 
     pub(super) fn catalog(&self, host: &Host) -> Result<Value, HostError> {
+        let typed_dependencies = self
+            .templates
+            .iter()
+            .any(|template| template.accepted_dependency_schemas.is_some());
         let mut catalog = json!({"max_steps":self.max_steps,"max_total_runtime_ms":self.max_total_runtime_ms,
             "max_total_output_tokens":self.max_total_output_tokens,
             "templates":self.templates.iter().map(|template| {
@@ -167,16 +182,23 @@ impl PlanningConfig {
                 "method":template.route.method,"target_schema_id":template.route.target_schema_id,
                 "input_fields":template.route.payload_fields,"export_fields":template.export_fields,
                 "budget":template.route.budget});
+                if template.route.goal.is_some() || typed_dependencies {
+                    entry["result_schema_id"] = json!(template.route.dependency_result_schema());
+                }
+                if let Some(schemas) = &template.accepted_dependency_schemas {
+                    entry["accepted_dependency_schemas"] = json!(schemas);
+                }
                 if let Some(goal) = &template.route.goal {
                     entry["kind"] = json!("goal");
-                    entry["result_schema_id"] = json!(goal.export_execution_schema_id.as_ref()
-                        .map_or(crate::task_runtime::goal::ASSESSMENT_SCHEMA, |id| id.0.as_str()));
                     entry["goal_limits"] = json!({"max_rounds":goal.max_rounds,"initial_assessment":goal.initial_assessment,
                         "approval":"manual","actions":goal.actions.iter().map(|a| &a.capability).collect::<Vec<_>>(),
                         "assessment_method":goal.assessment.method,"assessment_budget":goal.assessment.budget});
                 }
                 if !template.replanning_failure_receipt_fields.is_empty() {
                     entry["replanning_failure_receipt_fields"] = json!(template.replanning_failure_receipt_fields);
+                    if typed_dependencies {
+                        entry["failure_result_schema_id"] = json!(template.route.dependency_result_schema());
+                    }
                 }
                 entry
             }).collect::<Vec<_>>()});
@@ -292,7 +314,8 @@ impl PlanningConfig {
         let mut validation_routes = Vec::new();
         let mut previous_routes = HashMap::new();
         for step in &proposal.steps {
-            let mut route = templates[step.template.as_str()].route.clone();
+            let consumer = templates[step.template.as_str()];
+            let mut route = consumer.route.clone();
             route.id = route_id(parent, &step.id, self.replanning.as_ref().map(|_| revision));
             if static_routes.iter().any(|fixed| fixed.id == route.id) {
                 return Err(invalid("generated plan route collides with a static route"));
@@ -329,6 +352,7 @@ impl PlanningConfig {
                         })
                     })?;
                     let (binding, source_route) = previous_dependency(edge, previous, &templates)?;
+                    consumer.validate_dependency_schema(&source_route)?;
                     previous_edges.push(TaskDependency {
                         route_id: binding.route_id.clone(),
                         payload_fields: edge.payload_fields.clone(),
@@ -342,11 +366,12 @@ impl PlanningConfig {
                 let upstream = steps
                     .get(edge.step_id.as_str())
                     .ok_or_else(|| invalid("plan references an unknown step"))?;
-                let allowed = &templates[upstream.template.as_str()].export_fields;
+                let producer = templates[upstream.template.as_str()];
+                consumer.validate_dependency_schema(&producer.route)?;
                 if edge
                     .payload_fields
                     .iter()
-                    .any(|field| !allowed.contains(field))
+                    .any(|field| !producer.export_fields.contains(field))
                 {
                     return Err(invalid(
                         "plan requests a field outside the template exports",
@@ -371,6 +396,21 @@ impl PlanningConfig {
         validation_routes.extend(previous_routes.into_values());
         crate::task_runtime::dependencies::validate_routes(&validation_routes)?;
         Ok(accepted)
+    }
+}
+
+impl StepTemplate {
+    fn validate_dependency_schema(&self, producer: &ReasoningRoute) -> Result<(), HostError> {
+        if let Some(schemas) = &self.accepted_dependency_schemas {
+            let schema = producer.dependency_result_schema();
+            if !schemas.contains(&schema) {
+                return Err(invalid(format!(
+                    "template {} does not accept dependency schema {}",
+                    self.route.id, schema.0
+                )));
+            }
+        }
+        Ok(())
     }
 }
 

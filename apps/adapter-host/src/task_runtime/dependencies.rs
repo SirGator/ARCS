@@ -9,13 +9,26 @@ use arcs::store::{ArtifactRelations, relation_kinds};
 use serde::{Deserialize, Serialize};
 
 use super::{
-    CompletedTask, TaskRuntime,
+    CompletedTask, ReasoningRoute, TaskRuntime,
     config::invalid,
     goal::{ASSESSMENT_SCHEMA, GoalAssessment, GoalTask, GoalVerdict},
 };
 use crate::{Host, HostError};
 
 pub(super) use config::validate as validate_routes;
+
+impl ReasoningRoute {
+    pub(super) fn dependency_result_schema(&self) -> SchemaId {
+        self.goal.as_ref().map_or_else(
+            || self.target_schema_id.clone(),
+            |goal| {
+                goal.export_execution_schema_id
+                    .clone()
+                    .unwrap_or_else(|| SchemaId(ASSESSMENT_SCHEMA.into()))
+            },
+        )
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -140,10 +153,11 @@ impl TaskRuntime {
                     .capability
                     .adapter_id
                     .0;
+                let result_schema = route.dependency_result_schema();
                 let artifacts = saved
                     .candidate_version_ids
                     .iter()
-                    .map(|version| load_result(host, version, &producer, &route.target_schema_id));
+                    .map(|version| load_result(host, version, &producer, &result_schema));
                 bind_parent(&parent, saved.result_version_id, artifacts)
             }
             "completed" if route.goal.is_some() => {
@@ -155,23 +169,19 @@ impl TaskRuntime {
                     .as_ref()
                     .ok_or_else(|| invalid("completed dependency goal has no assessment"))?;
                 let assessor = &goal.assessment.capability.adapter_id.0;
-                let artifact = if let Some(schema) = &goal.export_execution_schema_id {
+                let result_schema = route.dependency_result_schema();
+                let artifact = if goal.export_execution_schema_id.is_some() {
                     assessed_goal_receipt(
                         host,
                         &saved,
                         assessment,
                         assessor,
-                        schema,
+                        &result_schema,
                         OutcomeVerdict::Success,
                     )?
                     .ok_or_else(|| invalid("completed goal export lacks a successful assessment"))
                 } else {
-                    load_result(
-                        host,
-                        assessment,
-                        assessor,
-                        &SchemaId(ASSESSMENT_SCHEMA.into()),
-                    )
+                    load_result(host, assessment, assessor, &result_schema)
                 };
                 bind_parent(&parent, assessment.clone(), std::iter::once(artifact))
             }

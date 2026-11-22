@@ -541,6 +541,8 @@ fn export_reuse_fixture() -> Fixture {
     let mut config = f.read("runtime.json");
     config["routes"][0]["plan"]["templates"][0]["route"]["budget"]["max_context_items"] = json!(2);
     config["routes"][0]["plan"]["replanning"]["reuse_completed_exports"] = json!(true);
+    config["routes"][0]["plan"]["templates"][2]["accepted_dependency_schemas"] =
+        json!(["arcs.solution_candidate.nearest.v1"]);
     config["routes"][0]["target_schema_id"] = json!("arcs.plan_candidate.v2");
     config["routes"][0]["max_reasoning_requests"] = json!(6);
     f.write("runtime.json", config);
@@ -716,6 +718,7 @@ fn previous_revision_dependencies_require_an_enabled_completed_visible_export() 
         ("private", "exceeds the predecessor exports"),
         ("omitted", "omitted from the replanning context"),
         ("capacity", "context budget must reserve room"),
+        ("schema", "template join does not accept dependency schema"),
     ] {
         let f = export_reuse_fixture();
         let mut model = f.read("planner.json");
@@ -738,6 +741,10 @@ fn previous_revision_dependencies_require_an_enabled_completed_visible_export() 
             "capacity" => {
                 config["routes"][0]["plan"]["templates"][2]["route"]["budget"]["max_context_items"] =
                     json!(2);
+            }
+            "schema" => {
+                config["routes"][0]["plan"]["templates"][2]["accepted_dependency_schemas"] =
+                    json!(["arcs.plan_candidate.v1"]);
             }
             _ => unreachable!(),
         }

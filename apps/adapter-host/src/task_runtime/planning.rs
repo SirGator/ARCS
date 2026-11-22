@@ -100,6 +100,8 @@ pub struct PlanningConfig {
 pub struct StepTemplate {
     pub route: ReasoningRoute,
     pub export_fields: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accepted_dependency_schemas: Option<Vec<SchemaId>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub replanning_failure_receipt_fields: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -117,6 +117,77 @@ fn unapproved_templates_cycles_exports_and_aggregate_budgets_are_rejected_withou
 }
 
 #[test]
+fn dependency_schema_must_match_the_receiving_template_before_children_start() {
+    let result_schema = "arcs.solution_candidate.nearest.v1";
+    for (schemas, ready) in [
+        (json!([result_schema]), true),
+        (json!(["arcs.plan_candidate.v1"]), false),
+        (json!([]), false),
+    ] {
+        let f = fixture("normal", "normal");
+        let mut config = f.read("runtime.json");
+        config["routes"][0]["plan"]["templates"][2]["accepted_dependency_schemas"] =
+            schemas.clone();
+        f.write("runtime.json", config);
+        let (mut host, mut runtime) = f.open();
+        let expected = if ready {
+            PlanState::ReadyForReview
+        } else {
+            PlanState::Rejected
+        };
+        until(&mut host, &mut runtime, |r| {
+            r.plans_after(0, 1)
+                .unwrap()
+                .first()
+                .is_some_and(|p| p.state == expected)
+        });
+        let receipt = runtime.plans_after(0, 1).unwrap().remove(0);
+        if ready {
+            assert_eq!(receipt.steps.len(), 3);
+            assert_eq!(f.count("join", "attempts"), 1);
+        } else {
+            assert!(receipt.steps.is_empty());
+            assert!(receipt.detail.as_deref().unwrap().contains(
+                "template join does not accept dependency schema arcs.solution_candidate.nearest.v1"
+            ));
+            assert!(!f.started("a") && !f.started("b") && !f.started("join"));
+        }
+        let planner = rusqlite::Connection::open(f.directory.join("planner.sqlite")).unwrap();
+        let raw: String = planner
+            .query_row("SELECT input FROM results", [], |row| row.get(0))
+            .unwrap();
+        let input: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        let templates = &input["constraints"]["task_planning"]["templates"];
+        assert_eq!(templates[0]["result_schema_id"], result_schema);
+        assert_eq!(templates[2]["accepted_dependency_schemas"], schemas);
+        assert_no_authority(&host);
+        host.shutdown().unwrap();
+    }
+}
+
+#[test]
+fn accepted_dependency_schemas_must_be_distinct_and_registered() {
+    let known = "arcs.solution_candidate.nearest.v1";
+    for schemas in [json!(["arcs.unknown.v1"]), json!([known, known])] {
+        let f = fixture("normal", "normal");
+        let mut config = f.read("runtime.json");
+        config["routes"][0]["plan"]["templates"][2]["accepted_dependency_schemas"] = schemas;
+        f.write("runtime.json", config);
+        let mut host = Host::open(f.directory.join("host.json")).unwrap();
+        let opened = TaskRuntime::open(
+            &host,
+            RuntimeConfig::load(f.directory.join("runtime.json")).unwrap(),
+        );
+        let Err(error) = opened else {
+            panic!("invalid dependency schema list accepted");
+        };
+        assert!(error.to_string().contains("distinct registered schemas"));
+        assert!(!f.directory.join("runtime.sqlite").exists());
+        host.shutdown().unwrap();
+    }
+}
+
+#[test]
 fn schema_overrides_and_no_solution_never_create_an_executable_plan() {
     for schema_override in [false, true] {
         let f = fixture("normal", "normal");

@@ -374,7 +374,11 @@ fn a_completed_goal_exports_its_assessment_to_a_dependent_reasoning_step() {
     config["routes"][0]["plan"]["templates"]
         .as_array_mut()
         .unwrap()
-        .push(json!({"route":report,"export_fields":["detail"]}));
+        .push(json!({
+            "route":report,
+            "export_fields":["detail"],
+            "accepted_dependency_schemas":["arcs.goal_assessment_candidate.v1"]
+        }));
     f.write("runtime.json", config);
     f.write("planner.json",json!({"proposal":{"steps":[{"id":"device","template":"switch"},{"id":"report","template":"report","dependencies":[{"step_id":"device","payload_fields":["goal_status","effect"]}]}]}}));
     let mut host = f.host();

@@ -73,6 +73,22 @@ Alle Capabilities und Budgets werden bei der Einrichtung und vor jedem Tick
 gegen die aktuellen registrierten Manifeste und Grants geprüft, auch für
 noch nicht ausgewählte Vorlagen.
 
+Die empfangende Betreiber-Vorlage kann neben `route` und `export_fields`
+akzeptierte Ergebnisschemas angeben. Ein Beispiel ist
+`"accepted_dependency_schemas": ["arcs.solution_candidate.nearest.v1"]`.
+Die Liste erlaubt bis zu 32 eindeutige registrierte Schema-IDs. `[]`
+schließt jede Abhängigkeitskante für diese Vorlage aus. Ohne Liste gilt
+die Prüfung der Exportfelder. Mit Liste müssen Schema und Exportfelder
+passen. Das gilt für Kanten derselben Revision, frühere Ergebnisexporte
+und freigegebene Fehlerquittungen. Bei Goals zählt das Schema der
+Wirkungsbewertung oder der konfigurierten Ausführungsquittung.
+
+Sobald mindestens eine Vorlage die Liste verwendet, zeigt der Planerkatalog
+`result_schema_id` je Vorlage und `failure_result_schema_id` für konfigurierte
+Fehlerexporte. `accepted_dependency_schemas` steht bei der jeweiligen
+empfangenden Vorlage. Die Übergabe bleibt eine Projektion ausgewählter Felder
+aus dem ursprünglichen Artefakt.
+
 Der Planner erhält unter `constraints.task_planning` einen Katalog mit
 Vorlagen-ID, Objective, Reasoner, Methode, Ziel-Schema, Eingangs-/Exportfeldern
 und Ressourcenbudget. Goal-Vorlagen beschreiben zusätzlich ihre Runden-,

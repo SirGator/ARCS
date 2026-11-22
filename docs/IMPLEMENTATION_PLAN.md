@@ -641,6 +641,11 @@
 > der anfänglichen Reasoner-Optionen seiner Vorlagen erhalten.
 > Nach einem Neustart verwendet dieselbe Revision denselben Beleg.
 >
+> Siebenundsechzigster Schritt gemäß v3 §9.1 und §9.2, CAP-03.
+> Empfangende Vorlagen können Ergebnisschemas für ihre Abhängigkeiten
+> vorgeben. Der Planer sieht die Exportverträge und der Host prüft
+> sie vor Aufnahme des Plans sowie beim Laden einer gespeicherten Revision.
+>
 **Leitbild:** ARCS ist ein universeller Agent. Es soll sich einfach bedienen lassen, beliebige kompatible Systeme verbinden, eigenständig Probleme lösen und langfristige Aufgaben über Monate verfolgen.
 
 ## 1. Verbindliche Architekturregeln

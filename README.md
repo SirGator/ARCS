@@ -85,7 +85,8 @@ dokumentiert Slice 62. Der [Bericht zur Reasoner-Auswahl mit technischen Messwer
 dokumentiert Slice 63. Der [Bericht zur Reasoner-Zuteilung mit Binärdaten](docs/ZWISCHENBERICHT_2026-11-22_REASONER_DATA_ADMISSION.md)
 dokumentiert Slice 64. Der [Bericht zur Planerauswahl pro Zielrunde](docs/ZWISCHENBERICHT_2026-11-22_GOAL_ROUND_ROUTING.md)
 dokumentiert Slice 65. Der [Bericht zu Verfügbarkeitsbelegen für Planvorlagen](docs/ZWISCHENBERICHT_2026-11-22_PLAN_TEMPLATE_AVAILABILITY.md)
-dokumentiert Slice 66. Die Berichte vom
+dokumentiert Slice 66. Der [Bericht zu Schema-Verträgen für Plan-Schritte](docs/ZWISCHENBERICHT_2026-11-22_PLAN_DEPENDENCY_SCHEMAS.md)
+dokumentiert Slice 67. Die Berichte vom
 [17. November](docs/ZWISCHENBERICHT_2026-11-17.md) und
 [16. November](docs/ZWISCHENBERICHT_2026-11-16.md) dokumentieren frühere
 Umsetzungsstände, Prüfergebnisse und offene Grenzen.
