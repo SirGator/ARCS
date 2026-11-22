@@ -270,8 +270,15 @@ Task-Erzeugung. CPU-Drosselung kann bei einer bestandenen Prüfung
 auftreten. Ein Speichermangel oder eine abgewiesene Task-Erzeugung
 liefert `resource_limit`. Bei normalem Abschluss oder Timeout
 beendet der Adapter verbleibende Gruppenprozesse und räumt die
-Kindgruppe auf. Nach einem abrupten Adapterabbruch kann eine leere
-Kindgruppe zurückbleiben.
+Kindgruppe auf. Vor dem Prüfstart speichert das Adapterjournal
+Name, Gerät und Inode der Kindgruppe. Nach einem abrupten Abbruch
+bereinigt der Adapter beim Öffnen desselben Journals die eindeutig
+zugeordneten Gruppen. Der erneute Aufruf einer abgebrochenen
+Prüfung erhält `interrupted`, ohne den Prüfbefehl zu starten.
+
+Gruppen ohne Journaleintrag bleiben unberührt. Bei einer
+abweichenden Gruppenidentität meldet der Adapter einen Fehler
+beim Start. Die Diagnose nennt die betroffene Gruppe.
 
 Für den Kerneltest setze `ARCS_TEST_CHECK_CGROUP` auf einen leeren,
 passend delegierten Prüfbereich und optional `ARCS_TEST_BWRAP`
@@ -281,6 +288,8 @@ aktivieren die Limits im isolierten Ende-zu-Ende-Reparaturtest.
 ```bash
 cargo test -p arcs-workspace-check --locked --offline \
   isolated_checks_enforce_and_report -- --ignored
+cargo test -p arcs-workspace-check --locked --offline \
+  a_killed_adapter_reaps_only_its_cgroup -- --ignored
 cargo test -p arcs-host --locked --offline --test workspace_goal \
   a_workspace_repair_can_use_only_isolated_checks -- --ignored
 ```

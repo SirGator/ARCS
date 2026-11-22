@@ -75,7 +75,8 @@ dokumentiert Slice 52. Der [Bericht zur lokalen Modellreparatur](docs/ZWISCHENBE
 dokumentiert Slice 53. Der [Bericht zum verpflichtenden Quellabgleich für Aktionen](docs/ZWISCHENBERICHT_2026-11-22_ACTION_SOURCE_MATCH.md)
 dokumentiert Slice 54. Der [Bericht zu isolierten Git-Prüfungen](docs/ZWISCHENBERICHT_2026-11-22_ISOLATED_CHECKS.md)
 dokumentiert Slice 55. Der [Bericht zu Ressourcenlimits für isolierte Prüfungen](docs/ZWISCHENBERICHT_2026-11-22_CHECK_RESOURCES.md)
-dokumentiert Slice 56. Die Berichte vom
+dokumentiert Slice 56. Der [Bericht zur Bereinigung abgebrochener Prüfungen](docs/ZWISCHENBERICHT_2026-11-22_CHECK_RESOURCE_RECOVERY.md)
+dokumentiert Slice 57. Die Berichte vom
 [17. November](docs/ZWISCHENBERICHT_2026-11-17.md) und
 [16. November](docs/ZWISCHENBERICHT_2026-11-16.md) dokumentieren frühere
 Umsetzungsstände, Prüfergebnisse und offene Grenzen.

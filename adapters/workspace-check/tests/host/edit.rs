@@ -1,7 +1,15 @@
 use super::*;
-use std::os::unix::fs::PermissionsExt;
+use std::io::BufReader;
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
+
+use arcs::action::execution::execution_invocation_id;
+use arcs_adapter_protocol::ActInvocation;
+use arcs_adapter_protocol::stdio::{
+    AdapterMessage, Envelope, HostMessage, WIRE_VERSION, read_frame, write_frame,
+};
 
 const EDIT_REF: &str = "refs/arcs/test";
 const EDIT_SCHEMA: &str = "arcs.workspace_edit_candidate.v1";
@@ -993,6 +1001,198 @@ fn missing_cgroup_controls_never_launch_the_check() {
     assert!(!marker.exists());
     assert_eq!(fs::read_dir(&stand_in).unwrap().count(), 1);
     host.shutdown().unwrap();
+}
+
+#[test]
+fn startup_removes_its_empty_reservation_and_rejects_a_changed_cgroup() {
+    let f = Fixture::new();
+    configure_isolated_checks(
+        &f,
+        Path::new("/usr/bin/true"),
+        json!({"limited":{"program":"/usr/bin/true","args":[],"timeout_ms":2000}}),
+    );
+    let parent = f.0.join("fake-parent");
+    fs::create_dir(&parent).unwrap();
+    fs::write(parent.join("cgroup.subtree_control"), "cpu memory pids\n").unwrap();
+    configure_resource_limits(&f, &parent);
+    f.open().shutdown().unwrap();
+
+    let journal = Connection::open(f.0.join("checks.sqlite")).unwrap();
+    let reserved = "arcs-resource-00000000000000000000000000000001";
+    let foreign = "arcs-resource-00000000000000000000000000000002";
+    fs::create_dir(parent.join(reserved)).unwrap();
+    fs::create_dir(parent.join(foreign)).unwrap();
+    journal
+        .execute_batch("INSERT INTO checks(invocation_id,input) VALUES ('reserved','{}');")
+        .unwrap();
+    journal
+        .execute(
+            "INSERT INTO check_cgroups(invocation_id,name) VALUES ('reserved',?1)",
+            [reserved],
+        )
+        .unwrap();
+    f.open().shutdown().unwrap();
+    assert!(!parent.join(reserved).exists());
+    assert!(parent.join(foreign).is_dir());
+    assert_eq!(
+        journal
+            .query_row("SELECT count(*) FROM check_cgroups", [], |row| row
+                .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+
+    let metadata = fs::metadata(parent.join(foreign)).unwrap();
+    let kill_control = parent.join(foreign).join("cgroup.kill");
+    fs::write(&kill_control, "untouched").unwrap();
+    fs::write(parent.join(foreign).join("cgroup.events"), "populated 1\n").unwrap();
+    journal
+        .execute(
+            "INSERT INTO check_cgroups(invocation_id,name,device,inode) VALUES ('reserved',?1,?2,?3)",
+            rusqlite::params![foreign, metadata.dev().to_string(), (metadata.ino() ^ 1).to_string()],
+        )
+        .unwrap();
+    let startup = check_adapter(&f).output().unwrap();
+    assert!(!startup.status.success());
+    assert!(String::from_utf8_lossy(&startup.stderr).contains("resource cgroup identity changed"));
+    assert_eq!(fs::read_to_string(kill_control).unwrap(), "untouched");
+    assert_eq!(
+        journal
+            .query_row("SELECT name FROM check_cgroups", [], |row| row
+                .get::<_, String>(0))
+            .unwrap(),
+        foreign
+    );
+}
+
+fn check_adapter(f: &Fixture) -> Command {
+    let mut adapter = Command::new(env!("CARGO_BIN_EXE_arcs-workspace-check"));
+    adapter
+        .arg(f.0.join("profile.json"))
+        .arg(f.0.join("checks.sqlite"));
+    adapter
+}
+
+#[test]
+#[ignore = "requires real Bubblewrap and a writable delegated cgroup v2 parent"]
+fn a_killed_adapter_reaps_only_its_cgroup_and_replays_interrupted() {
+    let launcher = std::env::var_os("ARCS_TEST_BWRAP")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/usr/bin/bwrap"));
+    let parent =
+        PathBuf::from(std::env::var_os("ARCS_TEST_CHECK_CGROUP").expect("delegated cgroup parent"));
+    assert_eq!(child_cgroups(&parent), 0);
+    let f = Fixture::new();
+    let base = configure_isolated_checks(
+        &f,
+        &launcher,
+        json!({"hold":{"program":"/usr/bin/python3","timeout_ms":30000,
+            "args":["-I","-B","-c","import time; time.sleep(30)"]}}),
+    );
+    configure_resource_limits(&f, &parent);
+    let mut host = f.open();
+    let proposal = isolated_candidate(&host, "hold", &base);
+    let action = approve_for(&host, &proposal, ISOLATED_CAPABILITY);
+    let materialized = host.store().get(&action).unwrap().unwrap();
+    host.shutdown().unwrap();
+    drop(host);
+
+    let capability = CapabilityRef::new(ADAPTER, ISOLATED_CAPABILITY);
+    let result_schema_id = SchemaId(RESOURCE_RECEIPT.into());
+    let invocation_id = execution_invocation_id(&action, &capability, &result_schema_id);
+    let invocation = ActInvocation {
+        invocation_id: invocation_id.clone(),
+        capability,
+        action_version_id: action.clone(),
+        action_schema_id: materialized.schema_id,
+        payload: materialized.payload,
+        result_schema_id,
+    };
+    let mut adapter = check_adapter(&f)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdin = adapter.stdin.take().unwrap();
+    let mut stdout = BufReader::new(adapter.stdout.take().unwrap());
+    write_frame(
+        &mut stdin,
+        &Envelope {
+            protocol_version: WIRE_VERSION,
+            request_id: "hello".into(),
+            message: HostMessage::Hello,
+        },
+    )
+    .unwrap();
+    let hello: Envelope<AdapterMessage> = read_frame(&mut stdout).unwrap();
+    assert!(matches!(hello.message, AdapterMessage::Manifest { .. }));
+    write_frame(
+        &mut stdin,
+        &Envelope {
+            protocol_version: WIRE_VERSION,
+            request_id: "run".into(),
+            message: HostMessage::Execute { invocation },
+        },
+    )
+    .unwrap();
+
+    let journal = Connection::open(f.0.join("checks.sqlite")).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let owned = loop {
+        let name = journal.query_row(
+            "SELECT name FROM check_cgroups WHERE invocation_id=?1 AND inode IS NOT NULL",
+            [&invocation_id],
+            |row| row.get::<_, String>(0),
+        );
+        match name {
+            Ok(name) => {
+                let group = parent.join(name);
+                if group_populated(&group) {
+                    break group;
+                }
+            }
+            Err(rusqlite::Error::QueryReturnedNoRows) => {}
+            Err(error) => panic!("cannot read check ownership: {error}"),
+        }
+        if Instant::now() >= deadline {
+            let _ = adapter.kill();
+            let _ = adapter.wait();
+            panic!("the approved check did not enter its cgroup");
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    adapter.kill().unwrap();
+    assert!(!adapter.wait().unwrap().success());
+    assert!(group_populated(&owned));
+    let foreign = parent.join("arcs-resource-00000000000000000000000000000000");
+    fs::create_dir(&foreign).unwrap();
+
+    let mut host = f.open();
+    assert!(!owned.exists());
+    assert!(foreign.is_dir());
+    let receipt = host
+        .execute_approved(&AdapterId(ADAPTER.into()), &action)
+        .unwrap();
+    assert_eq!(receipt.schema_id.0, RESOURCE_RECEIPT);
+    assert_eq!(receipt.payload["result"]["status"], "interrupted");
+    assert_eq!(receipt.payload["result"]["revision"], base);
+    assert_eq!(child_cgroups(&parent), 1);
+    assert_eq!(
+        journal
+            .query_row("SELECT count(*) FROM check_cgroups", [], |row| row
+                .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+    host.shutdown().unwrap();
+    fs::remove_dir(foreign).unwrap();
+}
+
+fn group_populated(group: &Path) -> bool {
+    fs::read_to_string(group.join("cgroup.events"))
+        .unwrap()
+        .lines()
+        .any(|line| line == "populated 1")
 }
 
 #[test]

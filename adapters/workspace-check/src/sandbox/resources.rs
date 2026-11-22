@@ -2,9 +2,13 @@
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
 
+use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
+
+mod ownership;
+
+use ownership::GroupLease;
 
 const CPU_PERIOD_US: u64 = 100_000;
 
@@ -35,9 +39,8 @@ impl ResourceUsage {
 }
 
 pub(super) struct ResourceGroup<'a> {
-    directory: PathBuf,
+    lease: GroupLease<'a>,
     limits: &'a ResourceLimits,
-    removed: bool,
 }
 
 impl ResourceLimits {
@@ -59,45 +62,51 @@ impl ResourceLimits {
         Ok(())
     }
 
-    pub(super) fn create(&self, name: &std::ffi::OsStr) -> io::Result<ResourceGroup<'_>> {
-        let directory = self.parent.join(name);
-        fs::create_dir(&directory)?;
-        let group = ResourceGroup {
-            directory,
-            limits: self,
-            removed: false,
-        };
+    pub(super) fn recover(&self, journal: &Connection) -> io::Result<()> {
+        ownership::recover(&self.parent, journal)
+    }
+
+    pub(super) fn create<'a>(
+        &'a self,
+        journal: &'a Connection,
+        invocation: &'a str,
+    ) -> io::Result<ResourceGroup<'a>> {
+        let mut lease = GroupLease::create(&self.parent, journal, invocation)?;
         let quota = u64::from(self.cpu_percent) * (CPU_PERIOD_US / 100);
         write_control(
-            &group.directory,
+            &lease.directory,
             "cpu.max",
             &format!("{quota} {CPU_PERIOD_US}"),
         )?;
         write_control(
-            &group.directory,
+            &lease.directory,
             "memory.max",
             &self.memory_bytes.to_string(),
         )?;
-        write_control(&group.directory, "memory.swap.max", "0")?;
-        write_control(&group.directory, "memory.oom.group", "1")?;
-        write_control(&group.directory, "pids.max", &self.max_tasks.to_string())?;
+        write_control(&lease.directory, "memory.swap.max", "0")?;
+        write_control(&lease.directory, "memory.oom.group", "1")?;
+        write_control(&lease.directory, "pids.max", &self.max_tasks.to_string())?;
         OpenOptions::new()
             .write(true)
-            .open(group.directory.join("cgroup.kill"))?;
-        Ok(group)
+            .open(lease.directory.join("cgroup.kill"))?;
+        lease.confirm()?;
+        Ok(ResourceGroup {
+            lease,
+            limits: self,
+        })
     }
 }
 
 impl ResourceGroup<'_> {
     pub(super) fn membership(&self) -> PathBuf {
-        self.directory.join("cgroup.procs")
+        self.lease.directory.join("cgroup.procs")
     }
 
-    pub(super) fn finish(mut self) -> io::Result<ResourceUsage> {
-        self.stop()?;
-        let memory = fs::read_to_string(self.directory.join("memory.events"))?;
-        let tasks = fs::read_to_string(self.directory.join("pids.events"))?;
-        let cpu = fs::read_to_string(self.directory.join("cpu.stat"))?;
+    pub(super) fn finish(self) -> io::Result<ResourceUsage> {
+        self.lease.stop()?;
+        let memory = fs::read_to_string(self.lease.directory.join("memory.events"))?;
+        let tasks = fs::read_to_string(self.lease.directory.join("pids.events"))?;
+        let cpu = fs::read_to_string(self.lease.directory.join("cpu.stat"))?;
         let usage = ResourceUsage {
             cpu_percent: self.limits.cpu_percent,
             memory_bytes: self.limits.memory_bytes,
@@ -107,42 +116,8 @@ impl ResourceGroup<'_> {
             memory_oom_kills: counter(&memory, "oom_kill")?,
             task_limit_events: counter(&tasks, "max")?,
         };
-        fs::remove_dir(&self.directory)?;
-        self.removed = true;
+        self.lease.remove()?;
         Ok(usage)
-    }
-
-    fn stop(&self) -> io::Result<()> {
-        let populated = || {
-            counter(
-                &fs::read_to_string(self.directory.join("cgroup.events"))?,
-                "populated",
-            )
-        };
-        if populated()? == 0 {
-            return Ok(());
-        }
-        write_control(&self.directory, "cgroup.kill", "1")?;
-        let deadline = Instant::now() + Duration::from_secs(2);
-        while populated()? != 0 {
-            if Instant::now() >= deadline {
-                return Err(io::Error::new(
-                    io::ErrorKind::TimedOut,
-                    "sandbox cgroup did not empty",
-                ));
-            }
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        Ok(())
-    }
-}
-
-impl Drop for ResourceGroup<'_> {
-    fn drop(&mut self) {
-        if !self.removed {
-            let _ = self.stop();
-            let _ = fs::remove_dir(&self.directory);
-        }
     }
 }
 

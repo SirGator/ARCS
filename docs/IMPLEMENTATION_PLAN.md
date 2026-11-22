@@ -580,6 +580,13 @@
 > Grenzverletzungen von fachlichen Testfehlern und dokumentiert
 > die Kernelzähler im Ausführungsartefakt.
 >
+> Siebenundfünfzigster Schritt gemäß v3 §7.2 PAR-07/PAR-10,
+> §10.1 SEC-06/SEC-07 und TEST-02. Der Workspace-Adapter hält
+> die Identität seiner Prüfgruppen dauerhaft fest. Beim Neustart
+> räumt er eigene Gruppen auf. Ein Aufruf mit derselben
+> Ausführungsidentität liefert `interrupted`, wenn die Prüfung
+> ohne gespeichertes Ergebnis abgebrochen wurde.
+>
 **Leitbild:** ARCS ist ein universeller Agent. Es soll sich einfach bedienen lassen, beliebige kompatible Systeme verbinden, eigenständig Probleme lösen und langfristige Aufgaben über Monate verfolgen.
 
 ## 1. Verbindliche Architekturregeln

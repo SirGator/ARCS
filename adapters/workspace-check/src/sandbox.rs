@@ -10,6 +10,7 @@ use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};
 
+use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -30,6 +31,11 @@ pub(crate) struct Sandbox {
     pub checks: BTreeSet<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     resources: Option<ResourceLimits>,
+}
+
+pub(crate) struct CheckJournal<'a> {
+    pub db: &'a Connection,
+    pub invocation: &'a str,
 }
 
 pub(crate) struct IsolatedRun {
@@ -64,6 +70,13 @@ impl Sandbox {
         Ok(())
     }
 
+    pub(crate) fn recover_resources(&self, journal: &Connection) -> io::Result<()> {
+        if let Some(limits) = &self.resources {
+            limits.recover(journal)?;
+        }
+        Ok(())
+    }
+
     pub(crate) fn result_schema(&self) -> &'static str {
         if self.resources.is_some() {
             RESOURCE_RESULT
@@ -78,6 +91,7 @@ impl Sandbox {
         snapshot: &Path,
         program: &Path,
         arguments: &[String],
+        journal: CheckJournal<'_>,
     ) -> io::Result<IsolatedRun> {
         let parent = snapshot
             .parent()
@@ -88,14 +102,7 @@ impl Sandbox {
         let group = self
             .resources
             .as_ref()
-            .map(|limits| {
-                limits.create(
-                    status_dir
-                        .path()
-                        .file_name()
-                        .expect("temporary directory has a name"),
-                )
-            })
+            .map(|limits| limits.create(journal.db, journal.invocation))
             .transpose()?;
 
         // The fixed launcher only opens the status FD and joins the cgroup.

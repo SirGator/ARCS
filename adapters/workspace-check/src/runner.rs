@@ -7,7 +7,7 @@ use std::time::Instant;
 
 use crate::diagnostics::{self, Diagnostics};
 use crate::git_edit::{self, RepositoryScope};
-use crate::sandbox::{self, ResourceUsage, Sandbox};
+use crate::sandbox::{self, CheckJournal, ResourceUsage, Sandbox};
 use crate::source_read;
 
 use arcs_adapter_protocol::{
@@ -193,6 +193,9 @@ impl Runner {
         if runner.profile.source.is_some() {
             source_read::initialize(&runner.db)?;
         }
+        if let Some(sandbox) = &runner.profile.isolated_revision_checks {
+            sandbox.recover_resources(&runner.db).map_err(message)?;
+        }
         Ok(runner)
     }
 
@@ -357,7 +360,15 @@ impl Runner {
                 check,
                 revision,
                 diagnostic,
-                self.sandbox_for(name),
+                self.sandbox_for(name).map(|sandbox| {
+                    (
+                        sandbox,
+                        CheckJournal {
+                            db: &self.db,
+                            invocation: id,
+                        },
+                    )
+                }),
             );
             self.save_result(id, journal_result(result, output, resources, diagnostic))?
         };
@@ -523,7 +534,7 @@ fn run_check(
     check: &Check,
     revision: Option<&str>,
     diagnostic: bool,
-    sandbox: Option<&Sandbox>,
+    sandbox: Option<(&Sandbox, CheckJournal<'_>)>,
 ) -> (Value, Option<Diagnostics>, Option<ResourceUsage>) {
     let started = Instant::now();
     // The supervisor maintains the deadline even if the adapter process is lost.
@@ -548,9 +559,16 @@ fn run_check(
         .args(["--signal=KILL", "--", &timeout])
         .current_dir(workspace)
         .stdin(Stdio::null());
-    let process = if let Some(sandbox) = sandbox {
+    let isolated = sandbox.is_some();
+    let process = if let Some((sandbox, journal)) = sandbox {
         sandbox
-            .run(&mut command, workspace, &check.program, &check.args)
+            .run(
+                &mut command,
+                workspace,
+                &check.program,
+                &check.args,
+                journal,
+            )
             .map(|run| {
                 (
                     run.exit,
@@ -578,7 +596,7 @@ fn run_check(
         }
         Err(error) => (
             None,
-            sandbox.map(|_| Diagnostics::setup_error(&error)),
+            isolated.then(|| Diagnostics::setup_error(&error)),
             false,
             None,
         ),
@@ -603,7 +621,7 @@ fn run_check(
     }
     let output = output.filter(|_| {
         matches!(status, "failed" | "timed_out_or_killed" | "resource_limit")
-            || (sandbox.is_some() && status == "runner_error")
+            || (isolated && status == "runner_error")
     });
     (result, output, resources)
 }
