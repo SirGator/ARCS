@@ -247,7 +247,11 @@ impl<'a> TransformService<'a> {
     }
 }
 
-fn derived_trust(input: &Artifact, producer: ProducerClass, assigned: TrustLevel) -> Trust {
+pub(super) fn derived_trust(
+    input: &Artifact,
+    producer: ProducerClass,
+    assigned: TrustLevel,
+) -> Trust {
     let model_origin = input.trust.source_class == SourceClass::Model
         || input.created_by.actor_type == ActorType::Model;
     let level = match (input.trust.level, assigned) {

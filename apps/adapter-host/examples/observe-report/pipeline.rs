@@ -29,7 +29,7 @@ impl Verifier for ExportPolicy<'_> {
                 self.output.transformed.created_by.id == step.capability.adapter_id.0
                     && self.output.transformed.schema_id == step.output_schema_id
             }
-            None => self.output.transformed.version_id == self.output.input.version_id,
+            None => self.output.transformed.version_id == self.output.transform_input.version_id,
         };
         let passed = serde_json::from_value::<OutputRequest>(artifact.payload.clone()).is_ok_and(
             |request| {

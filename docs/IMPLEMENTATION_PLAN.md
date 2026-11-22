@@ -651,6 +651,11 @@
 > registrierten Schemas. Sie begrenzt die Suche auf Betreiber-Grants
 > und bindet die ausgewählten Schritte an ihre gespeicherte Definition.
 >
+> Neunundsechzigster Schritt gemäß v3 §5.2 MGR-07 und §9.1, CAP-03.
+> Pipelines können ausgewählte Felder in ein geprüftes Eingabeartefakt
+> projizieren. Transform verwendet die Projektionsversion und ihr Schema.
+> Die Projektion bleibt über Provenienz mit der Quelle verbunden.
+>
 **Leitbild:** ARCS ist ein universeller Agent. Es soll sich einfach bedienen lassen, beliebige kompatible Systeme verbinden, eigenständig Probleme lösen und langfristige Aufgaben über Monate verfolgen.
 
 ## 1. Verbindliche Architekturregeln

@@ -4,9 +4,11 @@ use crate::adapters::{AdapterCallError, AdapterManifest};
 pub use arcs_adapter_protocol::{TransformInvocation, TransformResponse};
 
 mod error;
+mod projection;
 mod routing;
 mod service;
 pub use error::TransformError;
+pub use projection::{PROJECTION_PUBLISHER, TransformInputProjection};
 pub use routing::{TransformHop, TransformRouting};
 pub use service::TransformService;
 

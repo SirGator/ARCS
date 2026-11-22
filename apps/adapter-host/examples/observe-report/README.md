@@ -113,6 +113,30 @@ Transform-Implementierungen mit geändertem Ergebnis müssen ihre deklarierte
 Version erhöhen. Der JSON-Berichtsadapter nutzt jetzt Version `0.2.0`.
 Grants und das Laufbudget gehören nicht zur unveränderlichen Definition.
 
+## Felder am Transform-Eingang auswählen
+
+`input_projection` legt fest, welche Felder die Pipeline aus jeder Observation
+an die Transform-Kette übergibt.
+
+```json
+"input_projection": {
+  "schema_id": "arcs.projection.reading.v1",
+  "payload_fields": ["value", "unit"]
+}
+```
+
+Registriere das Projektionsschema im Hostprofil. Die erste Transform-Capability
+muss dieses Schema akzeptieren. Automatisches Routing startet ebenfalls bei
+diesem Schema. Erlaubt sind 1 bis 64 eindeutige Felder auf der obersten Ebene.
+Der Core übernimmt ausgewählte Werte vollständig und validiert das Ergebnis
+gegen das Projektionsschema. Ein fehlendes Feld oder ein unpassender Wert
+stoppt die Ausführung vor dem ersten Transform-Aufruf.
+
+Die Projektion bleibt mit der ursprünglichen Observation verknüpft und
+behält deren Trust-Obergrenze. Eine Wiederaufnahme verwendet dieselbe
+Projektionsversion. In der Zustellung bezeichnet `input_version_id` die
+ursprüngliche Observation und `projection_version_id` ihre Projektion.
+
 ## Dauerhafter Fortschritt
 
 Der Runner speichert Definition und Checkpoints über den bestehenden

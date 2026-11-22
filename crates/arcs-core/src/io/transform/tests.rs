@@ -19,6 +19,8 @@ use serde_json::json;
 const INPUT: &str = "arcs.raw.transform_test.v1";
 const MID: &str = "arcs.mid.transform_test.v1";
 const OUTPUT: &str = "arcs.normalized.transform_test.v1";
+const PROJECTION_INPUT: &str = "arcs.raw.transform_projection_test.v1";
+const PROJECTION_SCHEMA: &str = "arcs.projection.transform_test.v1";
 
 struct Endpoint {
     manifest: AdapterManifest,
@@ -227,6 +229,129 @@ fn input(version: &str, level: TrustLevel) -> Artifact {
         json!({"value":12.0}),
     )
     .with_subject("measurement-1")
+}
+
+fn projection_fixture() -> (SchemaRegistry, SqliteArtifactStore, VersionId) {
+    let mut schemas = SchemaRegistry::with_bundled_schemas().unwrap();
+    schemas
+        .register_json(
+            &json!({
+                "$id": PROJECTION_INPUT,
+                "type": "object",
+                "required": ["public", "private"],
+                "properties": {
+                    "public": {"type": "string"},
+                    "private": {"type": "string"}
+                },
+                "additionalProperties": false
+            })
+            .to_string(),
+        )
+        .unwrap();
+    schemas
+        .register_json(
+            &json!({
+                "$id": PROJECTION_SCHEMA,
+                "type": "object",
+                "required": ["public"],
+                "properties": {"public": {"type": "string"}},
+                "additionalProperties": false
+            })
+            .to_string(),
+        )
+        .unwrap();
+    let store = SqliteArtifactStore::in_memory().unwrap();
+    let source = Artifact::new(
+        "projection-input",
+        "projection-input-v1",
+        "raw",
+        PROJECTION_INPUT,
+        "2026-10-23T00:00:00Z",
+        Actor {
+            actor_type: ActorType::Adapter,
+            id: "source".into(),
+        },
+        Source {
+            kind: SourceKind::Sensor,
+            reference: "projection-input".into(),
+        },
+        Trust {
+            level: TrustLevel::Medium,
+            source_class: SourceClass::External,
+        },
+        "source:projection-input",
+        json!({"public":"visible", "private":"hidden"}),
+    );
+    store.append(&source, &schemas).unwrap();
+    (schemas, store, VersionId("projection-input-v1".into()))
+}
+
+#[test]
+fn input_projection_is_a_subset_with_stable_reuse_and_preserved_origin_boundary() {
+    let (schemas, store, source_version) = projection_fixture();
+    let projection = TransformInputProjection {
+        schema_id: SchemaId(PROJECTION_SCHEMA.into()),
+        payload_fields: vec!["public".into()],
+    };
+    let first = projection
+        .materialize(&source_version, &store, &schemas, &SystemClock)
+        .unwrap();
+    let count = store.len().unwrap();
+
+    assert_eq!(first.payload, json!({"public": "visible"}));
+    assert_eq!(first.created_by.actor_type, ActorType::System);
+    assert_eq!(first.created_by.id, PROJECTION_PUBLISHER);
+    assert_eq!(first.trust.source_class, SourceClass::External);
+    assert_eq!(first.trust.level, TrustLevel::Medium);
+    assert_eq!(
+        first.provenance.as_ref().unwrap().parents,
+        vec![source_version.0.clone()]
+    );
+    assert_eq!(first.source.kind, SourceKind::Internal);
+    let relations = ArtifactRelations::new(&store)
+        .outgoing(&first.version_id)
+        .unwrap();
+    assert!(
+        relations
+            .iter()
+            .any(|edge| edge.to == source_version && edge.kind == relation_kinds::derived_from())
+    );
+    let second = projection
+        .materialize(&source_version, &store, &schemas, &SystemClock)
+        .unwrap();
+    assert_eq!(second, first);
+    assert_eq!(store.len().unwrap(), count);
+}
+
+#[test]
+fn input_projection_rejects_missing_fields_and_non_projection_policies_without_artifacts() {
+    let (schemas, store, source_version) = projection_fixture();
+    let count = store.len().unwrap();
+    let missing = TransformInputProjection {
+        schema_id: SchemaId(PROJECTION_SCHEMA.into()),
+        payload_fields: vec!["private.nested".into()],
+    };
+    assert!(matches!(
+        missing.materialize(&source_version, &store, &schemas, &SystemClock),
+        Err(TransformError::MissingProjectedField(field)) if field == "private.nested"
+    ));
+    let invalid_payload = TransformInputProjection {
+        schema_id: SchemaId(PROJECTION_SCHEMA.into()),
+        payload_fields: vec!["private".into()],
+    };
+    assert!(matches!(
+        invalid_payload.materialize(&source_version, &store, &schemas, &SystemClock),
+        Err(TransformError::InvalidProjectionPayload(_))
+    ));
+    let invalid_policy = TransformInputProjection {
+        schema_id: SchemaId(PROJECTION_INPUT.into()),
+        payload_fields: vec!["public".into()],
+    };
+    assert!(matches!(
+        invalid_policy.materialize(&source_version, &store, &schemas, &SystemClock),
+        Err(TransformError::InvalidProjectionPolicy(_))
+    ));
+    assert_eq!(store.len().unwrap(), count);
 }
 
 #[test]

@@ -341,6 +341,7 @@ impl PreparedConfig {
             if [
                 HOST_ID,
                 PIPELINE_ID,
+                arcs::transform::PROJECTION_PUBLISHER,
                 RUNTIME_ID,
                 PLAN_ID,
                 arcs::runtime::reservations::PUBLISHER,

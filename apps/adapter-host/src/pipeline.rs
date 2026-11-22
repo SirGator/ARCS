@@ -6,8 +6,8 @@ use std::collections::{BTreeMap, HashSet};
 use std::fmt;
 
 use arcs::adapters::{AdapterManifest, CapabilityContract, CapabilityRef, ProducerClass};
-use arcs::core::{Artifact, SchemaId, Trust, VersionId};
-use arcs::transform::TransformRouting;
+use arcs::core::{Artifact, SchemaId, SystemClock, Trust, VersionId};
+use arcs::transform::{TransformInputProjection, TransformRouting};
 use arcs::world::observation::ObservationLog;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -53,6 +53,8 @@ pub struct PipelineConfig {
     pub pipeline_id: String,
     pub source: CapabilityRef,
     pub input_schema_id: SchemaId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_projection: Option<TransformInputProjection>,
     #[serde(default)]
     pub steps: Vec<TransformStep>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -75,6 +77,8 @@ pub struct StepReport {
 #[derive(Debug, Serialize)]
 pub struct Delivery {
     pub input_version_id: VersionId,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub projection_version_id: Option<VersionId>,
     pub steps: Vec<StepReport>,
     pub transformed_version_id: VersionId,
     pub transformed_trust: Trust,
@@ -100,6 +104,8 @@ pub struct PipelineReport {
 pub struct PipelineOutput<'a> {
     pub config: &'a PipelineConfig,
     pub input: &'a Artifact,
+    /// The original input or its authorized projection.
+    pub transform_input: &'a Artifact,
     pub transformed: &'a Artifact,
     pub steps: &'a [StepReport],
     /// Effective Transform contracts selected for this run, in execution order.
@@ -128,7 +134,18 @@ fn identifier(value: &str) -> bool {
 }
 
 impl PipelineConfig {
+    fn transform_input_schema(&self) -> &SchemaId {
+        self.input_projection
+            .as_ref()
+            .map_or(&self.input_schema_id, |input| &input.schema_id)
+    }
+
     fn resolve_steps(&self, host: &Host) -> Result<Vec<TransformStep>> {
+        if let Some(input) = &self.input_projection {
+            input.validate(host.schemas()).map_err(|error| {
+                invalid(format!("invalid transform input projection: {error:?}"))
+            })?;
+        }
         let Some(routing) = &self.transform_routing else {
             if !(1..=32).contains(&self.steps.len()) {
                 return Err(invalid(
@@ -143,7 +160,11 @@ impl PipelineConfig {
             ));
         }
         let path = routing
-            .resolve(host.registry(), host.schemas(), &self.input_schema_id)
+            .resolve(
+                host.registry(),
+                host.schemas(),
+                self.transform_input_schema(),
+            )
             .map_err(|error| invalid(format!("invalid transform routing: {error:?}")))?
             .ok_or_else(|| {
                 invalid("no authorized transform path to the requested output schema")
@@ -193,7 +214,7 @@ impl PipelineConfig {
                 "source must Observe exactly the configured input schema",
             ));
         }
-        let mut input_schema = &self.input_schema_id;
+        let mut input_schema = self.transform_input_schema();
         for step in resolved_steps {
             if !identifier(&step.id) || !step_ids.insert(&step.id) {
                 return Err(invalid("step IDs must be valid and unique"));
@@ -230,6 +251,9 @@ impl PipelineConfig {
         });
         if let Some(routing) = &self.transform_routing {
             identity["transform_routing"] = json!(routing);
+        }
+        if let Some(input) = &self.input_projection {
+            identity["input_projection"] = json!(input);
         }
         Ok(identity)
     }
@@ -326,7 +350,23 @@ fn advance(
     journal: &mut Journal,
     policy: &mut dyn PipelineApproval,
 ) -> Result<Delivery> {
-    let mut transformed = input.clone();
+    let projection = config
+        .input_projection
+        .as_ref()
+        .map(|selection| {
+            journal.phase = "project_input".into();
+            selection
+                .materialize(
+                    &input.version_id,
+                    host.store(),
+                    host.schemas(),
+                    &SystemClock,
+                )
+                .map_err(|error| invalid(format!("transform input projection failed: {error:?}")))
+        })
+        .transpose()?;
+    let transform_input = projection.as_ref().unwrap_or(input);
+    let mut transformed = transform_input.clone();
     let mut steps = Vec::new();
     for (index, step) in resolved_steps.iter().enumerate() {
         journal.phase = format!("transform:{}", step.id);
@@ -380,6 +420,7 @@ fn advance(
         &PipelineOutput {
             config,
             input,
+            transform_input,
             transformed: &transformed,
             steps: &steps,
             resolved_steps,
@@ -438,6 +479,7 @@ fn advance(
     journal.save(host)?;
     Ok(Delivery {
         input_version_id: input.version_id.clone(),
+        projection_version_id: projection.map(|artifact| artifact.version_id),
         steps,
         transformed_version_id: transformed.version_id,
         transformed_trust: transformed.trust,

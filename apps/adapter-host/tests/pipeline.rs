@@ -665,6 +665,118 @@ fn discovered_two_hop_route_replays_the_same_result_after_restart() {
 }
 
 #[test]
+fn routed_transform_only_receives_projected_data_and_reuses_its_version() {
+    let raw = "arcs.number.raw.v1";
+    let selected = "arcs.projection.reading.v1";
+    let mut fixture = Fixture::new(raw, "Cel");
+    let mut config: Value =
+        serde_json::from_slice(&std::fs::read(fixture.directory.join("host.json")).unwrap())
+            .unwrap();
+    config["schemas"].as_array_mut().unwrap().extend([
+        json!(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../adapters/normalize-number/schemas/raw-number.schema.json")
+        ),
+        json!("selected-reading.schema.json"),
+    ]);
+    fixture.write(
+        "selected-reading.schema.json",
+        &json!({
+            "$id":selected, "type":"object","required":["value","unit"],
+            "properties":{"value":{"type":"number"},"unit":{"type":"string"}},
+            "additionalProperties":false
+        }),
+    );
+    fixture.observation_peer(
+        &mut config,
+        raw,
+        json!({"value":25,"scale":17,"offset":23,"unit":"Cel"}),
+    );
+    fixture.write("host.json", &config);
+    fixture.write(
+        "formatter.json",
+        &json!({"adapter_id":"example.report","accepts":[selected]}),
+    );
+    let grant: Value = serde_json::from_str(include_str!("../config/grants/report.json")).unwrap();
+    let mut limited_grant = grant.clone();
+    limited_grant["max_payload_bytes"] = json!(1);
+    fixture.write("formatter-grant.json", &limited_grant);
+    fixture.pipeline.as_object_mut().unwrap().remove("steps");
+    fixture.pipeline["transform_routing"] = json!({
+        "output_schema_id":"arcs.report.v1",
+        "allowed_capabilities":[{"adapter_id":"example.report","capability_id":"json.report"}],
+        "max_steps":1
+    });
+    fixture.pipeline["input_projection"] = json!({
+        "schema_id":"arcs.action.v1","payload_fields":["value","unit"]
+    });
+    let mut host = fixture.open();
+    let error = pipeline::run(&mut host, &fixture.config()).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("dedicated arcs.projection schema")
+    );
+    assert_eq!(host.report().unwrap().stored_artifacts, 0);
+
+    fixture.pipeline["input_projection"]["schema_id"] = json!(selected);
+    let error = pipeline::run(&mut host, &fixture.config()).unwrap_err();
+    assert!(format!("{error:?}").contains("InputTooLarge"), "{error:?}");
+    let projections = |host: &Host| {
+        host.store()
+            .committed_after(0)
+            .unwrap()
+            .into_iter()
+            .map(|recorded| recorded.artifact)
+            .filter(|artifact| artifact.schema_id.0 == selected)
+            .collect::<Vec<_>>()
+    };
+    let saved = projections(&host);
+    assert_eq!(saved.len(), 1);
+    assert!(fixture.files().is_empty());
+    host.shutdown().unwrap();
+    drop(host);
+
+    fixture.write("formatter-grant.json", &grant);
+    let mut host = fixture.open();
+    let report = pipeline::run(&mut host, &fixture.config()).unwrap();
+    let delivery = &report.deliveries[0];
+    assert_eq!(
+        delivery.projection_version_id.as_ref(),
+        Some(&saved[0].version_id)
+    );
+    assert_eq!(delivery.steps[0].input_version_id, saved[0].version_id);
+    assert_eq!(projections(&host), saved);
+    let original = host
+        .store()
+        .get(&delivery.input_version_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(original.payload["scale"], 17);
+    assert_eq!(
+        saved[0].provenance.as_ref().unwrap().parents,
+        [original.version_id.0]
+    );
+    assert_eq!(delivery.transformed_trust.level, TrustLevel::Low);
+    let rendered = host
+        .store()
+        .get(&delivery.transformed_version_id)
+        .unwrap()
+        .unwrap();
+    let body: Value = serde_json::from_str(rendered.payload["body"].as_str().unwrap()).unwrap();
+    assert_eq!(body["payload"], json!({"value":25,"unit":"Cel"}));
+    assert_eq!(fixture.files().len(), 1);
+    assert!(
+        pipeline::run(&mut host, &fixture.config())
+            .unwrap()
+            .deliveries
+            .is_empty()
+    );
+    assert_eq!(fixture.files().len(), 1);
+    host.shutdown().unwrap();
+}
+
+#[test]
 fn compatible_input_is_delivered_with_approval_and_no_transform() {
     let schema = "arcs.report.v1";
     let mut fixture = Fixture::new(schema, "Cel");
