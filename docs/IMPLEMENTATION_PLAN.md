@@ -593,6 +593,14 @@
 > zwischen Zielrunden kann ein Signal früher wecken, während
 > der Termin eine erneute Prüfung bei ausbleibendem Signal auslöst.
 >
+> Neunundfünfzigster Schritt gemäß v3 §6.5 MEM-03 sowie §8.2
+> LNG-02/LNG-05/LNG-09. Bewertete Zielrunden haben einen eigenen
+> Beleg im bestehenden Artifact-Netz. Er verbindet Aufgabe,
+> vorherige Runde, Bewertung und gegebenenfalls Wirkungsbeleg.
+> Der gespeicherte Zielstand verweist auf das Ende dieser Kette.
+> Der begrenzte Gedächtnisabruf kann daraus früheren Fortschritt
+> in eine neue Zielrunde übernehmen.
+>
 **Leitbild:** ARCS ist ein universeller Agent. Es soll sich einfach bedienen lassen, beliebige kompatible Systeme verbinden, eigenständig Probleme lösen und langfristige Aufgaben über Monate verfolgen.
 
 ## 1. Verbindliche Architekturregeln

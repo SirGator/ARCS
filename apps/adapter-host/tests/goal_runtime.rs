@@ -744,6 +744,8 @@ fn parallel_goal_rejects_invalid_assessment_and_persists_a_failed_checkpoint() {
     let mut runtime = fixture.runtime(&host);
     until(&mut host, &mut runtime, GoalState::terminal);
     assert_eq!(task(&runtime).state, GoalState::Failed);
+    assert!(task(&runtime).latest_round_version_id.is_none());
+    assert_eq!(count(&host, "goal_round"), 0);
     assert!(task(&runtime).detail.contains("fresh source"));
     assert_eq!(runtime.report(0).unwrap().failed_jobs, 1);
     assert_eq!(runtime.report(0).unwrap().pending_jobs, 0);

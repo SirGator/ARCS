@@ -1,0 +1,19 @@
+{
+  "$id": "arcs.goal_round.v1",
+  "type": "object",
+  "required": ["runtime_definition_version_id", "task_sequence", "input_version_id", "round", "phase", "goal_status", "effect", "next_state", "assessment_version_id"],
+  "properties": {
+    "runtime_definition_version_id": {"type": "string", "minLength": 1},
+    "task_sequence": {"type": "integer", "minimum": 1},
+    "input_version_id": {"type": "string", "minLength": 1},
+    "round": {"type": "integer", "minimum": 1, "maximum": 1000},
+    "phase": {"type": "string", "enum": ["check", "assess"]},
+    "goal_status": {"type": "string", "enum": ["achieved", "continue", "blocked", "unknown"]},
+    "effect": {"type": "string", "enum": ["success", "failure", "unknown"]},
+    "next_state": {"type": "string", "enum": ["completed", "planning", "waiting_time", "waiting_event", "blocked", "budget_exhausted"]},
+    "assessment_version_id": {"type": "string", "minLength": 1},
+    "outcome_version_id": {"type": "string", "minLength": 1},
+    "previous_round_version_id": {"type": "string", "minLength": 1}
+  },
+  "additionalProperties": false
+}

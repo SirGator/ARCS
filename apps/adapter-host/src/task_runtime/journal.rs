@@ -31,7 +31,7 @@ use serde_json::{Value, json};
 use super::{
     CompletedTask, RuntimeConfig,
     config::invalid,
-    goal::{GoalState, GoalTask},
+    goal::{GoalState, GoalTask, ROUND_CAPABILITY, ROUND_SCHEMA},
 };
 use crate::config::RUNTIME_ID;
 use crate::{Host, HostError};
@@ -284,6 +284,23 @@ fn bind_definition(
         },
         required_permissions: vec![],
     }];
+    if config.routes.iter().any(|route| {
+        route.goal.is_some()
+            || route.plan.as_ref().is_some_and(|plan| {
+                plan.templates
+                    .iter()
+                    .any(|template| template.route.goal.is_some())
+            })
+    }) {
+        capabilities.push(CapabilityDescriptor {
+            description: None,
+            id: CapabilityId(ROUND_CAPABILITY.into()),
+            contract: CapabilityContract::Input {
+                emits: vec![SchemaId(ROUND_SCHEMA.into())],
+            },
+            required_permissions: vec![],
+        });
+    }
     capabilities.extend(queries::query_capabilities(config));
     let enabled_capabilities = capabilities.iter().map(|cap| cap.id.clone()).collect();
     registry

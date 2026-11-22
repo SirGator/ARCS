@@ -71,6 +71,7 @@ impl TaskRuntime {
                     execution: None,
                     assessment: None,
                     outcome: None,
+                    latest_round_version_id: None,
                     detail: String::new(),
                 };
                 // Persist the freshness barrier before any acquisition can be retried.
@@ -175,8 +176,7 @@ impl TaskRuntime {
                     let allowed = reasoning_context_versions(host, &result)?;
                     validate_assessment_evidence(&verdict, &allowed, &task.before)?;
                     task.assessment = Some(candidate.version_id.clone());
-                    task.detail = verdict.detail;
-                    task.state = match (verdict.goal_status, verdict.effect) {
+                    let next = match (verdict.goal_status, verdict.effect) {
                         (
                             GoalVerdict::Achieved,
                             OutcomeVerdict::Unknown | OutcomeVerdict::Success,
@@ -184,6 +184,12 @@ impl TaskRuntime {
                         (GoalVerdict::Continue, OutcomeVerdict::Unknown) => GoalState::Planning,
                         _ => GoalState::Blocked,
                     };
+                    if next != GoalState::Planning {
+                        task.latest_round_version_id =
+                            Some(self.record_goal_round(host, &task, &verdict, next)?);
+                    }
+                    task.detail = verdict.detail;
+                    task.state = next;
                 }
             }
             GoalState::Planning => {
@@ -360,29 +366,35 @@ impl TaskRuntime {
                     validate_assessment_evidence(&verdict, &allowed, &task.after)?;
                     task.assessment = Some(artifact.version_id.clone());
                     task.outcome = Some(self.record_goal_outcome(host, config, &task, &verdict)?);
-                    task.detail = verdict.detail;
-                    task.state = match (verdict.goal_status, verdict.effect) {
+                    let next = match (verdict.goal_status, verdict.effect) {
                         (GoalVerdict::Achieved, OutcomeVerdict::Success) => GoalState::Completed,
                         (
                             GoalVerdict::Continue,
                             OutcomeVerdict::Success | OutcomeVerdict::Failure,
-                        ) if task.round < config.max_rounds => {
-                            task.round += 1;
-                            task.before = task.after.clone();
-                            task.after.clear();
-                            match &config.between_rounds {
-                                Some(activation) if activation.event_source().is_some() => {
-                                    GoalState::WaitingEvent
-                                }
-                                Some(_) => GoalState::WaitingTime,
-                                None => GoalState::Planning,
+                        ) if task.round < config.max_rounds => match &config.between_rounds {
+                            Some(activation) if activation.event_source().is_some() => {
+                                GoalState::WaitingEvent
                             }
-                        }
+                            Some(_) => GoalState::WaitingTime,
+                            None => GoalState::Planning,
+                        },
                         (GoalVerdict::Continue, _) if task.round >= config.max_rounds => {
                             GoalState::BudgetExhausted
                         }
                         _ => GoalState::Blocked,
                     };
+                    task.latest_round_version_id =
+                        Some(self.record_goal_round(host, &task, &verdict, next)?);
+                    if matches!(
+                        next,
+                        GoalState::Planning | GoalState::WaitingEvent | GoalState::WaitingTime
+                    ) {
+                        task.round += 1;
+                        task.before = task.after.clone();
+                        task.after.clear();
+                    }
+                    task.detail = verdict.detail;
+                    task.state = next;
                 }
             }
             GoalState::WaitingTime | GoalState::WaitingEvent => {

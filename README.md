@@ -77,7 +77,8 @@ dokumentiert Slice 54. Der [Bericht zu isolierten Git-Prüfungen](docs/ZWISCHENB
 dokumentiert Slice 55. Der [Bericht zu Ressourcenlimits für isolierte Prüfungen](docs/ZWISCHENBERICHT_2026-11-22_CHECK_RESOURCES.md)
 dokumentiert Slice 56. Der [Bericht zur Bereinigung abgebrochener Prüfungen](docs/ZWISCHENBERICHT_2026-11-22_CHECK_RESOURCE_RECOVERY.md)
 dokumentiert Slice 57. Der [Bericht zur Ereignisaktivierung mit spätestem Termin](docs/ZWISCHENBERICHT_2026-11-22_EVENT_WITH_DEADLINE.md)
-dokumentiert Slice 58. Die Berichte vom
+dokumentiert Slice 58. Der [Bericht zum Verlauf bewerteter Zielrunden](docs/ZWISCHENBERICHT_2026-11-22_GOAL_ROUND_HISTORY.md)
+dokumentiert Slice 59. Die Berichte vom
 [17. November](docs/ZWISCHENBERICHT_2026-11-17.md) und
 [16. November](docs/ZWISCHENBERICHT_2026-11-16.md) dokumentieren frühere
 Umsetzungsstände, Prüfergebnisse und offene Grenzen.

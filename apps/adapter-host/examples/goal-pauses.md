@@ -149,3 +149,25 @@ Die Wartebedingung wird derzeit durch den Betreiber für die Route bestimmt.
 Dynamisch durch Reasoner vorgeschlagene Wartepläne, beliebiges Pausieren
 innerhalb einer laufenden Runde, Kalender-/Cron-Termine und allgemeine
 Teilzielabhängigkeiten bleiben offen.
+
+## Bewertete Runden im Artifact-Netz
+
+Der aktuelle Zielstand führt unter `latest_round_version_id` zur jüngsten
+bewerteten Runde. Das Artefakt `arcs.goal_round.v1` enthält Rundennummer,
+Ergebnis der Bewertung und den gewählten Folgezustand. Es verweist auf die
+ursprüngliche Aufgabe, die Runtime-Definition, die Bewertung und bei einer
+ausgeführten Aktion auf deren Wirkungsbeleg. Über `previous_round_version_id`
+lässt sich der Verlauf bis zur ersten erfassten Runde zurückverfolgen. Eine
+abschließende Prüfung vor einer Aktion bekommt einen eigenen Rundenbeleg
+ohne Wirkungsbeleg. Beim Wiederanlauf wird ein schon gespeicherter Beleg
+wiederverwendet.
+
+Eine [Memory-Policy](artifact-memory.md) kann `arcs.goal_round.v1` mit
+`part_of_goal` ausgehend von der Aufgabeneingabe abrufen. Eine Suchtiefe
+von eins erfasst Runden zu dieser Eingabe. Beispielsweise können
+`round`, `goal_status` und `effect` für den nächsten Aufruf freigegeben
+werden. Für Ziele mit gemeinsamer Eingabe bietet die Kette ab
+`latest_round_version_id` Zugriff auf den Verlauf einer einzelnen Aufgabe.
+
+Die Aufzeichnung beginnt mit der nächsten ausgewerteten Runde. Frühere
+Wirkungsbelege sind weiterhin als eigenständige Artefakte verfügbar.

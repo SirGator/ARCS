@@ -5,7 +5,8 @@ mod memory;
 mod support;
 
 use arcs::approval::ApprovalDecision;
-use arcs::core::{Actor, ActorType};
+use arcs::core::{Actor, ActorType, Artifact};
+use arcs::store::{ArtifactRelations, relation_kinds};
 use arcs_host::Host;
 use arcs_host::task_runtime::goal::{GoalState, GoalTask};
 use arcs_host::task_runtime::{RuntimeConfig, TaskRuntime};
@@ -83,6 +84,16 @@ fn count(host: &Host, kind: &str) -> usize {
         .filter(|e| e.artifact.artifact_type == kind)
         .count()
 }
+fn rounds(host: &Host) -> Vec<Artifact> {
+    host.store()
+        .committed_after(0)
+        .unwrap()
+        .into_iter()
+        .map(|event| event.artifact)
+        .filter(|artifact| artifact.schema_id.0 == "arcs.goal_round.v1")
+        .collect()
+}
+
 fn invocations(f: &Fixture, name: &str) -> i64 {
     f.db(name)
         .query_row("SELECT COUNT(*) FROM invocations", [], |r| r.get(0))
@@ -205,7 +216,15 @@ fn repeated_monthly_pauses_preserve_all_receipts_memory_and_effects_across_resta
     configure(&f, json!({"kind":"after_delay","delay_ms":MONTH}), 4, true);
     let mut config = f.read("runtime.json");
     config["routes"][0]["activation"] = json!({"kind":"after_delay","delay_ms":0});
-    config["routes"][0]["memory"] = memory::policy("project:long-goal");
+    let mut policy = memory::policy("project:long-goal");
+    policy["scopes"].as_array_mut().unwrap().push(json!({
+        "filter":{"schema_id":"arcs.goal_round.v1"}, "payload_fields":["round","goal_status","effect"]
+    }));
+    policy["relations"] = json!(["part_of_goal"]);
+    policy["search"]["max_depth"] = json!(1);
+    policy["max_items"] = json!(4);
+    policy["max_bytes"] = json!(4096);
+    config["routes"][0]["memory"] = policy;
     f.write("runtime.json", config);
     let mut host = f.host();
     let remembered = memory::append(&host, "experience-before-project", "project:long-goal");
@@ -216,6 +235,45 @@ fn repeated_monthly_pauses_preserve_all_receipts_memory_and_effects_across_resta
             s == GoalState::WaitingTime || s.terminal()
         });
         assert_eq!(actuations(&f), expected);
+        let published = rounds(&host);
+        assert_eq!(published.len(), expected as usize);
+        let record = published.last().unwrap();
+        assert_eq!(
+            saved.latest_round_version_id.as_ref(),
+            Some(&record.version_id)
+        );
+        assert_eq!(record.payload["round"], expected);
+        assert_eq!(record.payload["phase"], "assess");
+        assert_eq!(record.payload["input_version_id"], saved.input_version_id.0);
+        assert_eq!(
+            record.payload["outcome_version_id"],
+            saved.outcome.as_ref().unwrap().0
+        );
+        let links = ArtifactRelations::new(host.store())
+            .outgoing(&record.version_id)
+            .unwrap();
+        assert!(
+            links.iter().any(|edge| edge.to == saved.input_version_id
+                && edge.kind == relation_kinds::part_of_goal())
+        );
+        assert!(
+            links
+                .iter()
+                .any(|edge| Some(&edge.to) == saved.assessment.as_ref()
+                    && edge.kind == relation_kinds::supported_by())
+        );
+        if expected > 1 {
+            let previous = &published[expected as usize - 2];
+            assert_eq!(record.subject, previous.subject);
+            assert_eq!(
+                record.payload["previous_round_version_id"],
+                previous.version_id.0
+            );
+            assert!(
+                links.iter().any(|edge| edge.to == previous.version_id
+                    && edge.kind == relation_kinds::based_on())
+            );
+        }
         if expected == 4 {
             assert_eq!(saved.state, GoalState::Completed);
             break;
@@ -252,14 +310,31 @@ fn repeated_monthly_pauses_preserve_all_receipts_memory_and_effects_across_resta
     assert_eq!(invocations(&f, "planner"), 4);
     let snapshots = memory::snapshots(&host);
     assert_eq!(snapshots.len(), 8);
-    for snapshot in snapshots {
+    let published = rounds(&host);
+    for (index, snapshot) in snapshots.iter().enumerate() {
+        let selected = snapshot.payload["selected"].as_array().unwrap();
         assert!(
-            snapshot.payload["selected"]
-                .as_array()
-                .unwrap()
+            selected
                 .iter()
                 .any(|item| item["selection"]["version_id"] == remembered.version_id.0)
         );
+        let round_index = index / 2;
+        if let Some(previous) = published[..round_index].last() {
+            let recalled = selected
+                .iter()
+                .find(|item| item["selection"]["version_id"] == previous.version_id.0)
+                .unwrap();
+            assert_eq!(
+                recalled["selection"]["payload_fields"],
+                json!(["round", "goal_status", "effect"])
+            );
+        } else {
+            assert!(
+                selected
+                    .iter()
+                    .all(|item| item["selection"]["version_id"] == remembered.version_id.0)
+            );
+        }
     }
     host.shutdown().unwrap();
 }
@@ -373,6 +448,8 @@ fn a_failed_wait_checkpoint_replays_the_assessment_without_repeating_the_action(
     assert_eq!(runtime.scheduled_history(1, None, 10).unwrap().len(), 1);
     assert_eq!(actuations(&f), 1);
     assert_eq!(count(&host, "outcome"), 1);
+    assert!(task(&runtime).latest_round_version_id.is_none());
+    let first_round = rounds(&host).remove(0).version_id;
     host.shutdown().unwrap();
     drop(runtime);
     drop(host);
@@ -381,9 +458,11 @@ fn a_failed_wait_checkpoint_replays_the_assessment_without_repeating_the_action(
         .unwrap();
     let mut host = f.host();
     let mut runtime = f.runtime(&host);
-    until_at(&mut host, &mut runtime, NOW, |s| {
+    let recovered = until_at(&mut host, &mut runtime, NOW, |s| {
         s == GoalState::WaitingTime
     });
+    assert_eq!(rounds(&host).len(), 1);
+    assert_eq!(recovered.latest_round_version_id, Some(first_round));
     assert_eq!(runtime.scheduled_history(1, None, 10).unwrap().len(), 2);
     let done = until_at(&mut host, &mut runtime, NOW + MONTH, GoalState::terminal);
     assert_eq!(done.state, GoalState::Completed);
@@ -439,6 +518,19 @@ fn an_initial_reassessment_can_finish_after_a_pause_without_an_obsolete_second_a
     assert_eq!(count(&host, "action"), 1);
     assert_eq!(count(&host, "approval"), 1);
     assert_eq!(invocations(&f, "planner"), 1);
+    let history = rounds(&host);
+    assert_eq!(history.len(), 2);
+    assert_eq!(history[1].payload["phase"], "check");
+    assert_eq!(history[1].payload["next_state"], "completed");
+    assert!(history[1].payload.get("outcome_version_id").is_none());
+    assert_eq!(
+        history[1].payload["previous_round_version_id"],
+        history[0].version_id.0
+    );
+    assert_eq!(
+        done.latest_round_version_id,
+        Some(history[1].version_id.clone())
+    );
     let current = host.store().get(&done.before[0]).unwrap().unwrap();
     assert_eq!(current.payload["enabled"], false);
     assert_eq!(current.payload["actuation_count"], 2);

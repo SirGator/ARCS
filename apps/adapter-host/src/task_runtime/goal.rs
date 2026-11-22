@@ -3,6 +3,7 @@
 mod acquisition;
 mod engine;
 mod gates;
+mod progress;
 mod waiting;
 
 use std::collections::{BTreeMap, HashSet};
@@ -16,6 +17,9 @@ use serde_json::Value;
 
 use super::{ReasoningRoute, config::invalid};
 use crate::{Host, HostError};
+
+pub(super) const ROUND_SCHEMA: &str = "arcs.goal_round.v1";
+pub(super) const ROUND_CAPABILITY: &str = "goal.round.record";
 
 pub const ASSESSMENT_SCHEMA: &str = "arcs.goal_assessment_candidate.v1";
 
@@ -215,6 +219,9 @@ pub struct GoalTask {
     pub execution: Option<VersionId>,
     pub assessment: Option<VersionId>,
     pub outcome: Option<VersionId>,
+    /// Head of the assessed round history in the Core artifact network.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latest_round_version_id: Option<VersionId>,
     pub detail: String,
 }
 
