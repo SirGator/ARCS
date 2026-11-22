@@ -7,7 +7,7 @@ use std::time::Instant;
 
 use crate::diagnostics::{self, Diagnostics};
 use crate::git_edit::{self, RepositoryScope};
-use crate::sandbox::{self, Sandbox};
+use crate::sandbox::{self, ResourceUsage, Sandbox};
 use crate::source_read;
 
 use arcs_adapter_protocol::{
@@ -123,10 +123,7 @@ impl Runner {
             );
         }
         if let Some(sandbox) = &mut profile.isolated_revision_checks {
-            sandbox.program = base
-                .join(&sandbox.program)
-                .canonicalize()
-                .map_err(message)?;
+            sandbox.prepare(base)?;
             if !sandbox.program.is_file()
                 || profile.edit.is_none()
                 || sandbox.checks.is_empty()
@@ -262,15 +259,14 @@ impl Runner {
         let (schema, allowed) = match capability {
             REVISION_CAPABILITY => (REVISION_RESULT, &self.profile.revision_checks),
             DIAGNOSTIC_CAPABILITY => (DIAGNOSTIC_RESULT, &self.profile.diagnostic_revision_checks),
-            sandbox::CAPABILITY => (
-                DIAGNOSTIC_RESULT,
-                &self
+            sandbox::CAPABILITY => {
+                let sandbox = self
                     .profile
                     .isolated_revision_checks
                     .as_ref()
-                    .ok_or_else(|| AdapterError::rejected("isolated checks are not configured"))?
-                    .checks,
-            ),
+                    .ok_or_else(|| AdapterError::rejected("isolated checks are not configured"))?;
+                (sandbox.result_schema(), &sandbox.checks)
+            }
             _ => return Err(AdapterError::rejected("unknown revision check capability")),
         };
         let action: RevisionSelection =
@@ -296,7 +292,10 @@ impl Runner {
         name: &str,
         revision: Option<&str>,
     ) -> Result<ActResponse, AdapterError> {
-        let diagnostic = invocation.result_schema_id.0 == DIAGNOSTIC_RESULT;
+        let diagnostic = matches!(
+            invocation.result_schema_id.0.as_str(),
+            DIAGNOSTIC_RESULT | sandbox::RESOURCE_RESULT
+        );
         let check = self
             .profile
             .checks
@@ -327,6 +326,7 @@ impl Runner {
                     journal_result(
                         check_result(name, "interrupted", revision),
                         None,
+                        None,
                         diagnostic,
                     ),
                 )?,
@@ -351,7 +351,7 @@ impl Runner {
                     params![id, input],
                 )
                 .map_err(unavailable)?;
-            let (result, output) = run_check(
+            let (result, output, resources) = run_check(
                 working_dir,
                 name,
                 check,
@@ -359,7 +359,7 @@ impl Runner {
                 diagnostic,
                 self.sandbox_for(name),
             );
-            self.save_result(id, journal_result(result, output, diagnostic))?
+            self.save_result(id, journal_result(result, output, resources, diagnostic))?
         };
         let mut payload = if diagnostic {
             result
@@ -435,11 +435,11 @@ impl Adapter for Runner {
                 DIAGNOSTIC_PERMISSION,
             ));
         }
-        if self.profile.isolated_revision_checks.is_some() {
+        if let Some(sandbox) = &self.profile.isolated_revision_checks {
             capabilities.push(act_capability(
                 sandbox::CAPABILITY,
                 REVISION_CANDIDATE,
-                DIAGNOSTIC_RESULT,
+                sandbox.result_schema(),
                 sandbox::PERMISSION,
             ));
         }
@@ -524,7 +524,7 @@ fn run_check(
     revision: Option<&str>,
     diagnostic: bool,
     sandbox: Option<&Sandbox>,
-) -> (Value, Option<Diagnostics>) {
+) -> (Value, Option<Diagnostics>, Option<ResourceUsage>) {
     let started = Instant::now();
     // The supervisor maintains the deadline even if the adapter process is lost.
     let timeout = format!(
@@ -551,24 +551,42 @@ fn run_check(
     let process = if let Some(sandbox) = sandbox {
         sandbox
             .run(&mut command, workspace, &check.program, &check.args)
-            .map(|(status, output, reported)| (status, Some(output), reported))
+            .map(|run| {
+                (
+                    run.exit,
+                    Some(run.diagnostics),
+                    run.reported_exit,
+                    run.resources,
+                )
+            })
     } else {
         command.arg(&check.program).args(&check.args);
         if diagnostic {
-            diagnostics::run(&mut command).map(|(status, output)| (status, Some(output), true))
+            diagnostics::run(&mut command)
+                .map(|(status, output)| (status, Some(output), true, None))
         } else {
             command
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
                 .status()
-                .map(|status| (status, None, true))
+                .map(|status| (status, None, true, None))
         }
     };
-    let (process, output, reported_exit) = match process {
-        Ok((status, output, reported_exit)) => (Some(status), output, reported_exit),
-        Err(_) => (None, None, false),
+    let (process, output, reported_exit, resources) = match process {
+        Ok((status, output, reported_exit, resources)) => {
+            (Some(status), output, reported_exit, resources)
+        }
+        Err(error) => (
+            None,
+            sandbox.map(|_| Diagnostics::setup_error(&error)),
+            false,
+            None,
+        ),
     };
     let (status, exit_code) = match process {
+        Some(exit) if resources.as_ref().is_some_and(ResourceUsage::hit_limit) => {
+            ("resource_limit", exit.code())
+        }
         Some(exit) if exit.code().is_none() || matches!(exit.code(), Some(124 | 137)) => {
             ("timed_out_or_killed", exit.code())
         }
@@ -584,20 +602,28 @@ fn run_check(
         result["exit_code"] = json!(code);
     }
     let output = output.filter(|_| {
-        matches!(status, "failed" | "timed_out_or_killed")
+        matches!(status, "failed" | "timed_out_or_killed" | "resource_limit")
             || (sandbox.is_some() && status == "runner_error")
     });
-    (result, output)
+    (result, output, resources)
 }
 
 // Existing profiles keep the original bare result in their journals.
-fn journal_result(result: Value, output: Option<Diagnostics>, diagnostic: bool) -> Value {
+fn journal_result(
+    result: Value,
+    output: Option<Diagnostics>,
+    resources: Option<ResourceUsage>,
+    diagnostic: bool,
+) -> Value {
     if !diagnostic {
         return result;
     }
     let mut payload = json!({"result":result});
     if let Some(output) = output {
         payload["diagnostics"] = json!(output);
+    }
+    if let Some(resources) = resources {
+        payload["resources"] = json!(resources);
     }
     payload
 }

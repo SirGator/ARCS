@@ -942,3 +942,159 @@ if sys.argv[4] == 'slow':
     );
     host.shutdown().unwrap();
 }
+
+const RESOURCE_RECEIPT: &str = "arcs.execution_result.workspace_revision_check.v3";
+
+fn configure_resource_limits(f: &Fixture, parent: &Path) {
+    let mut host = f.read("host.json");
+    let schemas = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("schemas");
+    host["schemas"].as_array_mut().unwrap().push(json!(
+        schemas.join("revision-resource-execution.schema.json")
+    ));
+    f.write("host.json", host);
+    let mut profile = f.read("profile.json");
+    profile["isolated_revision_checks"]["resources"] =
+        json!({"parent":parent,"cpu_percent":25,"memory_bytes":67108864,"max_tasks":12});
+    f.write("profile.json", profile);
+}
+
+#[test]
+fn missing_cgroup_controls_never_launch_the_check() {
+    let f = Fixture::new();
+    let marker = f.0.join("ran");
+    let base = configure_isolated_checks(
+        &f,
+        Path::new("/usr/bin/true"),
+        json!({
+            "limited":{"program":"/usr/bin/python3","timeout_ms":2000,
+                "args":["-I","-c","import pathlib,sys; pathlib.Path(sys.argv[1]).touch()",marker]}
+        }),
+    );
+    let stand_in = f.0.join("fake-parent");
+    fs::create_dir(&stand_in).unwrap();
+    fs::write(stand_in.join("cgroup.subtree_control"), "cpu memory pids\n").unwrap();
+    configure_resource_limits(&f, &stand_in);
+
+    let mut host = f.open();
+    let proposed = isolated_candidate(&host, "limited", &base);
+    let action = approve_for(&host, &proposed, ISOLATED_CAPABILITY);
+    let receipt = host
+        .execute_approved(&AdapterId(ADAPTER.into()), &action)
+        .unwrap();
+    assert_eq!(receipt.schema_id.0, RESOURCE_RECEIPT);
+    assert_eq!(receipt.payload["result"]["status"], "runner_error");
+    assert!(
+        receipt.payload["diagnostics"]["stderr"]["text"]
+            .as_str()
+            .unwrap()
+            .contains("cpu.max")
+    );
+    assert!(receipt.payload.get("resources").is_none());
+    assert!(!marker.exists());
+    assert_eq!(fs::read_dir(&stand_in).unwrap().count(), 1);
+    host.shutdown().unwrap();
+}
+
+#[test]
+#[ignore = "requires real Bubblewrap and a writable delegated cgroup v2 parent"]
+fn isolated_checks_enforce_and_report_cpu_memory_and_task_limits() {
+    let launcher = std::env::var_os("ARCS_TEST_BWRAP")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/usr/bin/bwrap"));
+    let parent =
+        PathBuf::from(std::env::var_os("ARCS_TEST_CHECK_CGROUP").expect("delegated cgroup parent"));
+    assert_eq!(child_cgroups(&parent), 0);
+    let f = Fixture::new();
+    let definition = |code: &str| {
+        json!({
+            "program":"/usr/bin/python3","args":["-I","-B","-c",code],"timeout_ms":5000
+        })
+    };
+    let base = configure_isolated_checks(
+        &f,
+        &launcher,
+        json!({
+            "cpu":definition(r#"
+import time
+deadline = time.process_time() + .18
+while time.process_time() < deadline:
+    pass
+"#),
+            "memory":definition(r#"
+pages = []
+for _ in range(32):
+    region = bytearray(4 * 1024 * 1024)
+    for index in range(0, len(region), 4096):
+        region[index] = 1
+    pages.append(region)
+"#),
+            "deadline":{"program":"/usr/bin/python3","timeout_ms":1000,"args":["-I","-B","-c",r#"
+import subprocess
+import time
+child = subprocess.Popen(['/usr/bin/sleep', '10'], start_new_session=True)
+print('waiting for isolated child', flush=True)
+time.sleep(10)
+"#]},
+        "tasks":definition(r#"
+import errno
+import subprocess
+children = []
+try:
+    for _ in range(16):
+        children.append(subprocess.Popen(['/usr/bin/sleep', '2']))
+except OSError as error:
+    assert error.errno == errno.EAGAIN
+    print("task creation was denied")
+finally:
+    for child in children:
+        child.terminate()
+    for child in children:
+        child.wait()
+"#)
+        }),
+    );
+    configure_resource_limits(&f, &parent);
+    let mut host = f.open();
+    let adapter = AdapterId(ADAPTER.into());
+    for (name, status) in [
+        ("cpu", "passed"),
+        ("memory", "resource_limit"),
+        ("tasks", "resource_limit"),
+        ("deadline", "timed_out_or_killed"),
+    ] {
+        let proposal = isolated_candidate(&host, name, &base);
+        let action = approve_for(&host, &proposal, ISOLATED_CAPABILITY);
+        let receipt = host.execute_approved(&adapter, &action).unwrap();
+        assert_eq!(receipt.schema_id.0, RESOURCE_RECEIPT);
+        assert_eq!(receipt.payload["result"]["status"], status, "{receipt:?}");
+        assert_eq!(receipt.payload["result"]["revision"], base);
+        let usage = &receipt.payload["resources"];
+        assert_eq!(usage["cpu_percent"], 25);
+        assert_eq!(usage["memory_bytes"], 67108864);
+        assert_eq!(usage["max_tasks"], 12);
+        match name {
+            "cpu" => assert!(usage["cpu_throttled_periods"].as_u64().unwrap() > 0),
+            "memory" => assert!(usage["memory_oom_kills"].as_u64().unwrap() > 0),
+            "tasks" => assert!(usage["task_limit_events"].as_u64().unwrap() > 0),
+            "deadline" => {
+                assert_eq!(usage["memory_oom_kills"], 0);
+                assert_eq!(usage["task_limit_events"], 0);
+                assert_eq!(
+                    receipt.payload["diagnostics"]["stdout"]["text"],
+                    "waiting for isolated child\n"
+                );
+            }
+            _ => unreachable!(),
+        }
+        assert_eq!(child_cgroups(&parent), 0, "each finished group is removed");
+    }
+    host.shutdown().unwrap();
+}
+
+fn child_cgroups(parent: &Path) -> usize {
+    fs::read_dir(parent)
+        .unwrap()
+        .map(|entry| entry.unwrap())
+        .filter(|entry| entry.file_type().unwrap().is_dir())
+        .count()
+}

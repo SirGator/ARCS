@@ -1,4 +1,9 @@
 //! Bubblewrap owns the namespace boundary for revision checks.
+mod resources;
+
+use resources::ResourceLimits;
+pub(crate) use resources::ResourceUsage;
+
 use std::collections::BTreeSet;
 use std::fs::File;
 use std::io::{self, Read};
@@ -13,6 +18,8 @@ use crate::git_edit::TemporaryDirectory;
 
 pub(crate) const CAPABILITY: &str = "check.revision.isolated";
 pub(crate) const PERMISSION: &str = "workspace.check_revision_isolated";
+pub(crate) const RESOURCE_RESULT: &str = "arcs.execution_result.workspace_revision_check.v3";
+const DIAGNOSTIC_RESULT: &str = "arcs.execution_result.workspace_revision_check.v2";
 const RUNTIME_ROOTS: &[&str] = &["/usr", "/bin", "/sbin", "/lib", "/lib32", "/lib64"];
 const SCRATCH_BYTES: &str = "67108864";
 
@@ -21,6 +28,15 @@ const SCRATCH_BYTES: &str = "67108864";
 pub(crate) struct Sandbox {
     pub program: PathBuf,
     pub checks: BTreeSet<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    resources: Option<ResourceLimits>,
+}
+
+pub(crate) struct IsolatedRun {
+    pub exit: ExitStatus,
+    pub diagnostics: Diagnostics,
+    pub reported_exit: bool,
+    pub resources: Option<ResourceUsage>,
 }
 
 pub(crate) fn validate_program(program: &Path) -> Result<(), String> {
@@ -33,30 +49,75 @@ pub(crate) fn validate_program(program: &Path) -> Result<(), String> {
 }
 
 impl Sandbox {
+    pub(crate) fn prepare(&mut self, base: &Path) -> Result<(), String> {
+        self.program = base
+            .join(&self.program)
+            .canonicalize()
+            .map_err(|error| error.to_string())?;
+        if let Some(limits) = &mut self.resources {
+            limits.parent = base
+                .join(&limits.parent)
+                .canonicalize()
+                .map_err(|error| error.to_string())?;
+            limits.validate()?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn result_schema(&self) -> &'static str {
+        if self.resources.is_some() {
+            RESOURCE_RESULT
+        } else {
+            DIAGNOSTIC_RESULT
+        }
+    }
+
     pub(crate) fn run(
         &self,
         supervisor: &mut Command,
         snapshot: &Path,
         program: &Path,
         arguments: &[String],
-    ) -> io::Result<(ExitStatus, Diagnostics, bool)> {
+    ) -> io::Result<IsolatedRun> {
         let parent = snapshot
             .parent()
             .ok_or_else(|| io::Error::other("snapshot has no parent"))?;
         let status_dir = TemporaryDirectory::create(parent, "check-sandbox")?;
         let status_file = status_dir.path().join("status.jsonl");
 
-        // The shell only opens the supervisor status FD. Paths and command
-        // arguments are separate argv entries and never interpolated.
+        let group = self
+            .resources
+            .as_ref()
+            .map(|limits| {
+                limits.create(
+                    status_dir
+                        .path()
+                        .file_name()
+                        .expect("temporary directory has a name"),
+                )
+            })
+            .transpose()?;
+
+        // The fixed launcher only opens the status FD and joins the cgroup.
+        // Paths and command arguments stay separate argv entries.
         supervisor
             .env_clear()
             .args([
                 "/bin/sh",
                 "-c",
-                "exec 3>\"$1\" || exit 125\nshift\nexec \"$@\"",
+                r#"exec 3>"$1" || exit 125
+if [ -n "$2" ]; then printf '0\n' >"$2" || exit 125; fi
+shift 2
+exec "$@""#,
                 "arcs-bwrap",
             ])
             .arg(&status_file)
+            .arg(
+                group
+                    .as_ref()
+                    .map(|group| group.membership())
+                    .unwrap_or_default(),
+            )
             .arg(&self.program)
             .args([
                 "--unshare-all",
@@ -116,7 +177,12 @@ impl Sandbox {
         let reported = exit
             .code()
             .is_some_and(|code| recorded_exit(&status_file) == Some(i64::from(code)));
-        Ok((exit, diagnostics, reported))
+        Ok(IsolatedRun {
+            exit,
+            diagnostics,
+            reported_exit: reported,
+            resources: group.map(|group| group.finish()).transpose()?,
+        })
     }
 }
 

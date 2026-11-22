@@ -22,6 +22,34 @@ struct Output {
     truncated: bool,
 }
 
+impl Diagnostics {
+    pub(crate) fn setup_error(error: &io::Error) -> Self {
+        let message = format!("isolated check setup or cleanup: {error}");
+        let prefix = message.as_bytes();
+        Self {
+            stdout: Output::new(Vec::new(), false),
+            stderr: Output::new(
+                prefix[..prefix.len().min(PREFIX_BYTES)].to_vec(),
+                prefix.len() > PREFIX_BYTES,
+            ),
+        }
+    }
+}
+
+impl Output {
+    fn new(mut prefix: Vec<u8>, truncated: bool) -> Self {
+        for byte in &mut prefix {
+            if byte.is_ascii_control() && !matches!(*byte, b'\n' | b'\r' | b'\t') {
+                *byte = b'.';
+            }
+        }
+        Self {
+            text: String::from_utf8_lossy(&prefix).into_owned(),
+            truncated,
+        }
+    }
+}
+
 struct Capture {
     reader: UnixStream,
     prefix: Vec<u8>,
@@ -103,14 +131,6 @@ impl Capture {
                 break;
             }
         }
-        for byte in &mut self.prefix {
-            if byte.is_ascii_control() && !matches!(*byte, b'\n' | b'\r' | b'\t') {
-                *byte = b'.';
-            }
-        }
-        Output {
-            text: String::from_utf8_lossy(&self.prefix).into_owned(),
-            truncated: self.truncated || !self.closed,
-        }
+        Output::new(self.prefix, self.truncated || !self.closed)
     }
 }

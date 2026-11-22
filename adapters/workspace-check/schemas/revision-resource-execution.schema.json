@@ -1,0 +1,66 @@
+{
+  "$id": "arcs.execution_result.workspace_revision_check.v3",
+  "type": "object",
+  "required": ["action_version", "result"],
+  "properties": {
+    "action_version": { "type": "string", "minLength": 1 },
+    "diagnostics": {
+      "type": "object",
+      "required": ["stdout", "stderr"],
+      "properties": {
+        "stdout": {
+          "type": "object",
+          "required": ["text", "truncated"],
+          "properties": {
+            "text": { "type": "string" },
+            "truncated": { "type": "boolean" }
+          },
+          "additionalProperties": false
+        },
+        "stderr": {
+          "type": "object",
+          "required": ["text", "truncated"],
+          "properties": {
+            "text": { "type": "string" },
+            "truncated": { "type": "boolean" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "resources": {
+      "type": "object",
+      "required": [
+        "cpu_percent", "memory_bytes", "max_tasks", "cpu_throttled_periods",
+        "memory_oom_events", "memory_oom_kills", "task_limit_events"
+      ],
+      "properties": {
+        "cpu_percent": { "type": "integer", "minimum": 1 },
+        "memory_bytes": { "type": "integer", "minimum": 1 },
+        "max_tasks": { "type": "integer", "minimum": 1 },
+        "cpu_throttled_periods": { "type": "integer", "minimum": 0 },
+        "memory_oom_events": { "type": "integer", "minimum": 0 },
+        "memory_oom_kills": { "type": "integer", "minimum": 0 },
+        "task_limit_events": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "result": {
+      "type": "object",
+      "required": ["check", "revision", "status"],
+      "properties": {
+        "check": { "type": "string", "minLength": 1 },
+        "revision": { "type": "string", "minLength": 40 },
+        "status": {
+          "type": "string",
+          "enum": ["passed", "failed", "timed_out_or_killed", "runner_error", "interrupted", "resource_limit"]
+        },
+        "duration_ms": { "type": "integer", "minimum": 0 },
+        "exit_code": { "type": "integer", "minimum": 0, "maximum": 255 }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

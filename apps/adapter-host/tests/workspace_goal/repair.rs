@@ -959,6 +959,40 @@ fn a_workspace_repair_can_use_only_isolated_checks() {
     checker["diagnostic_revision_checks"] = json!([]);
     checker["revision_checks"] = json!([]);
     checker["isolated_revision_checks"] = json!({"program":program,"checks":["unit"]});
+    let resources = std::env::var_os("ARCS_TEST_CHECK_CGROUP").map(PathBuf::from);
+    if let Some(parent) = &resources {
+        checker["isolated_revision_checks"]["resources"] =
+            json!({"parent":parent,"cpu_percent":50,"memory_bytes":134217728,"max_tasks":16});
+        let mut host = f.read("host.json");
+        let schema_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../adapters/workspace-check/schemas/revision-resource-execution.schema.json");
+        let definition: Value = serde_json::from_slice(&fs::read(&schema_path).unwrap()).unwrap();
+        host["schemas"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!(schema_path));
+        f.write("host.json", host);
+
+        let mut success = f.read("check-success.schema.json");
+        success["$id"] = json!("arcs.policy.repair_check_success.v2");
+        success["required"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!("resources"));
+        let mut limits = definition["properties"]["resources"].clone();
+        for (key, expected) in [
+            ("cpu_percent", 50),
+            ("memory_bytes", 134217728),
+            ("max_tasks", 16),
+            ("memory_oom_events", 0),
+            ("memory_oom_kills", 0),
+            ("task_limit_events", 0),
+        ] {
+            limits["properties"][key] = json!({"const":expected});
+        }
+        success["properties"]["resources"] = limits;
+        f.write("check-success.schema.json", success);
+    }
     f.write("check-profile.json", checker);
     let mut grant = f.read("check-grant.json");
     grant["enabled_capabilities"] = json!(["edit.apply", "check.revision.isolated", "source.read"]);
@@ -975,6 +1009,17 @@ fn a_workspace_repair_can_use_only_isolated_checks() {
         let route = &mut runtime["routes"][0]["plan"]["templates"][index]["route"];
         route["allowed_capabilities"] = json!([capability]);
         route["goal"]["actions"][0]["capability"] = capability.clone();
+    }
+    if resources.is_some() {
+        let receipt = "arcs.execution_result.workspace_revision_check.v3";
+        for index in [1, 3] {
+            runtime["routes"][0]["plan"]["templates"][index]["route"]["goal"]["export_execution_schema_id"] =
+                json!(receipt);
+            runtime["routes"][0]["plan"]["templates"][index]["route"]["goal"]["execution_success_schema_id"] =
+                json!("arcs.policy.repair_check_success.v2");
+        }
+        runtime["routes"][0]["plan"]["templates"][2]["route"]["goal"]["sources"][0]["query"]["from_dependencies"]
+            ["revision"]["schema_id"] = json!(receipt);
     }
     f.write("runtime.json", runtime);
     verify_repair(&f, false);

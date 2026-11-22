@@ -14,6 +14,7 @@ pub const CHECK: &str = "arcs.workspace_revision_check_candidate.v1";
 const SOURCE: &str = "arcs.workspace_source.v1";
 const TASK: &str = "arcs.task.workspace_repair.v1";
 const EDIT_RECEIPT: &str = "arcs.execution_result.workspace_edit.v1";
+const CHECK_WITH_LIMITS: &str = "arcs.execution_result.workspace_revision_check.v3";
 const CHECK_WITH_DIAGNOSTICS: &str = "arcs.execution_result.workspace_revision_check.v2";
 const CHECK_RECEIPT: &str = "arcs.execution_result.workspace_revision_check.v1";
 
@@ -86,7 +87,7 @@ pub fn reason(invocation: &ReasoningInvocationV2) -> Result<ReasoningResponseV2,
                 .ok_or_else(|| AdapterError::rejected("missing workspace repair candidate"))?;
             let schemas: &[_] = match candidate.schema_id.0.as_str() {
                 EDIT => &[EDIT_RECEIPT],
-                CHECK => &[CHECK_RECEIPT, CHECK_WITH_DIAGNOSTICS],
+                CHECK => &[CHECK_RECEIPT, CHECK_WITH_DIAGNOSTICS, CHECK_WITH_LIMITS],
                 _ => {
                     return Err(AdapterError::rejected(
                         "unsupported workspace repair candidate",

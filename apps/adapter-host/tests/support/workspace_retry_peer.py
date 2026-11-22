@@ -8,7 +8,10 @@ PLAN = "arcs.plan_candidate.v3"
 EDIT = "arcs.workspace_edit_candidate.v1"
 CHECK = "arcs.workspace_revision_check_candidate.v1"
 EDIT_RECEIPT = "arcs.execution_result.workspace_edit.v1"
-CHECK_RECEIPT = "arcs.execution_result.workspace_revision_check.v2"
+CHECK_RECEIPTS = (
+    "arcs.execution_result.workspace_revision_check.v2",
+    "arcs.execution_result.workspace_revision_check.v3",
+)
 CONTEXT = "arcs.plan_replanning.v2"
 ID = "workspace.replanner"
 
@@ -17,8 +20,9 @@ db.execute("CREATE TABLE IF NOT EXISTS calls (id TEXT PRIMARY KEY, input TEXT, r
 
 
 def context(inv, version, schema):
+    schemas = (schema,) if isinstance(schema, str) else schema
     return next(item for item in inv["context"]
-                if item["version_id"] == version and item["schema_id"] == schema)
+                if item["version_id"] == version and item["schema_id"] in schemas)
 
 
 def dependency(inv):
@@ -47,7 +51,7 @@ def propose(inv):
             check = next(step for step in digest["payload"]["steps"] if step["id"] == "check")
             edit = next(step for step in digest["payload"]["steps"] if step["id"] == "edit")
             assert check["resolution"] == "blocked" and check["output_version_ids"] == []
-            failure = context(inv, check["failure_receipt_version_id"], CHECK_RECEIPT)["payload"]
+            failure = context(inv, check["failure_receipt_version_id"], CHECK_RECEIPTS)["payload"]
             previous, = edit["output_version_ids"]
             applied = context(inv, previous, EDIT_RECEIPT)["payload"]["result"]
             if "diagnostics" not in failure:
@@ -73,7 +77,7 @@ def propose(inv):
             binding, = (item for item in inv["constraints"]["task_dependencies"]
                         if item.get("failure_evidence"))
             failure, = binding["context"]
-            receipt = context(inv, failure["version_id"], CHECK_RECEIPT)["payload"]
+            receipt = context(inv, failure["version_id"], CHECK_RECEIPTS)["payload"]
             assert "AssertionError: 6 != 5" in receipt["diagnostics"]["stderr"]["text"]
             source_id = inv["constraints"]["goal_runtime"]["before"]["failed-source"]
             source = context(inv, source_id, "arcs.workspace_source.v1")["payload"]

@@ -217,8 +217,9 @@ ohne zusätzliche Linux-Capabilities.
 Der Adapter verlangt Bubblewraps separaten Exitbeleg. Ein fehlgeschlagener
 Start liefert `runner_error` mit begrenzter Diagnose, soweit vorhanden.
 Das Prüfprogramm wird in diesem Fall nicht außerhalb der Sandbox
-gestartet. Das vorhandene Zeitlimit bleibt wirksam. Das Profil
-setzt keine eigenen CPU-, RAM- oder Prozessquoten für den Prüfprozess.
+gestartet. Das vorhandene Zeitlimit bleibt wirksam. Mit dem
+optionalen Block `resources` lässt sich die isolierte Prüfung
+zusätzlich pro Prozessbaum begrenzen.
 
 Die beiden Prozess-Tests benötigen ein nutzbares Bubblewrap. Für einen
 abweichenden Installationspfad kann der Tester `ARCS_TEST_BWRAP` setzen.
@@ -230,6 +231,59 @@ cargo test -p arcs-host --locked --offline --test workspace_goal \
 ```
 
 [Offizielle Bubblewrap-Dokumentation](https://github.com/containers/bubblewrap/blob/main/bwrap.xml)
+
+### CPU-, Speicher- und Prozesslimits setzen
+
+Ergänze in `isolated_revision_checks` den Block `resources`.
+`parent` muss ein an den Adapterbetrieb delegiertes
+cgroup-v2-Verzeichnis sein. Darin müssen die Controller `cpu`,
+`memory` und `pids` für Kindgruppen aktiviert sein. Der Adapter
+und die Prüfgruppen müssen im selben delegierten Bereich liegen.
+
+```json
+{
+  "resources": {
+    "parent": "/sys/fs/cgroup/path-to-delegated-workspace-checks",
+    "cpu_percent": 50,
+    "memory_bytes": 134217728,
+    "max_tasks": 16
+  }
+}
+```
+
+`cpu_percent: 100` entspricht der Zeit eines logischen CPU-Kerns.
+`memory_bytes` gilt für die Gruppe, der Swap-Verbrauch ist gesperrt.
+`max_tasks` zählt Linux-Tasks einschließlich Threads. Die Grenzen
+gelten für die Sandbox und alle Prüfnachfahren. Kann die Gruppe
+nicht eingerichtet werden, startet die Prüfung nicht.
+[Kernel-Dokumentation zu cgroup v2](https://docs.kernel.org/admin-guide/cgroup-v2.html)
+
+Mit diesem Profil verwendet die Capability das Ergebnisschema
+`arcs.execution_result.workspace_revision_check.v3`.
+Lade `revision-resource-execution.schema.json` und aktualisiere
+die betroffenen Goal-Erfolgsschemata, Exporte und Request-Feldbindungen. Verwende dafür eine neu gebundene
+Adapterinstallation mit eigenem Journal.
+
+`resources` in der Quittung enthält die eingestellten Grenzen und die
+Kernelzähler für CPU-Drosselung, Speicherereignisse und abgewiesene
+Task-Erzeugung. CPU-Drosselung kann bei einer bestandenen Prüfung
+auftreten. Ein Speichermangel oder eine abgewiesene Task-Erzeugung
+liefert `resource_limit`. Bei normalem Abschluss oder Timeout
+beendet der Adapter verbleibende Gruppenprozesse und räumt die
+Kindgruppe auf. Nach einem abrupten Adapterabbruch kann eine leere
+Kindgruppe zurückbleiben.
+
+Für den Kerneltest setze `ARCS_TEST_CHECK_CGROUP` auf einen leeren,
+passend delegierten Prüfbereich und optional `ARCS_TEST_BWRAP`
+auf den Pfad zum lokalen Bubblewrap. Dieselben Einstellungen
+aktivieren die Limits im isolierten Ende-zu-Ende-Reparaturtest.
+
+```bash
+cargo test -p arcs-workspace-check --locked --offline \
+  isolated_checks_enforce_and_report -- --ignored
+cargo test -p arcs-host --locked --offline --test workspace_goal \
+  a_workspace_repair_can_use_only_isolated_checks -- --ignored
+```
 
 ## Quelltext einer Revision abrufen
 

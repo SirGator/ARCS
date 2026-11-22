@@ -573,6 +573,13 @@
 > Der Sandbox-Start erzeugt einen separaten Laufbeleg. Der
 > bestehende Reparaturplan verarbeitet auch diese Prüfergebnisse.
 >
+> Sechsundfünfzigster Schritt gemäß v3 §7.2 PAR-07/PAR-08,
+> §10.1 SEC-06/SEC-07 und TEST-02. Ein delegierter cgroup-v2-Bereich
+> ermöglicht CPU-, Speicher- und Taskgrenzen für den gesamten
+> Prozessbaum einer isolierten Git-Prüfung. Der Adapter unterscheidet
+> Grenzverletzungen von fachlichen Testfehlern und dokumentiert
+> die Kernelzähler im Ausführungsartefakt.
+>
 **Leitbild:** ARCS ist ein universeller Agent. Es soll sich einfach bedienen lassen, beliebige kompatible Systeme verbinden, eigenständig Probleme lösen und langfristige Aufgaben über Monate verfolgen.
 
 ## 1. Verbindliche Architekturregeln
