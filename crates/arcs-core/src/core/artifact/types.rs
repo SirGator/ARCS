@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::core::security::SecurityProfile;
+
 pub use arcs_adapter_protocol::{SchemaId, SubjectId, TrustLevel, VersionId};
 
 /// Globale Obergrenze für auditierbare externe oder interne Source-Referenzen.
@@ -171,6 +173,13 @@ pub struct Artifact {
     /// Optionale, aber auditierbare Entstehungsgeschichte.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provenance: Option<Provenance>,
+    /// Schutzstufe, Verantwortung und Herkunftsbeleg des Inhalts.
+    ///
+    /// Das Profil wird beim Commit im Store aufgelöst: Ohne Deklaration gilt
+    /// die geerbte Stufe der Quellen. Gespeichert wird stets die wirksame
+    /// Stufe, damit Leser ohne erneute Vererbung entscheiden können.
+    #[serde(default)]
+    pub security: SecurityProfile,
 }
 
 impl Artifact {
@@ -208,12 +217,19 @@ impl Artifact {
             tags: Vec::new(),
             payload,
             provenance: None,
+            security: SecurityProfile::default(),
         }
     }
 
     /// Ordnet die neue Version einem fachlichen Subject zu.
     pub fn with_subject(mut self, subject: impl Into<String>) -> Self {
         self.subject = Some(SubjectId(subject.into()));
+        self
+    }
+
+    /// Setzt Schutzstufe, Verantwortung und Herkunftsbeleg des Inhalts.
+    pub fn with_security(mut self, security: SecurityProfile) -> Self {
+        self.security = security;
         self
     }
 }

@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use arcs::adapters::{AdapterId, AdapterRegistry};
 use arcs::core::{Artifact, SystemClock};
 use arcs::input::{InputMessage, InputService};
@@ -12,9 +13,25 @@ pub fn policy(tag: &str) -> Value {
         "relations":["based_on"],"search":{"max_depth":2,"max_visited":32,"max_edges":64,"max_candidates":8},"max_items":2,"max_bytes":2048})
 }
 pub fn append(host: &Host, id: &str, tag: &str) -> Artifact {
+    append_with_classification(host, id, tag, None)
+}
+/// Legt eine Erinnerung an und deklariert ihre Datenklasse.
+///
+/// Die Deklaration stammt vom Betreiber des Adapters. Ohne Angabe gilt die
+/// Standardstufe `internal`.
+pub fn append_with_classification(
+    host: &Host,
+    id: &str,
+    tag: &str,
+    classification: Option<&str>,
+) -> Artifact {
     let adapter_id = adapter(tag);
     let manifest=serde_json::from_value(json!({"protocol_version":1,"adapter_id":adapter_id,"adapter_version":"1","capabilities":[{"id":"memory.capture","contract":{"kind":"input","emits":["arcs.input.v1"]},"required_permissions":[]}]})).unwrap();
-    let grant=serde_json::from_value(json!({"adapter_id":adapter_id,"producer_class":"adapter","enabled_capabilities":["memory.capture"],"granted_permissions":[],"assigned_trust":"medium","ingress_source_kind":"chat","max_payload_bytes":4096,"max_external_reference_bytes":512,"reasoning_limits":null})).unwrap();
+    let mut grant_json = json!({"adapter_id":adapter_id,"producer_class":"adapter","enabled_capabilities":["memory.capture"],"granted_permissions":[],"assigned_trust":"medium","ingress_source_kind":"chat","max_payload_bytes":4096,"max_external_reference_bytes":512,"reasoning_limits":null});
+    if let Some(classification) = classification {
+        grant_json["data_classification"] = json!(classification);
+    }
+    let grant = serde_json::from_value(grant_json).unwrap();
     let mut registry = AdapterRegistry::new();
     registry
         .register(manifest, grant, host.schemas(), host.store())

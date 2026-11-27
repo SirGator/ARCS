@@ -104,6 +104,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 reasoning_limits_v2: None,
                 reasoning_limits: None,
                 data_limits: None,
+                data_classification: None,
             },
             host.schemas(),
             host.store(),

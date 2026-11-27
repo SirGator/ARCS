@@ -13,8 +13,8 @@ use crate::adapters::{
     input_data::{InputDataSelection, InputDataService},
 };
 use crate::core::{
-    Actor, ActorType, ArtifactFactory, ArtifactFactoryInput, ArtifactIdGenerator, Clock,
-    Provenance, SchemaId, SchemaRegistry, Source, SourceClass, SourceKind, SubjectId, Trust,
+    Actor, ActorType, ArtifactFactory, ArtifactFactoryInput, ArtifactIdGenerator, Classification,
+    Clock, Provenance, SchemaId, SchemaRegistry, Source, SourceClass, SourceKind, SubjectId, Trust,
     TrustLevel, VersionId, validate_artifact,
 };
 use crate::runtime::{InvocationKind, deterministic_invocation_id};
@@ -155,8 +155,21 @@ impl ReasoningContextService<'_> {
             &request.capability.adapter_id,
             &request.capability.capability_id,
         )?;
-        let limits = registered
-            .grant()
+        let grant = registered.grant();
+        // Der Grant des Betreibers setzt die harte Obergrenze. Ein Request
+        // darf sie nur weiter einschränken, niemals erhöhen.
+        let ceiling = grant.data_classification_ceiling();
+        for scope in &policy.scopes {
+            if let Some(requested) = scope.filter.max_classification
+                && !requested.allows(ceiling)
+            {
+                return Err(ReasoningError::DataClassExceedsGrant {
+                    requested,
+                    permitted: ceiling,
+                });
+            }
+        }
+        let limits = grant
             .reasoning_limits_v2
             .as_ref()
             .ok_or(ReasoningError::ReasoningBudgetExceedsGrant)?;
@@ -170,7 +183,7 @@ impl ReasoningContextService<'_> {
         if request.context.len() > request.budget.max_context_items {
             return Err(invalid("mandatory context exceeds item budget"));
         }
-        self.check_wire_budget(&request, inputs)?;
+        self.check_wire_budget(&request, inputs, ceiling)?;
         let schema = if policy.epistemic.is_some() {
             EPISTEMIC_SCHEMA
         } else {
@@ -202,8 +215,8 @@ impl ReasoningContextService<'_> {
             if record.request != request || record.policy != *policy || record.inputs != inputs {
                 return Err(invalid("memory selection identity conflict"));
             }
-            let result = self.apply_record(request, &record)?;
-            self.check_wire_budget(&result, inputs)?;
+            let result = self.apply_record(request, &record, ceiling)?;
+            self.check_wire_budget(&result, inputs, ceiling)?;
             return Ok(result);
         }
         let mut seeds: Vec<_> = request
@@ -216,7 +229,7 @@ impl ReasoningContextService<'_> {
                 seeds.push(anchor.clone());
             }
         }
-        let scopes = text::resolve_scopes(self.store, &request, policy)?;
+        let scopes = text::resolve_scopes(self.store, &request, policy, ceiling)?;
         let result = ArtifactRetrieval::new(self.store).recall(&RetrievalQuery {
             seeds,
             scopes: scopes.clone(),
@@ -271,7 +284,7 @@ impl ReasoningContextService<'_> {
                 version_id: hit.artifact.version_id.clone(),
                 payload_fields: scope.payload_fields.clone(),
             };
-            let item = match self.project(&selection) {
+            let item = match self.project(&selection, ceiling) {
                 Ok(item) => item,
                 Err(
                     ReasoningError::InvalidContextField { .. }
@@ -289,7 +302,7 @@ impl ReasoningContextService<'_> {
                 continue;
             }
             augmented.context.push(selection.clone());
-            match self.check_wire_budget(&augmented, inputs) {
+            match self.check_wire_budget(&augmented, inputs, ceiling) {
                 Ok(()) => {}
                 Err(ReasoningError::ContextTooLarge { .. }) => {
                     augmented.context.pop();
@@ -368,8 +381,8 @@ impl ReasoningContextService<'_> {
             &relations,
         )?;
         let persisted: ContextRecord = serde_json::from_value(committed.artifact.payload)?;
-        let augmented = self.apply_record(request, &persisted)?;
-        self.check_wire_budget(&augmented, inputs)?;
+        let augmented = self.apply_record(request, &persisted, ceiling)?;
+        self.check_wire_budget(&augmented, inputs, ceiling)?;
         Ok(augmented)
     }
 
@@ -377,6 +390,7 @@ impl ReasoningContextService<'_> {
         &self,
         mut request: ReasoningRequestV2,
         record: &ContextRecord,
+        ceiling: Classification,
     ) -> Result<ReasoningRequestV2, ReasoningError> {
         self.validate_epistemic_record(record)?;
         if record.selected.len() > record.policy.max_items {
@@ -388,7 +402,7 @@ impl ReasoningContextService<'_> {
             .map(|item| item.version_id.clone())
             .collect();
         let mut items = Vec::new();
-        let scopes = text::resolve_scopes(self.store, &request, &record.policy)?;
+        let scopes = text::resolve_scopes(self.store, &request, &record.policy, ceiling)?;
         for selected in &record.selected {
             let artifact = self
                 .store
@@ -409,7 +423,7 @@ impl ReasoningContextService<'_> {
             {
                 return Err(invalid("saved memory selection exceeds configured scope"));
             }
-            items.push(self.project(&selected.selection)?);
+            items.push(self.project(&selected.selection, ceiling)?);
             request.context.push(selected.selection.clone());
         }
         if request.context.len() > request.budget.max_context_items
@@ -423,6 +437,7 @@ impl ReasoningContextService<'_> {
     fn project(
         &self,
         selection: &ContextSelection,
+        ceiling: Classification,
     ) -> Result<ReasoningContextItem, ReasoningError> {
         let artifact = self
             .store
@@ -430,6 +445,16 @@ impl ReasoningContextService<'_> {
             .ok_or_else(|| ReasoningError::MissingContextArtifact(selection.version_id.clone()))?;
         validate_artifact(&artifact, self.schemas)
             .map_err(|_| invalid("invalid stored memory artifact"))?;
+        // Vor der Offenlegung: Der ausgewählte Kontext muss die Grenze des
+        // Adapters einhalten. Ein gespeicherter Abruf bleibt an dieselbe
+        // Grenze gebunden.
+        let classification = artifact.security.effective();
+        if !classification.allows(ceiling) {
+            return Err(ReasoningError::DataClassExceedsGrant {
+                requested: classification,
+                permitted: ceiling,
+            });
+        }
         Ok(ReasoningContextItem {
             payload: select_payload_fields(&artifact, &selection.payload_fields)?,
             version_id: artifact.version_id,
@@ -443,6 +468,7 @@ impl ReasoningContextService<'_> {
         &self,
         request: &ReasoningRequestV2,
         inputs: &[InputDataSelection],
+        ceiling: Classification,
     ) -> Result<(), ReasoningError> {
         let mut seen = HashSet::new();
         let mut context = Vec::new();
@@ -452,7 +478,7 @@ impl ReasoningContextService<'_> {
                     selection.version_id.clone(),
                 ));
             }
-            context.push(self.project(selection)?);
+            context.push(self.project(selection, ceiling)?);
         }
         context.sort_by(|a, b| a.version_id.0.cmp(&b.version_id.0));
         let input_data = InputDataService::new(self.registry, self.schemas, self.store).prepare(

@@ -192,6 +192,7 @@ fn input_grant() -> AdapterGrant {
         input_data_limits: None,
         reasoning_limits_v2: None,
         reasoning_limits: None,
+        data_classification: None,
     }
 }
 
@@ -231,6 +232,7 @@ fn reasoning_grant() -> AdapterGrant {
             max_output_bytes: 4096,
             max_candidates: 1,
         }),
+        data_classification: None,
     }
 }
 
@@ -266,6 +268,7 @@ fn act_grant() -> AdapterGrant {
         input_data_limits: None,
         reasoning_limits_v2: None,
         reasoning_limits: None,
+        data_classification: None,
     }
 }
 

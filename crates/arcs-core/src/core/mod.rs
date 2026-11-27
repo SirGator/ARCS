@@ -10,6 +10,8 @@ pub mod artifact;
 pub mod artifact_factory;
 /// Registry und Prüfung der versionierten JSON-Schemas.
 pub mod schema;
+/// Schutzstufen, Herkunftsbindung und Freigabe von Herabstufungen.
+pub mod security;
 /// Zusammengesetzte Validierung kompletter Artefakte.
 pub mod validation;
 
@@ -23,4 +25,5 @@ pub use artifact_factory::{
     GeneratedArtifactIds, SequenceIdGenerator, SystemClock,
 };
 pub use schema::{RegistryError, SchemaDefinition, SchemaRegistry, SchemaViolation};
+pub use security::{Classification, SecurityProfile, SecurityProfileError};
 pub use validation::{ValidationError, validate_artifact};

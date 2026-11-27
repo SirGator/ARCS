@@ -133,6 +133,7 @@ impl Fixture {
             input_data_limits: None,
             reasoning_limits: None,
             reasoning_limits_v2: None,
+            data_classification: None,
         };
         let mut source_grant = grant("source");
         source_grant.ingress_source_kind = Some(SourceKind::File);

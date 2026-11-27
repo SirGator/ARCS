@@ -62,6 +62,7 @@ fn grant() -> AdapterGrant {
         input_data_limits: None,
         reasoning_limits_v2: None,
         reasoning_limits: None,
+        data_classification: None,
     }
 }
 
@@ -103,6 +104,7 @@ fn register_host(
         input_data_limits: None,
         reasoning_limits_v2: None,
         reasoning_limits: None,
+        data_classification: None,
     };
     registry
         .register(manifest, grant, schemas, store)

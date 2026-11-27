@@ -67,6 +67,7 @@ fn fixture(limits: Option<DataLimits>) -> (AdapterRegistry, Endpoint, AdapterGra
         reasoning_limits_v2: None,
         reasoning_limits: None,
         data_limits: limits,
+        data_classification: None,
     };
     let mut schemas = SchemaRegistry::with_bundled_schemas().unwrap();
     schemas.register_json(DATA_REFERENCE_SCHEMA_JSON).unwrap();

@@ -70,6 +70,7 @@ fn install(
                         max_output_tokens: None,
                     },
                 }),
+                data_classification: None,
             },
             &schemas,
             &store,

@@ -110,6 +110,7 @@ impl Fixture {
             reasoning_limits_v2: None,
             reasoning_limits: None,
             data_limits: None,
+            data_classification: None,
         };
         let store = SqliteArtifactStore::in_memory().unwrap();
         let input = Artifact::new(

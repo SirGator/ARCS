@@ -1,5 +1,6 @@
 use super::*;
-use crate::core::{Artifact, SystemClock};
+use crate::core::security::SecurityProfile;
+use crate::core::{Artifact, Classification, SystemClock};
 use crate::reasoning::general::{GeneralReasoningService, ReasoningPreparation};
 use crate::reasoning::test_support::Fixture;
 use serde_json::json;
@@ -45,6 +46,7 @@ fn policy() -> MemoryPolicy {
                 schema_id: SchemaId(NOTE.into()),
                 subject: None,
                 tags: vec!["project:p".into()],
+                max_classification: None,
             },
             payload_fields: vec!["body".into()],
             text_query: None,
@@ -629,4 +631,123 @@ fn untrusted_artifact_cannot_impersonate_a_saved_memory_selection() {
     assert!(
         matches!(augment(&mut f,request(),&policy()),Err(ReasoningError::InvalidReasoningRequest(message)) if message.contains("another producer"))
     );
+}
+
+// ---------------------------------------------------------------------------
+// Schutzstufen: Der Kontext folgt der Grenze des Betreibers.
+// ---------------------------------------------------------------------------
+
+/// Eine vertrauliche Notiz, die als Quelle im Memory liegt.
+fn confidential_note(f: &Fixture, id: &str) -> Artifact {
+    let mut note = Artifact::new(
+        id,
+        format!("{id}-v1"),
+        "memory_note",
+        NOTE,
+        "2026-11-28T00:00:00Z",
+        Actor {
+            actor_type: ActorType::System,
+            id: "operator".into(),
+        },
+        Source {
+            kind: SourceKind::Internal,
+            reference: id.into(),
+        },
+        Trust {
+            level: TrustLevel::High,
+            source_class: SourceClass::System,
+        },
+        id,
+        json!({"body":"vertraulich","private_note":"nur intern"}),
+    );
+    note.tags = vec!["project:p".into()];
+    note.security = SecurityProfile::declared(Classification::Confidential);
+    f.store.append(&note, &f.schemas).unwrap();
+    note
+}
+
+/// Ein Grant, der dem Adapter vertrauliche Daten erlaubt.
+fn confidential_grant() -> crate::adapters::AdapterGrant {
+    let mut grant = Fixture::grant();
+    grant.data_classification = Some(Classification::Confidential);
+    grant
+}
+
+#[test]
+fn confidential_memory_stays_out_of_a_lower_scope() {
+    let mut f = fixture();
+    confidential_note(&f, "note-secret");
+
+    let augmented =
+        augment(&mut f, request(), &policy()).expect("default grant admits only internal data");
+
+    // Die vertrauliche Notiz erreicht den Kontext nicht.
+    let selected = augmented
+        .context
+        .iter()
+        .map(|selection| selection.version_id.0.clone())
+        .collect::<Vec<_>>();
+    assert!(!selected.contains(&"note-secret-v1".to_string()));
+    assert!(selected.contains(&"input-v1".to_string()));
+}
+
+#[test]
+fn confidential_memory_reaches_an_adapter_that_is_allowed_to_see_it() {
+    let mut f = Fixture::with_grant(confidential_grant());
+    f.schemas
+        .register_json(r#"{"$id":"arcs.memory_note.test.v1","type":"object","required":["body","private_note"],"properties":{"body":{"type":"string"},"private_note":{"type":"string"}},"additionalProperties":false}"#)
+        .unwrap();
+    confidential_note(&f, "note-secret");
+
+    let augmented =
+        augment(&mut f, request(), &policy()).expect("the grant allows confidential data");
+
+    let selected = augmented
+        .context
+        .iter()
+        .map(|selection| selection.version_id.0.clone())
+        .collect::<Vec<_>>();
+    assert!(selected.contains(&"note-secret-v1".to_string()));
+}
+
+#[test]
+fn a_scope_above_the_grant_ceiling_is_rejected() {
+    let mut f = fixture();
+    confidential_note(&f, "note-secret");
+    let mut policy = policy();
+    policy.scopes[0].filter.max_classification = Some(Classification::Confidential);
+
+    let error =
+        augment(&mut f, request(), &policy).expect_err("a scope may not raise the grant ceiling");
+
+    assert!(matches!(
+        error,
+        ReasoningError::DataClassExceedsGrant {
+            requested: Classification::Confidential,
+            permitted: Classification::Internal,
+        }
+    ));
+}
+
+#[test]
+fn mandatory_context_above_the_ceiling_is_rejected() {
+    let mut f = fixture();
+    let secret = confidential_note(&f, "note-secret");
+    let mut request = request();
+    request.context.push(ContextSelection {
+        version_id: secret.version_id.clone(),
+        payload_fields: vec!["body".into()],
+    });
+    request.budget.max_context_items = 4;
+
+    let error = augment(&mut f, request, &policy())
+        .expect_err("mandatory context is checked before disclosure");
+
+    assert!(matches!(
+        error,
+        ReasoningError::DataClassExceedsGrant {
+            requested: Classification::Confidential,
+            permitted: Classification::Internal,
+        }
+    ));
 }

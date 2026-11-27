@@ -1,6 +1,7 @@
 //! SQLite-Implementierung des unveränderlichen Artefakt-Stores.
 
 mod act_fences;
+mod classification;
 mod current_updates;
 mod graph;
 mod metadata;
@@ -13,6 +14,7 @@ pub use text_index::TextIndexTrace;
 
 use rusqlite::{Connection, OptionalExtension, params};
 
+use crate::core::security::Classification;
 use crate::core::{
     Artifact, SchemaId, SchemaRegistry, SequenceIdGenerator, SubjectId, ValidationError, VersionId,
     validate_artifact,
@@ -46,6 +48,19 @@ pub enum StoreError {
     InvalidCurrentBatch,
     OpenActFences,
     ProjectionTooLarge,
+    /// Eine deklarierte Schutzstufe liegt unter der geerbten Stufe.
+    ///
+    /// Eine Herabstufung braucht eine belegte Freigabe. Ohne sie wird der
+    /// Commit abgelehnt, damit kein Inhalt unterhalb seiner Herkunft
+    /// weiterwandert.
+    UnauthorizedDowngrade {
+        /// Vom Erzeuger deklarierte Stufe.
+        declared: Classification,
+        /// Aus den Quellen geerbte Stufe.
+        inherited: Classification,
+    },
+    /// Der Herkunftsbeleg einer Herabstufung ist unvollständig.
+    IncompleteDeclassification,
 }
 
 /// Core-seitiger Wiederholungsschlüssel und kanonische ursprüngliche Eingabe.
@@ -265,7 +280,7 @@ impl SqliteArtifactStore {
                 artifact: serde_json::from_str(&json)?,
             });
         }
-        let sequence = append_validated(&transaction, artifact)?;
+        let (sequence, resolved) = append_validated(&transaction, artifact)?;
         transaction.execute(
             "INSERT INTO current_artifacts (subject, schema_id, version_id)
              VALUES (?1, ?2, ?3) ON CONFLICT(subject, schema_id) DO UPDATE SET
@@ -280,7 +295,7 @@ impl SqliteArtifactStore {
         transaction.commit()?;
         Ok(CommittedArtifact {
             sequence,
-            artifact: artifact.clone(),
+            artifact: resolved,
         })
     }
 
@@ -303,6 +318,9 @@ impl SqliteArtifactStore {
             }
             return Ok(serde_json::from_str(&json)?);
         }
+        // Die Auflösung läuft vor dem Idempotenzvergleich: Gespeichert ist
+        // immer die wirksame Stufe, nicht die Deklaration des Erzeugers.
+        let resolved = classification::resolve(&transaction, artifact)?;
         let existing: Option<String> = transaction
             .query_row(
                 "SELECT artifact_json FROM artifact_versions WHERE version_id=?1",
@@ -311,29 +329,32 @@ impl SqliteArtifactStore {
             )
             .optional()?;
         if let Some(json) = existing {
-            if serde_json::from_str::<Artifact>(&json)? != *artifact {
+            if serde_json::from_str::<Artifact>(&json)? != resolved {
                 return Err(StoreError::IdempotencyConflict);
             }
         } else {
-            append_validated(&transaction, artifact)?;
+            append_resolved(&transaction, &resolved)?;
         }
         transaction.execute(
             "INSERT INTO ingress_receipts VALUES (?1,?2,?3)",
             params![receipt.key, receipt.input, artifact.version_id.0],
         )?;
         transaction.commit()?;
-        Ok(artifact.clone())
+        Ok(resolved)
     }
 
     /// Validiert und speichert genau eine unveränderliche Artefaktversion.
+    ///
+    /// Rückgabe ist die gespeicherte Fassung mit der aufgelösten Schutzstufe.
     pub(crate) fn append(
         &self,
         artifact: &Artifact,
         registry: &SchemaRegistry,
-    ) -> Result<(), StoreError> {
+    ) -> Result<Artifact, StoreError> {
         // Kein Artefakt darf die Schema-Sicherheitsgrenze umgehen.
         validate_artifact(artifact, registry).map_err(StoreError::Validation)?;
-        append_validated(&self.connection, artifact).map(|_| ())
+        let (_, resolved) = append_validated(&self.connection, artifact)?;
+        Ok(resolved)
     }
 
     /// Bindet alle bekannten Schema-IDs atomar an ihre kanonischen Dokumente.
@@ -392,7 +413,7 @@ impl SqliteArtifactStore {
             .ok_or(StoreError::MissingSubject)?;
 
         let transaction = self.connection.unchecked_transaction()?;
-        let sequence = append_validated(&transaction, artifact)?;
+        let (sequence, _) = append_validated(&transaction, artifact)?;
         transaction.execute(
             "INSERT INTO current_artifacts (subject, schema_id, version_id)
              VALUES (?1, ?2, ?3)
@@ -678,7 +699,20 @@ impl SqliteArtifactStore {
 
 /// Führt den gemeinsamen append-only Teil auf einer Connection oder
 /// Transaction aus. Validierung erfolgt immer vor dem Aufruf.
-fn append_validated(connection: &Connection, artifact: &Artifact) -> Result<u64, StoreError> {
+fn append_validated(
+    connection: &Connection,
+    artifact: &Artifact,
+) -> Result<(u64, Artifact), StoreError> {
+    // Die wirksame Schutzstufe wird vor dem Schreiben aufgelöst. Damit kann
+    // kein Artefakt unterhalb der Stufe seiner Herkunft gespeichert werden.
+    let resolved = classification::resolve(connection, artifact)?;
+    let sequence = append_resolved(connection, &resolved)?;
+    Ok((sequence, resolved))
+}
+
+/// Führt den gemeinsamen append-only Teil auf einer Connection oder
+/// Transaction aus. Validierung und Auflösung erfolgen immer vor dem Aufruf.
+fn append_resolved(connection: &Connection, artifact: &Artifact) -> Result<u64, StoreError> {
     // Die erste Version muss 1 sein; danach ist nur der direkte Nachfolger
     // erlaubt. So entstehen keine nicht replaybaren Lücken.
     let latest: Option<i64> = connection
@@ -792,5 +826,7 @@ fn insert_relations(
     Ok(())
 }
 
+#[cfg(test)]
+mod classification_tests;
 #[cfg(test)]
 mod tests;

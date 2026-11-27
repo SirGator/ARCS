@@ -1,4 +1,5 @@
 use super::*;
+use crate::core::security::SecurityProfile;
 use crate::runtime::{InvocationKind, deterministic_invocation_id};
 
 fn subject(target: &VersionId) -> SubjectId {
@@ -166,6 +167,7 @@ pub(super) fn commit(
             rules_applied: vec!["memory.operator_assessment.v1".into()],
             ..Default::default()
         }),
+        security: SecurityProfile::default(),
     };
     match service.store.append_current_compared(
         std::slice::from_ref(&artifact),

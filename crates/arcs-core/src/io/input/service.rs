@@ -4,6 +4,7 @@ use crate::adapters::{
     AdapterId, AdapterRegistry, AdapterRegistryError, CapabilityContract, CapabilityRef,
     ProducerClass,
 };
+use crate::core::security::SecurityProfile;
 use crate::core::{
     Actor, ActorType, Artifact, ArtifactFactory, ArtifactFactoryInput, ArtifactIdGenerator, Clock,
     Provenance, SchemaRegistry, Source, SourceClass, SubjectId, Trust, TrustLevel,
@@ -156,35 +157,40 @@ impl<'a> InputService<'a> {
             return Err(InputError::IdentityConflict(stream_key));
         }
 
+        // Vom Betreiber erklärte Datenklasse: Daten dieses Adapters tragen
+        // diese Stufe und werden daran im Memory gefiltert.
+        let ingress_classification = grant.ingress_classification();
         let mut factory = ArtifactFactory::new(self.clock, self.ids);
-        let artifact = factory.create(ArtifactFactoryInput {
-            schema: definition,
-            created_by: Actor {
-                actor_type: actor_type_for(producer_class),
-                id: adapter_id.0.clone(),
-            },
-            source: Source {
-                kind: source_kind,
-                reference: message.external_reference,
-            },
-            trust: trust_for(producer_class, assigned_trust),
-            stream_key,
-            subject,
-            tags: vec![
-                format!("adapter:{}", adapter_id.0),
-                format!("capability:{}", message.capability_id.0),
-            ],
-            payload: message.payload,
-            provenance: Some(Provenance {
-                parents: vec![],
-                rules_applied: vec![
-                    "input.capability_authorized".into(),
-                    "input.payload_validated".into(),
+        let artifact = factory
+            .create(ArtifactFactoryInput {
+                schema: definition,
+                created_by: Actor {
+                    actor_type: actor_type_for(producer_class),
+                    id: adapter_id.0.clone(),
+                },
+                source: Source {
+                    kind: source_kind,
+                    reference: message.external_reference,
+                },
+                trust: trust_for(producer_class, assigned_trust),
+                stream_key,
+                subject,
+                tags: vec![
+                    format!("adapter:{}", adapter_id.0),
+                    format!("capability:{}", message.capability_id.0),
                 ],
-                models_used: vec![],
-                transform: Some(format!("adapter:{}", adapter_id.0)),
-            }),
-        })?;
+                payload: message.payload,
+                provenance: Some(Provenance {
+                    parents: vec![],
+                    rules_applied: vec![
+                        "input.capability_authorized".into(),
+                        "input.payload_validated".into(),
+                    ],
+                    models_used: vec![],
+                    transform: Some(format!("adapter:{}", adapter_id.0)),
+                }),
+            })?
+            .with_security(SecurityProfile::declared(ingress_classification));
 
         if let Some(key) = receipt_key.as_deref() {
             return Ok(self.store.append_event_once(
@@ -196,8 +202,7 @@ impl<'a> InputService<'a> {
                 },
             )?);
         }
-        self.store.append(&artifact, self.schemas)?;
-        Ok(artifact)
+        Ok(self.store.append(&artifact, self.schemas)?)
     }
 }
 

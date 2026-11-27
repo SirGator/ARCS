@@ -2,6 +2,7 @@
 
 use super::service::ensure_candidate_schema;
 use super::{ReasoningError, ReasoningService};
+use crate::core::security::SecurityProfile;
 use crate::core::{
     Actor, ActorType, Artifact, ModelUse, Provenance, Source, SourceClass, SourceKind, Trust,
     TrustLevel,
@@ -134,6 +135,7 @@ impl ReasoningService<'_> {
                 }],
                 transform: Some(format!("reasoning_adapter:{}", proposal.adapter_id.0)),
             }),
+            security: SecurityProfile::default(),
         };
 
         // Aktivierungsgewichte und semantische Nachvollziehbarkeit bleiben

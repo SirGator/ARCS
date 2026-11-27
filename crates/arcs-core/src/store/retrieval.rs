@@ -2,7 +2,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::{ArtifactRelation, RelationKind, SqliteArtifactStore, StoreError};
-use crate::core::{Artifact, SchemaId, SubjectId, VersionId};
+use crate::core::{Artifact, Classification, SchemaId, SubjectId, VersionId};
 
 pub mod text;
 pub use super::database::sqlite_database::TextIndexTrace;
@@ -28,6 +28,12 @@ pub struct ArtifactFilter {
     pub subject: Option<SubjectId>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
+    /// Obergrenze der Schutzstufe zulässiger Artefakte.
+    ///
+    /// Die Grenze wirkt beim Abruf, nicht erst bei der Offenlegung: Ein
+    /// Artefakt oberhalb der Grenze wird nie in den Kontext aufgenommen.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_classification: Option<Classification>,
 }
 impl ArtifactFilter {
     pub fn matches(&self, artifact: &Artifact) -> bool {
@@ -37,6 +43,9 @@ impl ArtifactFilter {
                 .as_ref()
                 .is_none_or(|subject| artifact.subject.as_ref() == Some(subject))
             && self.tags.iter().all(|tag| artifact.tags.contains(tag))
+            && self
+                .max_classification
+                .is_none_or(|ceiling| artifact.security.effective().allows(ceiling))
     }
     pub fn is_scoped(&self) -> bool {
         self.subject.is_some() || !self.tags.is_empty()

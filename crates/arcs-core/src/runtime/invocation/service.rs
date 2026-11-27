@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
+use crate::core::security::SecurityProfile;
 use crate::core::{
     Actor, ActorType, Artifact, ArtifactId, Clock, Provenance, SchemaId, SchemaRegistry, Source,
     SourceClass, SourceKind, SubjectId, Trust, TrustLevel, VersionId,
@@ -482,6 +483,7 @@ fn state_artifact(
             models_used: vec![],
             transform: Some("runtime.invocation".into()),
         }),
+        security: SecurityProfile::default(),
     })
 }
 

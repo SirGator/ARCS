@@ -10,6 +10,7 @@ use super::{
 use crate::adapters::{
     AdapterCallError, AdapterGrant, AdapterManifest, AdapterRegistry, ProducerClass,
 };
+use crate::core::security::SecurityProfile;
 use crate::core::{
     Actor, ActorType, Artifact, ArtifactIdGenerator, Clock, Provenance, SchemaId, SchemaRegistry,
     Source, SourceClass, SourceKind, Trust, TrustLevel, VersionId, validate_artifact,
@@ -768,6 +769,7 @@ impl GeneralReasoningService<'_> {
                 models_used: vec![],
                 transform: Some("reasoning.v2".into()),
             }),
+            security: SecurityProfile::default(),
         }
     }
 }

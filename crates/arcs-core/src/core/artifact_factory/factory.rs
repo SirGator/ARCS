@@ -2,6 +2,7 @@ use serde_json::Value;
 
 use crate::core::artifact::{Actor, Artifact, Provenance, Source, SubjectId, Trust};
 use crate::core::schema::SchemaDefinition;
+use crate::core::security::SecurityProfile;
 
 use super::{ArtifactFactoryError, ArtifactIdGenerator, Clock};
 
@@ -73,6 +74,7 @@ impl<'a> ArtifactFactory<'a> {
             tags: input.tags,
             payload: input.payload,
             provenance: input.provenance,
+            security: SecurityProfile::default(),
         })
     }
 }

@@ -38,6 +38,7 @@ pub(super) fn resolve_scopes(
     store: &SqliteArtifactStore,
     request: &ReasoningRequestV2,
     policy: &MemoryPolicy,
+    ceiling: Classification,
 ) -> Result<Vec<RetrievalScope>, ReasoningError> {
     let mut scopes = Vec::new();
     for scope in &policy.scopes {
@@ -80,10 +81,18 @@ pub(super) fn resolve_scopes(
         } else {
             None
         };
-        scopes.push(RetrievalScope {
-            filter: scope.filter.clone(),
-            text,
-        });
+        let mut filter = scope.filter.clone();
+        // Der wirksame Abruf filtert zusätzlich nach der Schutzstufe. Die
+        // Grenze des Betreibers gilt auch dann, wenn ein Scope keine eigene
+        // Obergrenze nennt.
+        // Wirksam ist die strengere Grenze: Der Scope darf enger sein als der
+        // Grant, aber niemals weiter.
+        filter.max_classification = Some(
+            filter
+                .max_classification
+                .map_or(ceiling, |limit| limit.min(ceiling)),
+        );
+        scopes.push(RetrievalScope { filter, text });
     }
     Ok(scopes)
 }

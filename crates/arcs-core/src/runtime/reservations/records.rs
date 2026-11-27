@@ -1,4 +1,5 @@
 use super::*;
+use crate::core::security::SecurityProfile;
 use crate::core::{
     ArtifactId, Provenance, SchemaId, Source, SourceClass, SourceKind, SubjectId, Trust,
     TrustLevel, validate_artifact,
@@ -92,6 +93,7 @@ pub(super) fn make(
             models_used: vec![],
             transform: Some("runtime.reservation".into()),
         }),
+        security: SecurityProfile::default(),
     };
     validate_artifact(&artifact, schemas)
         .map_err(|e| invalid(format!("invalid reservation artifact: {e:?}")))?;

@@ -55,6 +55,16 @@ pub enum ReasoningError {
     InvalidPayload(Vec<SchemaViolation>),
     ForbiddenCandidateCapability(CapabilityRef),
     CandidateReferenceOutsideContext(VersionId),
+    /// Der angeforderte Datenbereich überschreitet die Grenze des Adapters.
+    ///
+    /// Die Prüfung erfolgt vor der Offenlegung: Der Kontext wird gar nicht
+    /// erst aufgebaut, wenn die Datenklasse den Grant übersteigt.
+    DataClassExceedsGrant {
+        /// Angeforderte Schutzstufe.
+        requested: crate::core::Classification,
+        /// Vom Betreiber erlaubte Schutzstufe.
+        permitted: crate::core::Classification,
+    },
 }
 
 impl From<crate::store::retrieval::RetrievalError> for ReasoningError {

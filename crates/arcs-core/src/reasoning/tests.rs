@@ -135,6 +135,7 @@ fn reasoning_grant() -> AdapterGrant {
             max_output_bytes: 8192,
             max_candidates: 2,
         }),
+        data_classification: None,
     }
 }
 
@@ -172,6 +173,7 @@ fn action_grant() -> AdapterGrant {
         input_data_limits: None,
         reasoning_limits_v2: None,
         reasoning_limits: None,
+        data_classification: None,
     }
 }
 

@@ -167,6 +167,7 @@ fn act_grant() -> AdapterGrant {
         input_data_limits: None,
         reasoning_limits_v2: None,
         reasoning_limits: None,
+        data_classification: None,
     }
 }
 

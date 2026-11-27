@@ -98,6 +98,7 @@ impl Fixture {
             reasoning_limits_v2: None,
             reasoning_limits: None,
             data_limits: None,
+            data_classification: None,
         };
         let fixture = Self {
             schemas,
@@ -182,6 +183,7 @@ fn register_route_capability(
         reasoning_limits_v2: None,
         reasoning_limits: None,
         data_limits: None,
+        data_classification: None,
     };
     registry
         .register(manifest, grant, &fixture.schemas, &fixture.store)

@@ -35,6 +35,10 @@ pub(crate) struct Fixture {
 }
 impl Fixture {
     pub(crate) fn new() -> Self {
+        Self::with_grant(Self::grant())
+    }
+    /// Wie `new`, aber mit einem vom Betreiber erteilten Grant.
+    pub(crate) fn with_grant(grant: AdapterGrant) -> Self {
         let store = SqliteArtifactStore::in_memory().unwrap();
         let mut schemas = SchemaRegistry::with_bundled_schemas().unwrap();
         schemas.register_json(r#"{"$id":"arcs.memory_candidate.test.v1","type":"object","required":["summary"],"properties":{"summary":{"type":"string"}},"additionalProperties":false}"#).unwrap();
@@ -45,7 +49,7 @@ impl Fixture {
         };
         let mut registry = AdapterRegistry::new();
         registry
-            .register(peer.manifest.clone(), Self::grant(), &schemas, &store)
+            .register(peer.manifest.clone(), grant, &schemas, &store)
             .unwrap();
         let input = Artifact::new(
             "input",

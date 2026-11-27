@@ -167,6 +167,7 @@ fn grant() -> AdapterGrant {
             max_output_bytes: 4096,
             max_candidates: 2,
         }),
+        data_classification: None,
     }
 }
 

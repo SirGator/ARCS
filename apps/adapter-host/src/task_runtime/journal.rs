@@ -324,6 +324,7 @@ fn bind_definition(
                 reasoning_limits: None,
                 input_data_limits: None,
                 reasoning_limits_v2: None,
+                data_classification: None,
             },
             host.schemas(),
             host.store(),

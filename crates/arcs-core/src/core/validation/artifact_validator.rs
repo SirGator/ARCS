@@ -2,6 +2,7 @@ use crate::core::artifact::{
     Artifact, MAX_ARTIFACT_TYPE_BYTES, MAX_MODEL_TRACE_TEXT_BYTES, MAX_SOURCE_REFERENCE_BYTES,
 };
 use crate::core::schema::{SchemaRegistry, SchemaViolation, is_rfc3339};
+use crate::core::security::SecurityProfileError;
 
 /// Gründe, aus denen ein Artefakt nicht in den Store gelangen darf.
 #[derive(Debug)]
@@ -109,6 +110,22 @@ pub fn validate_artifact(
                 ));
             }
         }
+    }
+    // Das Sicherheitsprofil muss in sich stimmen: Ein unvollständiger
+    // Herkunftsbeleg oder ein unzulässiger Freitext wird vor dem Commit
+    // abgewiesen.
+    if let Err(error) = artifact.security.validate() {
+        envelope_violations.push(SchemaViolation::new(
+            "$.security",
+            match error {
+                SecurityProfileError::InvalidText(field) => {
+                    format!("security field {field} is empty, too long, or has control characters")
+                }
+                SecurityProfileError::IncompleteDeclassification => {
+                    "security declassification needs both source and reason".to_string()
+                }
+            },
+        ));
     }
     if !envelope_violations.is_empty() {
         return Err(ValidationError::Payload(envelope_violations));

@@ -100,6 +100,7 @@ fn grant(
         input_data_limits: None,
         reasoning_limits_v2: None,
         reasoning_limits: None,
+        data_classification: None,
     }
 }
 
@@ -293,6 +294,7 @@ fn act_capability_cannot_push_observation() {
         input_data_limits: None,
         reasoning_limits_v2: None,
         reasoning_limits: None,
+        data_classification: None,
     };
     let registry = registry(&schemas, manifest, grant);
     let mut ids = TestIds { next: 1 };

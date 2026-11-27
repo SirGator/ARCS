@@ -52,6 +52,7 @@ pub(super) fn query(seed: VersionId) -> RetrievalQuery {
                 schema_id: SchemaId("arcs.input.v1".into()),
                 subject: None,
                 tags: vec![],
+                max_classification: None,
             },
             text: None,
         }],

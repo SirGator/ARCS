@@ -6,9 +6,11 @@ use serde_json::{Map, Value, json};
 
 use super::ReasoningError;
 use crate::adapters::registration::{AdapterRegistry, CapabilityRef, ProducerClass};
+use crate::core::security::SecurityProfile;
 use crate::core::{
-    Actor, ActorType, Artifact, ArtifactIdGenerator, Clock, MAX_MODEL_TRACE_TEXT_BYTES, Provenance,
-    SchemaId, SchemaRegistry, Source, SourceClass, SourceKind, Trust, TrustLevel, VersionId,
+    Actor, ActorType, Artifact, ArtifactIdGenerator, Classification, Clock,
+    MAX_MODEL_TRACE_TEXT_BYTES, Provenance, SchemaId, SchemaRegistry, Source, SourceClass,
+    SourceKind, Trust, TrustLevel, VersionId,
 };
 use crate::reasoning::{
     ReasoningAdapter, ReasoningContextItem, ReasoningInvocation, ReasoningRequest,
@@ -74,7 +76,7 @@ impl ReasoningService<'_> {
         if self.endpoint.manifest().adapter_id != adapter_id {
             return Err(ReasoningError::MissingReasoningEndpoint(adapter_id));
         }
-        let (authorized_capability, emitted_schemas, reasoning_limits) = {
+        let (authorized_capability, emitted_schemas, reasoning_limits, data_ceiling) = {
             let (registered, capability) = self
                 .policy
                 .authorized_capability(&adapter_id, &request.reasoning_capability.capability_id)?;
@@ -97,6 +99,7 @@ impl ReasoningService<'_> {
                     .reasoning_limits
                     .clone()
                     .ok_or(ReasoningError::ReasoningBudgetExceedsGrant)?,
+                registered.grant().data_classification_ceiling(),
             )
         };
         if !request.budget.fits_within(&reasoning_limits) {
@@ -112,7 +115,7 @@ impl ReasoningService<'_> {
 
         let allowed_capabilities =
             validate_allowed_capabilities(self.policy, &request.allowed_capabilities)?;
-        let context = self.build_reasoning_context(&request)?;
+        let context = self.build_reasoning_context(&request, data_ceiling)?;
         let context_versions = context
             .iter()
             .map(|item| item.version_id.clone())
@@ -236,7 +239,11 @@ impl ReasoningService<'_> {
                 &reasoning_request_version,
                 &invocation_id,
             )?;
-            let result = self.build_reasoning_result_artifact(&invocation_id, response)?;
+            let result = self.build_reasoning_result_artifact(
+                &invocation_id,
+                reasoning_request_version.clone(),
+                response,
+            )?;
             InvocationService::new(self.store, self.schemas, self.clock).succeed_with_event(
                 &dispatched,
                 &result,
@@ -396,6 +403,7 @@ impl ReasoningService<'_> {
                 models_used: vec![],
                 transform: Some("reasoning.prepare_request".into()),
             }),
+            security: SecurityProfile::default(),
         };
 
         Ok(artifact)
@@ -404,6 +412,7 @@ impl ReasoningService<'_> {
     fn build_reasoning_result_artifact(
         &mut self,
         invocation_id: &str,
+        request_version: VersionId,
         response: ReasoningResponse,
     ) -> Result<Artifact, ReasoningError> {
         let schema_id = SchemaId(REASONING_RESULT_SCHEMA_ID.into());
@@ -438,17 +447,21 @@ impl ReasoningService<'_> {
             tags: vec![format!("invocation:{invocation_id}")],
             payload: json!({"response": response}),
             provenance: Some(Provenance {
-                parents: vec![],
+                // Das Ergebnis erbt vom Auftrag und damit vom Kontext, der an
+                // das externe Modell gegangen ist.
+                parents: vec![request_version.0.clone()],
                 rules_applied: vec!["reasoning.response_validated".into()],
                 models_used: vec![],
                 transform: Some("reasoning.persist_result".into()),
             }),
+            security: SecurityProfile::default(),
         })
     }
 
     fn build_reasoning_context(
         &self,
         request: &ReasoningRequest,
+        ceiling: Classification,
     ) -> Result<Vec<ReasoningContextItem>, ReasoningError> {
         if request.context.len() > request.budget.max_context_items {
             return Err(ReasoningError::InvalidReasoningRequest(
@@ -467,6 +480,15 @@ impl ReasoningService<'_> {
             let artifact = self.store.get(&selection.version_id)?.ok_or_else(|| {
                 ReasoningError::MissingContextArtifact(selection.version_id.clone())
             })?;
+            // Vor der Offenlegung: Kontext oberhalb der Adaptergrenze wird
+            // abgewiesen, auch wenn der Aufrufer ihn ausdrücklich wählt.
+            let classification = artifact.security.effective();
+            if !classification.allows(ceiling) {
+                return Err(ReasoningError::DataClassExceedsGrant {
+                    requested: classification,
+                    permitted: ceiling,
+                });
+            }
             let payload = select_payload_fields(&artifact, &selection.payload_fields)?;
             context.push(ReasoningContextItem {
                 version_id: artifact.version_id,

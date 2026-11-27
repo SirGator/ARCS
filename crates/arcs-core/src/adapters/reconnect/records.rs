@@ -1,4 +1,5 @@
 use super::*;
+use crate::core::security::SecurityProfile;
 use crate::runtime::{InvocationKind, deterministic_invocation_id};
 use crate::store::database::Idempotency;
 
@@ -270,6 +271,7 @@ pub(super) fn update(
             rules_applied: vec!["adapter.reconnect.state.v1".into()],
             ..Default::default()
         }),
+        security: SecurityProfile::default(),
     };
     match service.store.append_current_compared(
         std::slice::from_ref(&artifact),
