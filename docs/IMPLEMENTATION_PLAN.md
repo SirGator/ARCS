@@ -23,6 +23,16 @@
 > erledigt markiert. Die `OPS-01` bis `OPS-06` der Erweiterung sind **nicht**
 > die `OPS-01`/`OPS-02` aus Phase 8 und **nicht** `OPS-01` aus v3 §12.
 >
+> Dritter Slice: Schutzstufen mit erzwungener Ableitung und Default-Deny an
+> der Offenlegungskante. Artefakte tragen ein Sicherheitsprofil aus Deklaration
+> und wirksamer Stufe; der Store löst die Stufe aus Provenienz und Vorgängerversion
+> auf und lehnt unbelegte Herabstufungen ab. Abruf, Memory-Scope und
+> Adapter-Grant begrenzen die Datenklasse vor der Offenlegung. `PRIV-01`,
+> `PRIV-02` und `PRIV-03` sind damit teilweise umgesetzt, `PRIV-07` in der
+> Datenklassenprüfung. Secret-Broker, Egress-Isolation, Löschung, Zweckbindung
+> und Vertragsprüfung im Routing bleiben offen. Nachweis:
+> [Zwischenbericht 28.11.2026](ZWISCHENBERICHT_2026-11-28_SCHUTZSTUFEN.md).
+>
 > Erster umgesetzter Slice: begrenztes paralleles Reasoning mit zentraler
 > Ergebnisvalidierung, exklusiven Adapter-Sessions, Fehlerisolierung und
 > Wiederaufnahme. PAR-01, PAR-03, PAR-04, PAR-05, PAR-06 und PAR-07 sind damit teilweise
