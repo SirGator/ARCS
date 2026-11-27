@@ -8,6 +8,21 @@
 > Anforderungs-IDs bleiben versions- und abschnittsbezogen; die bestehenden
 > v2-Aufgaben und Abnahmestände werden durch v3 nicht umnummeriert.
 >
+> Ergänzung vom 27. November 2026:
+> [Zielbilderweiterung v3.1](ZIELBILD_ERWEITERUNG_2026-11-27.md) ergänzt das
+> Zielbild um Unified Multi-Context Runtime, Datenschutz und
+> Informationsflusskontrolle, formale Methoden, dauerhaften Betrieb und
+> Unternehmensfähigkeit. Die neuen Anforderungen `CTX-*`, `PRIV-*`, `FORM-*`,
+> `OPS-*` und `BIZ-*` sind in den Phasen EXT-0 sowie EXT-CTX bis EXT-BIZ als
+> Arbeitspakete festgehalten und noch nicht abgenommen. Die Phasen EXT-0 bis
+> EXT-BIZ bauen auf den bestehenden
+> Verträgen aus Phase 1 bis Phase 8 auf und ersetzen sie nicht. EXT-0 ist
+> der vorgeschaltete Abgleich, weil die Erweiterung diese Verträge erweitert
+> statt eine Ersatzarchitektur aufzubauen.
+> Bestehende v2- und v3-Aufgaben werden nicht umnummeriert und nicht als
+> erledigt markiert. Die `OPS-01` bis `OPS-06` der Erweiterung sind **nicht**
+> die `OPS-01`/`OPS-02` aus Phase 8 und **nicht** `OPS-01` aus v3 §12.
+>
 > Erster umgesetzter Slice: begrenztes paralleles Reasoning mit zentraler
 > Ergebnisvalidierung, exklusiven Adapter-Sessions, Fehlerisolierung und
 > Wiederaufnahme. PAR-01, PAR-03, PAR-04, PAR-05, PAR-06 und PAR-07 sind damit teilweise
@@ -860,6 +875,132 @@ Die zeitkritische Flugstabilisierung bleibt Aufgabe eines spezialisierten Contro
 
 ---
 
+## Phase EXT-0 – Vertragsabgleich der Zielbilderweiterung
+
+**Priorität: P0. Voraussetzung für alle EXT-Phasen.**
+
+Ziel: Bestehende Goal-Runtime, Task-Queues, Journale, Ressourcenreservierungen,
+Memory-Scopes, Admission-Regeln und Adapterverträge werden geprüft und
+**erweitert**, nicht dupliziert. Ergebnis ist eine dokumentierte Zuordnungstabelle
+und keine Parallelarchitektur.
+
+- [ ] **EXT-00:** Abgleich von `CTX-01`, `CTX-05`, `CTX-08`, `PRIV-01`, `PRIV-02` und `OPS-03` gegen die bestehenden Verträge in `apps/adapter-host/src/task_runtime/**`, `crates/arcs-core/src/runtime/{invocation,reservations}/**`, `crates/arcs-core/src/reasoning/context.rs` und `crates/arcs-core/src/core/{artifact,schema}/**`.
+- [ ] **EXT-00:** Je Erweiterungs-ID eine konkrete Erweiterungsstelle benennen; änderungen ohne Zuordnung sind zurückzuweisen.
+- [ ] **EXT-00:** ID-Namensraum der Erweiterung (`CTX-*`, `PRIV-*`, `FORM-*`, `OPS-*`, `BIZ-*`) gegen die bestehenden v2- und v3-Kürzel dokumentieren; `OPS-*` der Erweiterung ist **nicht** `OPS-01`/`OPS-02` aus Phase 8 und **nicht** `OPS-01` aus v3 §12.
+
+**Abnahme:** Für jede neue Anforderung ist eine Erweiterungsstelle benannt.
+Es existiert kein zweiter Core, kein zweiter Store und keine Parallelführung
+bestehender Verträge.
+
+---
+
+## Phase EXT-CTX – Unified Multi-Context Runtime
+
+**Priorität: P0 (CTX-01 bis CTX-05), P1 (CTX-06, CTX-07).**
+Ergänzt v3 §5, §6, §7 und §8. Siehe
+[Zielbilderweiterung §18](ZIELBILD_ERWEITERUNG_2026-11-27.md).
+
+- [ ] **EXT-CTX-01 (CTX-01):** Leichten persistenten Arbeitskontext einführen, der Ziel, Task, Planrevision, Artifact-Versionen, Arbeitszustand, Authority-Scope, zulässige Memory-Sicht, Priorität, Budget und laufende Operationen bündelt.
+- [ ] **EXT-CTX-02 (CTX-02):** Gemeinsame Nutzung von Core-Diensten, Adapterregistrierung, Verifier, Artifact-Store und Reasonern nachweisen; Session- und KV-Isolation je Tätigkeit regeln.
+- [ ] **EXT-CTX-03 (CTX-03):** Sichere Kontextwechsel mit explizitem Checkpoint einführen; wartende Aufgaben ohne aktive Modellinstanz fortsetzen; laufende externe Operationen beim ursprünglichen Task halten.
+- [ ] **EXT-CTX-04 (CTX-04):** Fairness, Backpressure, Budgetabrechnung und Prioritätsklasse für interaktive Anfragen im Scheduler ergänzen; Preemption nur an sicheren Grenzen.
+- [ ] **EXT-CTX-05 (CTX-05):** Resultate, Events, Toolantworten und Freigaben eindeutig an Task, Kontext, Planrevision und Operation binden; keinen globalen veränderlichen „aktuellen Kontext“ einführen.
+- [ ] **EXT-CTX-06 (CTX-06):** Agent Spawning als optionale, begrenzte Fähigkeit für Isolation und externe Delegation dokumentieren – nicht als Normalmechanismus.
+- [ ] **EXT-CTX-07 (CTX-07):** Ressourcenmessung je Task und Dienst: RAM, VRAM, Kontexttokens, Modellaufrufe, Latenz, Durchsatz, Kosten, Wiederaufnahmekosten.
+
+**Abnahme:** Ein laufender Hintergrundtask bleibt aktiv, während dieselbe
+Instanz eine persönliche Anfrage beantwortet und einen autorisierten
+Statusbericht liefert; danach erfolgt die korrekte Fortsetzung ohne zweiten Core
+und ohne Kontextvermischung (TEST-06).
+
+---
+
+## Phase EXT-PRIV – Datenschutz und kontrollierte Informationsflüsse
+
+**Priorität: P0 (PRIV-01 bis PRIV-05, PRIV-07), P1 (PRIV-06, PRIV-08 bis
+PRIV-10), P2 (PRIV-11).** Siehe
+[Zielbilderweiterung §19](ZIELBILD_ERWEITERUNG_2026-11-27.md).
+
+- [ ] **EXT-PRIV-01 (PRIV-01):** Sicherheitsprofil S0–S4 als Default-Profil sowie Eigentümer, Zweck, Empfänger, Aufbewahrung und Verarbeitungsumgebung an Artefakten führen; `TrustLevel` bleibt getrennte Dimension.
+- [ ] **EXT-PRIV-02 (PRIV-02):** Default-deny-Kette über Memory-Retrieval, Kontextbildung, Transform, Request, Reason, Act und Output; Prüfung jeweils vor der Offenlegung.
+- [ ] **EXT-PRIV-03 (PRIV-03):** Konservative Vererbung der Schutzanforderungen auf abgeleitete Artefakte, Graphkanten, Embeddings, Caches, Zusammenfassungen und Logs; Herabstufung nur über autorisierte, geprüfte Transformation.
+- [ ] **EXT-PRIV-04 (PRIV-04):** Secret-Broker mit kurzlebigen, zweck- und ressourcenbegrenzten Berechtigungen; keine Schlüssel in LLM-Kontexten oder gewöhnlichen Logs.
+- [ ] **EXT-PRIV-05 (PRIV-05):** Sandbox-, Dateisystem-, Datenbank- und Egress-Regeln außerhalb der Modelle durchsetzen; Prompt-Injection, Fehlerausgaben und Telemetrie als Datenabflüsse behandeln.
+- [ ] **EXT-PRIV-06 (PRIV-06):** Nachweisbare Löschung, Aufbewahrungsfristen, Zugriffsaudit und Datenherkunft einschließlich Indizes, Backups und abgeleiteter Daten.
+- [ ] **EXT-PRIV-07 (PRIV-07):** Routing-Reihenfolge Zulässigkeit → Qualität → Kosten → Latenz erzwingen; lokale Ausführung ist nicht automatisch vertrauenswürdig.
+- [ ] **EXT-PRIV-08 (PRIV-08):** Lokale Klassifikation, Pseudonymisierung, Aggregation, Generalisierung und minimale Kontextprojektion; Grenzen der Pseudonymisierung dokumentieren.
+- [ ] **EXT-PRIV-09 (PRIV-09):** Abstraktionsvertrag für externes symbolisches Reasoning; erzeugter Code wird vor Ausführung geprüft und isoliert.
+- [ ] **EXT-PRIV-10 (PRIV-10):** Lokale Rekonstruktion und unabhängige Verification der abstrahierten Lösung; bei fehlender Information auf zulässige lokale Verarbeitung wechseln.
+- [ ] **EXT-PRIV-11 (PRIV-11):** Recherche zu Confidential Computing, Differential Privacy, sicherer Mehrparteienberechnung und homomorpher Verschlüsselung; keine Implementierung, keine unbelegte Privatheitsbehauptung.
+
+**Abnahme:** Nicht autorisierte Daten bleiben auch über Retrieval,
+Graphbeziehungen, Cache, Zusammenfassung und Logs unzugänglich (TEST-07).
+Markierte Testdaten fließen bei nicht erlaubter Cloud-Verarbeitung weder
+direkt noch abgeleitet ab; eine zulässige abstrahierte Aufgabe wird extern
+bearbeitet und lokal rekonstruiert (TEST-08).
+
+---
+
+## Phase EXT-FORM – Formale Methoden (Lean)
+
+**Priorität: P0 (FORM-01, FORM-02, FORM-03, FORM-04), P1 (FORM-05, FORM-06),
+P2 (FORM-07).** Siehe
+[Zielbilderweiterung §20](ZIELBILD_ERWEITERUNG_2026-11-27.md).
+
+- [ ] **EXT-FORM-01 (FORM-01):** Acht formale Artefakttypen (`formal_definition`, `formal_assumption`, `formal_model`, `proof_obligation`, `proof`, `theorem`, `counterexample`, `formal_verification_report`) als versionierte Artefakte mit Schemas einführen.
+- [ ] **EXT-FORM-02 (FORM-02):** Nachweisvertrag mit Aussage, Annahmen, Modell-/Planversion, Toolchain, erlaubten Axiomen und Prüfresultat; `sorry`, Timeouts und unprüfbare Ergebnisse gelten nicht als verifiziert.
+- [ ] **EXT-FORM-03 (FORM-03):** Sollzustände, Vor-/Nachbedingungen, Invarianten und Ressourcenlimits formal ausdrücken und als strukturierte Reasoning-Rückmeldung auswerten.
+- [ ] **EXT-FORM-04 (FORM-04):** Sicherheitsmodell des Core formalisieren (Authority-Erhalt, Referenzintegrität, Klassifikationsvererbung, Declassification, Zustandsübergänge, Ressourcengrenzen); Noninterference nur mit Beobachter- und Bedrohungsmodell.
+- [ ] **EXT-FORM-05 (FORM-05):** Isolierten Lean-Prüfadapter als bestehende Capability betreiben; bei vorgeschriebenem, fehlgeschlagenem oder nicht verfügbarem Nachweis wird die Aktion blockiert oder in einen Wartezustand überführt.
+- [ ] **EXT-FORM-06 (FORM-06):** Lean mit SMT-/Constraint-Solvern, Optimierern, Simulationen und Tests kombinieren; epistemischer Status der Ergebnisse getrennt führen.
+- [ ] **EXT-FORM-07 (FORM-07):** Rust-zu-Modell-Übertragung evaluieren, ohne das extrahierte Modell mit dem Produktionssystem gleichzusetzen.
+
+**Abnahme:** Ein gültiger Nachweis wird angenommen, ein falscher,
+unvollständiger, veralteter oder auf unzulässigen Annahmen/Axiomen
+basierender Nachweis wird abgewiesen; ein vorgeschriebener fehlender Nachweis
+blockiert die Wirkung (TEST-09).
+
+---
+
+## Phase EXT-OPS – Dauerbetrieb, verteilte Ausführung, KI-Mitarbeiter
+
+**Priorität: P0 (OPS-01, OPS-03), P1 (OPS-02, OPS-04, OPS-05, OPS-06).**
+Siehe [Zielbilderweiterung §21](ZIELBILD_ERWEITERUNG_2026-11-27.md).
+
+- [ ] **EXT-OPS-01 (OPS-01):** Host-Lebenszyklus mit Ereignissen, geplanten Aktivierungen, Heartbeats, Status, Recovery, begrenztem Retry und kontrolliertem Shutdown; keine LLM-Inferenz im Wartezustand.
+- [ ] **EXT-OPS-02 (OPS-02):** Execution Nodes mit authentifizierter Identität, Fähigkeiten, OS, Kapazität, Trust, Gesundheitszustand und kurzlebigen Grants; logische Sternarchitektur bleibt.
+- [ ] **EXT-OPS-03 (OPS-03):** Persistente Task Ownership mit Leases, Fencing und Operation IDs; Wiederaufnahme berücksichtigt erfolgte Wirkungen, unklare Wirkungen werden explizit geklärt.
+- [ ] **EXT-OPS-04 (OPS-04):** Externe Agenten und Coding-Harnesses als begrenzte Capabilities mit strukturiertem Input, Status, Evidenz, Resultat, Abbruch und Ressourcenbudget.
+- [ ] **EXT-OPS-05 (OPS-05):** Autorisiertes Operations-Interface für Aufgaben, Budgets, Kosten, Knoten, Fehler, Journal, Freigaben und menschliche Übernahme; Freigabe gilt nur für die geprüfte Operation.
+- [ ] **EXT-OPS-06 (OPS-06):** Rollen- und Mitarbeiterprofil als persistente logische Identität mit Zielen, Policies und Arbeitshistorie ohne eigene Authority-Quelle.
+
+**Abnahme:** Node- oder Host-Ausfall sowie verspätete Resultate führen
+weder zur falschen Task-Zuordnung noch zur unkontrollierten Wiederholung einer
+externen Wirkung (TEST-10).
+
+---
+
+## Phase EXT-BIZ – Unternehmensfähigkeit und Business-/Systems-Reasoning
+
+**Priorität: P0 (BIZ-05), P1 (BIZ-01 bis BIZ-04, BIZ-06).** Siehe
+[Zielbilderweiterung §22](ZIELBILD_ERWEITERUNG_2026-11-27.md).
+
+- [ ] **EXT-BIZ-01 (BIZ-01):** Organisationsziele, Rollen, Budgets, Regeln, Stakeholder, Risiken, Fristen und Entscheidungsverantwortung als generische Artefakte und Policies modellieren.
+- [ ] **EXT-BIZ-02 (BIZ-02):** Business-/Requirements-Reasoning trennt bestätigte Anforderungen, Annahmen, Hypothesen und offene Fragen und erzeugt Rückfragen.
+- [ ] **EXT-BIZ-03 (BIZ-03):** Product-, UX- und Systems-Reasoning erzeugt Alternativen und prüft Abhängigkeiten, Akzeptanzkriterien, Wirtschaftlichkeit, Ressourcen und Wartbarkeit.
+- [ ] **EXT-BIZ-04 (BIZ-04):** Eingehende Ereignisse werden zu autorisierten Aufgaben; Investigation, Umsetzung, unabhängige Tests, Freigabe und Deployment bleiben nachweisbare Schritte.
+- [ ] **EXT-BIZ-05 (BIZ-05):** Drei Autonomiestufen pro Aktion als Policy erzwingen; Budget-, Vertrags-, Preis- und Risikogrenzen sind konfigurierbar; ARCS ersetzt keine gesetzlich erforderliche menschliche Verantwortung.
+- [ ] **EXT-BIZ-06 (BIZ-06):** Formale Regeln, Entscheidungsmodelle, Simulationen und Evidenz absichern Entscheidungen; Erfolg an tatsächlichen Ergebnissen, Kosten und menschlichen Eingriffen messen.
+
+**Abnahme:** Ein unvollständiger Kundenauftrag wird in belegte
+Anforderungen, Hypothesen, Rückfragen, Plan, Umsetzung und überprüfte
+Ergebnisse überführt; eine nicht autorisierte
+Produktionsänderung oder Budgetüberschreitung wird blockiert (TEST-11).
+
+---
+
+---
+
 ## 3. Drei verbindliche Systemtests
 
 ### TEST-01 – Universelle Steuerung
@@ -880,6 +1021,43 @@ Geprüft werden Aufgabenplanung, Werkzeugnutzung, Artifact-Gedächtnis, Wiederau
 
 Geprüft wird, ob ARCS aus vergangenen Erfahrungen relevante Informationen wiederfindet und dadurch bessere oder günstigere Entscheidungen trifft, ohne fehlerhafte Erinnerungen ungeprüft zu übernehmen.
 
+### Ergänzende Systemtests der Zielbilderweiterung (TEST-06 bis TEST-12)
+
+Diese Testreihe schließtt an v3 §13 an und ersetzt die Tests
+TEST-01 bis TEST-03 dieses Plans nicht. Die vollständige Beschreibung mit
+Bezug auf die betroffenen Anforderungs-IDs steht in
+[Zielbilderweiterung §23](ZIELBILD_ERWEITERUNG_2026-11-27.md).
+
+- **TEST-06 – Assistenz während Unternehmensarbeit:** Hintergrundtask mit
+  externem Prozess bleibt aktiv, während dieselbe Instanz eine persönliche
+  Anfrage beantwortet und einen autorisierten Statusbericht liefert; danach
+  korrekte Fortsetzung ohne zweiten Core oder Kontextvermischung.
+- **TEST-07 – Kontrolliertes gemeinsames Memory:** Autorisierte
+  bereichsübergreifende Abfrage gelingt; nicht autorisierte private oder
+  fremde Unternehmensdaten bleiben über Retrieval, Graphbeziehungen, Cache,
+  Zusammenfassung und Logs unzugänglich.
+- **TEST-08 – Vertrauliches Reasoning:** Markierte Testdaten fließen bei
+  nicht erlaubter Cloud-Verarbeitung weder direkt noch abgeleitet über Modell,
+  Shell, Browser, Logs oder Netzwerk ab; eine zulässige abstrahierte Aufgabe
+  wird extern bearbeitet und lokal rekonstruiert.
+- **TEST-09 – Formale Prüfung:** Gültiger Nachweis wird angenommen;
+  falsche, unvollständige, veraltete oder auf unzulässigen
+  Annahmen/Axiomen basierende Nachweise werden abgewiesen; ein vorgeschriebener
+  fehlender Nachweis blockiert die Wirkung.
+- **TEST-10 – Verteilte Recovery:** Node-/Host-Ausfall und verspätete
+  Resultate führen weder zur falschen Task-Zuordnung noch zur
+  unkontrollierten Wiederholung einer externen Wirkung; unklare Wirkung wird
+  explizit geklärt.
+- **TEST-11 – Betrieblicher Prozess:** Ein unvollständiger Kundenauftrag
+  wird in belegte Anforderungen, Hypothesen, Rückfragen, Plan, Umsetzung und
+  überprüfte Ergebnisse überführt; eine nicht autorisierte
+  Produktionsänderung oder Budgetüberschreitung wird blockiert.
+- **TEST-12 – Ressourcen und Fairness:** RAM/VRAM, Tokenkosten,
+  Antwortlatenz, Durchsatz und Wiederaufnahmekosten werden mit wachsender Zahl
+  aktiver und wartender Kontexte gemessen und mit getrennten Vollinstanzen
+  verglichen; Limits, faire Ausführung und interaktive
+  Reaktionsfähigkeit werden nachgewiesen.
+
 ---
 
 ## 4. Nächste unmittelbar umzusetzende Arbeiten
@@ -892,6 +1070,29 @@ Die erste Entwicklungsrunde sollte diese Reihenfolge haben:
 4. **Dauerhafte Aufgaben mit Wartezuständen ermöglichen:** Scheduler, Ereignistrigger und Wiederaufnahme ergänzen.
 5. **Dynamische Capability-Auswahl als kleinen vertikalen Prototyp bauen:** Mindestens drei unabhängige Komponenten ohne fest verdrahtete Ablaufroute kombinieren.
 6. **Einen schwierigen End-to-End-Test ausführen:** Ergebnisse, Fehler, Kosten und notwendige menschliche Eingriffe messen.
+
+### Ergänzung vom 27. November 2026
+
+Für die Zielbilderweiterung gilt die in
+[Zielbilderweiterung §23.2](ZIELBILD_ERWEITERUNG_2026-11-27.md)
+empfohlene Reihenfolge. Sie beginnt mit dem Vertragsabgleich (Phase EXT-0)
+und lässt die bisherigen Arbeiten unberührt weiterlaufen:
+
+1. **Vertragsabgleich (EXT-0):** Bestehende Goal-Runtime, Task-Queues,
+   Journale, Ressourcenreservierungen, Memory-Scopes, Admission-Regeln und
+   Adapterverträge den Anforderungen zuordnen; keine parallele
+   Ersatzarchitektur.
+2. **Mehrere persistente Arbeitskontexte (EXT-CTX):** Gemeinsame
+   Infrastruktur mit autorisierten systemweiten Statusabfragen; Abnahme
+   TEST-06.
+3. **Sicherheitsslice Datenschutz (EXT-PRIV):** Datenflussprüfung, Herkunft,
+   Secret-Broker, Egress-Isolation und zulässigkeitsbasiertes Modellrouting;
+   Abnahme TEST-07 und TEST-08.
+4. **Formales Kernmodell mit isoliertem Lean-Adapter (EXT-FORM):** Positive
+   und negative Nachweise; Modellgrenzen dokumentieren; Abnahme TEST-09.
+5. **Ereignisbasierte betriebliche Aufgaben und verteilte Ausführung
+   (EXT-OPS, EXT-BIZ):** Task Ownership mit Leases, externe Harnesses als
+   begrenzte Capabilities; Abnahme TEST-10 und TEST-11.
 
 ## 5. Entwicklungsregeln
 

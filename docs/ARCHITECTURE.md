@@ -1,5 +1,6 @@
 ARCS – Technische Gesamtarchitektur und zukünftige Anforderungen
 Architekturspezifikation v3.0 · 15. November 2026
+Erweiterung v3.1 · 27. November 2026: Zielbilderweiterung (Unified Multi-Context Runtime, Datenschutz, formale Methoden, Betrieb, Unternehmensfähigkeit) in docs/ZIELBILD_ERWEITERUNG_2026-11-27.md
 Technischer Entwurf mit Code- und Zeilenreferenzen
 1. Das verbindliche Zielbild
 ARCS soll ein universeller, heterarchisch organisierter, parallel arbeitender und langfristig autonomer KI-Agent werden.
@@ -15,7 +16,13 @@ Die bisher festgelegten Architekturprinzipien sind:
 6. Austauschbare Intelligenz: LLMs, Jev, Solver und weitere Reasoner bleiben externe Komponenten.
 7. Kontrollierte Autonomie: Freie Problemlösung ist möglich, aber Berechtigungen, Verification und Approval gelten weiterhin.
 8. Einfache Bedienung: Der Benutzer beschreibt Ziele. Die technische Konfiguration soll möglichst automatisch erfolgen.
+9. Gemeinsame Infrastruktur, unabhängige Arbeitszustände: Ein Core und logisch gemeinsames Memory; keine vollständige Agenteninstanz pro Aufgabe.
+10. Zweckgebundene Informationsflüsse: Zugriff auf Wissen und Übertragung von Wissen sind eigenständige, überprüfbare Berechtigungen.
+11. Formale Methoden: Lean ist als dauerhaft verfügbare Reasoning- und Verifikationsfähigkeit integriert; die Engine bleibt isoliert, Werkzeuge bleiben externe Komponenten.
+12. Kontinuierliche, nachvollziehbare Arbeit: ARCS bearbeitet laufende Ziele, reagiert auf Ereignisse und gibt autorisierte Auskunft über eigene Arbeitszustände.
+13. Organisationsfähigkeit als Anwendung des allgemeinen Systems: Rollen, Ziele, Budgets und betriebliche Prozesse werden durch Artefakte, Policies und Capabilities ausgedrückt, nicht als fest verdrahtete Unternehmenslogik im Core.
 Das sind Zielanforderungen, keine Behauptung, dass sämtliche Funktionen bereits implementiert wären.
+Die Prinzipien 9 bis 13 sowie die Anforderungen CTX-*, PRIV-*, FORM-*, OPS-* und BIZ-* sind in der Zielbilderweiterung vom 27. November 2026 (docs/ZIELBILD_ERWEITERUNG_2026-11-27.md) beschrieben. Sie ergänzen die Abschnitte 3 bis 15 dieses Dokuments; bestehende Anforderungen, IDs und historische Referenzstände bleiben unverändert gültig.
 Aktuell überprüfte Codebasis
 Das öffentlich sichtbare Repository steht weiterhin bei Commit 23d97ef vom 25. Oktober 2026. Die folgenden Datei- und Zeilenangaben beziehen sich ausdrücklich auf diesen Commit.
 

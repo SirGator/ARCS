@@ -17,6 +17,9 @@ Funktion für bereits implementiert oder abgenommen.
 
 - [Architekturvertrag](ARCHITECTURE.md): geltende Modulgrenzen und dokumentierter
   lokaler Implementierungsstand.
+- [Zielbilderweiterung v3.1 – 27. November 2026](ZIELBILD_ERWEITERUNG_2026-11-27.md):
+  Unified Multi-Context Runtime, Datenschutz und Informationsflusskontrolle,
+  formale Methoden, dauerhafter Betrieb und Unternehmensfähigkeit.
 - [Implementierungsplan v2.0](IMPLEMENTATION_PLAN.md): konkrete Arbeitsliste und
   bisherige Teilimplementierungen.
 - [Paralleles Reasoning](../apps/adapter-host/examples/parallel-runtime.md) und
@@ -46,8 +49,20 @@ Die bisher festgelegten Architekturprinzipien sind:
 6. Austauschbare Intelligenz: LLMs, Jev, Solver und weitere Reasoner bleiben externe Komponenten.
 7. Kontrollierte Autonomie: Freie Problemlösung ist möglich, aber Berechtigungen, Verification und Approval gelten weiterhin.
 8. Einfache Bedienung: Der Benutzer beschreibt Ziele. Die technische Konfiguration soll möglichst automatisch erfolgen.
+9. Gemeinsame Infrastruktur, unabhängige Arbeitszustände: Ein Core und logisch gemeinsames Memory; keine vollständige Agenteninstanz pro Aufgabe.
+10. Zweckgebundene Informationsflüsse: Zugriff auf Wissen und Übertragung von Wissen sind eigenständige, überprüfbare Berechtigungen.
+11. Formale Methoden: Lean ist als dauerhaft verfügbare Reasoning- und Verifikationsfähigkeit integriert; die Engine bleibt isoliert, Werkzeuge bleiben externe Komponenten.
+12. Kontinuierliche, nachvollziehbare Arbeit: ARCS bearbeitet laufende Ziele, reagiert auf Ereignisse und gibt autorisierte Auskunft über eigene Arbeitszustände.
+13. Organisationsfähigkeit als Anwendung des allgemeinen Systems: Rollen, Ziele, Budgets und betriebliche Prozesse werden durch Artefakte, Policies und Capabilities ausgedrückt, nicht als fest verdrahtete Unternehmenslogik im Core.
 
 Das sind Zielanforderungen, keine Behauptung, dass sämtliche Funktionen bereits implementiert wären.
+
+Die Prinzipien 9 bis 13 sind in der
+[Zielbilderweiterung vom 27. November 2026](ZIELBILD_ERWEITERUNG_2026-11-27.md)
+mit den zugehörigen Anforderungen `CTX-*`, `PRIV-*`, `FORM-*`, `OPS-*` und
+`BIZ-*` sowie den ergänzenden Systemtests `TEST-06` bis `TEST-12` beschrieben.
+Sie ergänzen die Abschnitte 3 bis 15 dieses Dokuments und lassen deren
+Anforderungen und IDs unverändert gültig.
 
 ### Historischer Referenzstand
 

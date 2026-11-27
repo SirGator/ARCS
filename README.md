@@ -95,6 +95,13 @@ dokumentiert Slice 71. Die Berichte vom
 [16. November](docs/ZWISCHENBERICHT_2026-11-16.md) dokumentieren frühere
 Umsetzungsstände, Prüfergebnisse und offene Grenzen.
 
+Die [Zielbilderweiterung vom 27. November 2026](docs/ZIELBILD_ERWEITERUNG_2026-11-27.md)
+ergänzt das Zielbild um eine einheitliche Multi-Context-Runtime, kontrollierte
+Informationsflüsse, formale Methoden mit Lean, dauerhaften und verteilten Betrieb
+sowie Unternehmensfähigkeit. Sie beschreibt den angestrebten Zustand und
+ersetzt keine bestehende Anforderung. Die neuen Phasen EXT-0 sowie EXT-CTX bis
+EXT-BIZ stehen im [Implementierungsplan](docs/IMPLEMENTATION_PLAN.md).
+
 Der [Gedächtnisabruf](apps/adapter-host/examples/artifact-memory.md) ergänzt
 Reasoning-Kontext aus dem gemeinsamen Artifact-Netz. Er begrenzt Suche und
 Payloadfelder und speichert die Auswahl für Wiederaufnahme und parallele Aufrufe.
