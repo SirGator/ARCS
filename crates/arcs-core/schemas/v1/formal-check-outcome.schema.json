@@ -1,0 +1,67 @@
+{
+  "$id": "arcs.formal_check_outcome.v1",
+  "title": "ARCS Ergebnis einer formalen Prüfung",
+  "type": "object",
+  "required": [
+    "verdict",
+    "duration_ms"
+  ],
+  "properties": {
+    "verdict": {
+      "type": "string",
+      "enum": [
+        "proved",
+        "disproved",
+        "failed",
+        "unavailable",
+        "rejected"
+      ]
+    },
+    "used_axioms": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "check",
+          "verdict",
+          "detail"
+        ],
+        "properties": {
+          "check": {
+            "type": "string",
+            "minLength": 1
+          },
+          "verdict": {
+            "type": "string",
+            "enum": [
+              "pass",
+              "fail",
+              "unknown"
+            ]
+          },
+          "detail": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "proof_text": {
+      "type": "string",
+      "minLength": 1
+    },
+    "duration_ms": {
+      "type": "integer",
+      "minimum": 0
+    }
+  },
+  "additionalProperties": false
+}

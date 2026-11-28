@@ -437,26 +437,31 @@ impl SqliteArtifactStore {
         registry: &SchemaRegistry,
         relations: &[(VersionId, RelationKind)],
     ) -> Result<u64, StoreError> {
-        validate_artifact(artifact, registry).map_err(StoreError::Validation)?;
-        let subject = artifact
-            .subject
-            .as_ref()
-            .ok_or(StoreError::MissingSubject)?;
-
-        let transaction = self.connection.unchecked_transaction()?;
-        let (sequence, resolved) = append_validated(&transaction, artifact)?;
-        transaction.execute(
-            "INSERT INTO current_artifacts (subject, schema_id, version_id)
-             VALUES (?1, ?2, ?3)
-             ON CONFLICT(subject, schema_id) DO UPDATE SET
-                 version_id = excluded.version_id,
-                 updated_at = CURRENT_TIMESTAMP",
-            params![subject.0, artifact.schema_id.0, artifact.version_id.0],
-        )?;
-        insert_relations(&transaction, &artifact.version_id, relations)?;
-        transaction.commit()?;
-        Ok((sequence, resolved))
+        self.append_current_related_inner(artifact, registry, relations)
+            .map(|(sequence, _)| sequence)
     }
+
+    /// Atomare Current-State-Aufnahme mit Relationen und aufgelöster Schutzstufe.
+    ///
+    /// Formale Nachweise brauchen beide Wirkungen in einem Commit: Ein
+    /// sichtbarer Bericht, der zugleich der aktuelle Stand ist, und die
+    /// semantische Beziehung zum geprüften Nachweis.
+    pub(crate) fn append_current_related_resolved(
+        &self,
+        artifact: &Artifact,
+        registry: &SchemaRegistry,
+        relations: &[(VersionId, RelationKind)],
+    ) -> Result<Artifact, StoreError> {
+        self.append_current_related_inner(artifact, registry, relations)
+            .map(|(_, resolved)| resolved)
+    }
+
+    fn append_current_related_inner(
+        &self,
+        artifact: &Artifact,
+        registry: &SchemaRegistry,
+        relations: &[(VersionId, RelationKind)],
+    ) -> Result<(u64, Artifact), StoreError> {
         validate_artifact(artifact, registry).map_err(StoreError::Validation)?;
         let subject = artifact
             .subject

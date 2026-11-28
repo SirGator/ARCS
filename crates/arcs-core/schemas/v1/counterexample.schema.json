@@ -1,0 +1,22 @@
+{
+  "$id": "arcs.counterexample.v1",
+  "title": "ARCS Gegenbeispiel",
+  "type": "object",
+  "required": ["statement", "witness", "toolchain", "source_versions"],
+  "properties": {
+    "statement": {"type": "string", "minLength": 1},
+    "witness": {"type": "string", "minLength": 1},
+    "toolchain": {
+      "type": "object",
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "version": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    },
+    "obligation_version": {"type": "string", "minLength": 1},
+    "source_versions": {"type": "array", "items": {"type": "string", "minLength": 1}}
+  },
+  "additionalProperties": false
+}

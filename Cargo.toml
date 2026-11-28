@@ -4,10 +4,12 @@ members = [
     "crates/arcs-core",
     "crates/arcs-adapter-protocol",
     "crates/arcs-adapter-sdk",
+    "crates/arcs-lean-engine",
     "adapters/simulated-sensor",
     "adapters/simulated-fan",
     "adapters/file-data",
     "adapters/normalize-number",
+    "adapters/formal-check",
     "adapters/file-output",
     "adapters/workspace-check",
     "adapters/json-report",
@@ -25,6 +27,7 @@ edition = "2024"
 arcs = { package = "arcs-core", path = "crates/arcs-core" }
 arcs-adapter-protocol = { path = "crates/arcs-adapter-protocol" }
 arcs-adapter-sdk = { path = "crates/arcs-adapter-sdk" }
+arcs-lean-engine = { path = "crates/arcs-lean-engine" }
 arcs-simulated-sensor = { path = "adapters/simulated-sensor" }
 arcs-simulated-fan = { path = "adapters/simulated-fan" }
 arcs-host = { path = "apps/adapter-host" }

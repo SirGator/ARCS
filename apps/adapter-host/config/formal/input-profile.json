@@ -1,0 +1,17 @@
+{
+  "adapter_id": "goal.input",
+  "capability_id": "task.submit",
+  "schema_id": "arcs.task.fan_goal.v1",
+  "events": [
+    {
+      "id": "cycle-1",
+      "subject": "cycle-1",
+      "reference": "goal:cycle-1",
+      "payload": {
+        "device_id": "fan-01",
+        "enabled": false,
+        "minimum_actuations": 2
+      }
+    }
+  ]
+}

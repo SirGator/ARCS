@@ -49,6 +49,13 @@ pub struct GoalConfig {
     /// export the assessment itself.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub export_execution_schema_id: Option<SchemaId>,
+    /// Vorgeschriebener formaler Nachweis für die Handlung dieser Runde.
+    ///
+    /// Ohne diese Angabe wirkt die Handlung allein nach dem übrigen
+    /// Vertragsvergleich. Mit ihr darf die Handlung erst wirken, wenn der
+    /// Core einen passenden formalen Nachweis bestätigt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub formal_evidence: Option<super::formal::FormalEvidenceRequirement>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -378,6 +385,26 @@ impl GoalConfig {
         }
         if let Some(activation) = &self.between_rounds {
             activation.validate(host, manifests)?;
+        }
+        if let Some(requirement) = &self.formal_evidence {
+            if !identifier(&requirement.obligation)
+                || !(1..=600_000).contains(&requirement.max_runtime_ms)
+            {
+                return Err(invalid("invalid formal evidence requirement"));
+            }
+            super::formal::formal_capability(host, &requirement.capability)?;
+            manifests.insert(
+                requirement.capability.adapter_id.0.clone(),
+                host.registry()
+                    .authorized_capability(
+                        &requirement.capability.adapter_id,
+                        &requirement.capability.capability_id,
+                    )
+                    .map_err(HostError::Registration)?
+                    .0
+                    .manifest()
+                    .clone(),
+            );
         }
         let mut contract = |cap: &CapabilityRef| -> Result<CapabilityContract, HostError> {
             let (registered, descriptor) = host

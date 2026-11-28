@@ -1,0 +1,14 @@
+{
+  "$id": "arcs.formal_model.v1",
+  "title": "ARCS Formales Modell",
+  "type": "object",
+  "required": ["name", "language", "body", "source_versions"],
+  "properties": {
+    "name": {"type": "string", "minLength": 1},
+    "language": {"type": "string", "enum": ["lean4"]},
+    "body": {"type": "string", "minLength": 1},
+    "abstraction": {"type": "string", "minLength": 1},
+    "source_versions": {"type": "array", "items": {"type": "string", "minLength": 1}}
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,7 @@
+[package]
+name = "arcs-lean-engine"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+arcs-adapter-protocol.workspace = true

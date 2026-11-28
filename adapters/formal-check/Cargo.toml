@@ -1,0 +1,11 @@
+[package]
+name = "arcs-formal-check"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+arcs-adapter-protocol.workspace = true
+arcs-adapter-sdk.workspace = true
+arcs-lean-engine.workspace = true
+serde.workspace = true
+serde_json.workspace = true

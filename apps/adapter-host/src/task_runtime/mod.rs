@@ -3,6 +3,7 @@ mod config;
 mod control;
 pub mod deadlines;
 pub mod dependencies;
+pub mod formal;
 pub mod goal;
 mod job_failure;
 mod journal;

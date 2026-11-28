@@ -1,0 +1,5 @@
+{
+  "adapter_id": "goal.planner",
+  "method": "rules",
+  "scenario": "fan_goal"
+}

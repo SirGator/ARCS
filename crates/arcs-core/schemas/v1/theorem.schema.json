@@ -1,0 +1,15 @@
+{
+  "$id": "arcs.theorem.v1",
+  "title": "ARCS Theorem",
+  "type": "object",
+  "required": ["name", "statement", "proof_version", "source_versions"],
+  "properties": {
+    "name": {"type": "string", "minLength": 1},
+    "statement": {"type": "string", "minLength": 1},
+    "proof_version": {"type": "string", "minLength": 1},
+    "assumption_names": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "model_version": {"type": "string", "minLength": 1},
+    "source_versions": {"type": "array", "items": {"type": "string", "minLength": 1}}
+  },
+  "additionalProperties": false
+}

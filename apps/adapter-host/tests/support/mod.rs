@@ -55,6 +55,8 @@ pub fn adapter_binary(name: &str) -> PathBuf {
                 "arcs-json-input",
                 "-p",
                 "arcs-example-reasoner",
+                "-p",
+                "arcs-formal-check",
                 "--target-dir",
             ])
             .arg(target_directory);

@@ -1,0 +1,89 @@
+{
+  "$id": "arcs.proof.v1",
+  "title": "ARCS Beweisvorschlag",
+  "type": "object",
+  "required": [
+    "statement",
+    "assumption_names",
+    "toolchain",
+    "proof_text",
+    "source_versions"
+  ],
+  "properties": {
+    "statement": {
+      "type": "string",
+      "minLength": 1
+    },
+    "assumption_names": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "model_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "plan_revision": {
+      "type": "string",
+      "minLength": 1
+    },
+    "toolchain": {
+      "type": "object",
+      "required": [
+        "name",
+        "version"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "allowed_axioms": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "proof_text": {
+      "type": "string",
+      "minLength": 1
+    },
+    "prover": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_versions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "definition_names": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "obligation_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "target_version": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "additionalProperties": false
+}

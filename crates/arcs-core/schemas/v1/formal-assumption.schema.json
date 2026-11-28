@@ -1,0 +1,16 @@
+{
+  "$id": "arcs.formal_assumption.v1",
+  "title": "ARCS Formale Annahme",
+  "type": "object",
+  "required": ["name", "statement", "origin", "source_versions"],
+  "properties": {
+    "name": {"type": "string", "minLength": 1},
+    "statement": {"type": "string", "minLength": 1},
+    "origin": {
+      "type": "string",
+      "enum": ["user", "derived", "imported", "axiom"]
+    },
+    "source_versions": {"type": "array", "items": {"type": "string", "minLength": 1}}
+  },
+  "additionalProperties": false
+}

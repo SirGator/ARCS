@@ -4,6 +4,7 @@
 pub mod act;
 pub mod capture;
 pub mod data;
+pub mod formal;
 mod identifiers;
 pub mod input;
 pub mod input_data;
@@ -19,6 +20,7 @@ pub mod transform;
 pub use act::*;
 pub use capture::*;
 pub use data::*;
+pub use formal::*;
 pub use identifiers::*;
 pub use input::*;
 pub use input_data::*;

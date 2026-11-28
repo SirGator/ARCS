@@ -30,6 +30,6 @@ pub mod world;
 
 // Rückwärtskompatible Modulpfade für bestehende Nutzer der Bibliothek.
 pub use action::{execution, outcome};
-pub use decision::{approval, verification};
+pub use decision::{approval, formal, verification};
 pub use io::{input, output, request, transform};
 pub use world::observation;

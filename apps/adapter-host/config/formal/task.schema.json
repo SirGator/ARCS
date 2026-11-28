@@ -1,0 +1,24 @@
+{
+  "$id": "arcs.task.fan_goal.v1",
+  "type": "object",
+  "required": [
+    "device_id",
+    "enabled",
+    "minimum_actuations"
+  ],
+  "properties": {
+    "device_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "enabled": {
+      "type": "boolean"
+    },
+    "minimum_actuations": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1000
+    }
+  },
+  "additionalProperties": false
+}

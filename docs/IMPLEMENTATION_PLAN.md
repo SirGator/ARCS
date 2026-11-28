@@ -33,6 +33,17 @@
 > und Vertragsprüfung im Routing bleiben offen. Nachweis:
 > [Zwischenbericht 28.11.2026](ZWISCHENBERICHT_2026-11-28_SCHUTZSTUFEN.md).
 >
+> Fünfter Slice der Erweiterung: formale Nachweise mit einer isolierten
+> Lean-Engine als externem Adapter. Der Core führt formale Aussagen,
+> Beweisobligationen, Beweise, Gegenbeispiele und Verifikationsberichte als
+> versionierte Artefakte und entscheidet, ob ein Nachweis eine Handlung
+> trägt. Lean selbst bleibt ein Werkzeug: Es erbt weder Autorität noch
+> Store-Zugriff. Ein vorgeschriebener Nachweis entscheidet vor dem übrigen
+> Handlungsvertrag; fehlt er, wartet das Ziel, statt zu handeln. `FORM-01`,
+> `FORM-02` und `FORM-05` sind damit umgesetzt, `FORM-03` in der Grundlage.
+> Offen bleiben `FORM-04`, `FORM-06` und `FORM-07`. Nachweis:
+> [Zwischenbericht 28.11.2026](ZWISCHENBERICHT_2026-11-28_FORMALE_NACHWEISE.md).
+>
 > Vierter Slice der Erweiterung: vereinte Multi-Context-Runtime mit
 > persistenten Arbeitskontexten. Jede bearbeitete Aufgabe erhält einen
 > leichtgewichtigen Arbeitskontext im Core, der Ziel, Task, Planrevision,

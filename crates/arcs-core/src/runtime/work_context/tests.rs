@@ -648,14 +648,22 @@ fn rebinding_the_same_result_is_idempotent() {
         version_id: None,
     };
     context = service
-        .bind_operation(&context, operation.clone(), Some(&VersionId("result-v1".into())))
+        .bind_operation(
+            &context,
+            operation.clone(),
+            Some(&VersionId("result-v1".into())),
+        )
         .unwrap();
     let version_after_first = context.version;
 
     // Ein erneutes Binden desselben Ergebnisses darf den Stand nicht
     // fortschreiben und keinen Fehler erzeugen.
     context = service
-        .bind_operation(&context, operation.clone(), Some(&VersionId("result-v1".into())))
+        .bind_operation(
+            &context,
+            operation.clone(),
+            Some(&VersionId("result-v1".into())),
+        )
         .unwrap();
     assert_eq!(context.version, version_after_first);
     assert_eq!(context.operations[0].state, OperationState::Succeeded);
@@ -706,5 +714,8 @@ fn rebinding_a_different_result_is_rejected() {
             Some(&VersionId("result-v2".into())),
         )
         .unwrap_err();
-    assert!(matches!(error, WorkContextError::Transition(_)), "{error:?}");
+    assert!(
+        matches!(error, WorkContextError::Transition(_)),
+        "{error:?}"
+    );
 }

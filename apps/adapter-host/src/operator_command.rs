@@ -3,6 +3,7 @@ use arcs::approval::ApprovalDecision;
 use arcs::core::{Actor, ActorType, VersionId};
 use serde::{Deserialize, Serialize};
 
+use crate::task_runtime::formal::{FormalEvidenceRequirement, FormalObligationRequest};
 use crate::task_runtime::output::{OutputCommand, OutputDelivery};
 use crate::task_runtime::queue::{TaskQueuePage, TaskQueueQuery};
 use crate::task_runtime::scheduler::{SeriesControlCommand, SeriesControlReceipt};
@@ -49,6 +50,22 @@ pub enum GoalCommand {
     },
 }
 
+/// Befehle der formalen Nachweise.
+///
+/// Die Befehle kommen aus der vertrauenswürdigen Anwendung. Ein Reasoner kann
+/// sie nicht auslösen: Sie legen Nachweise an, die eine Handlung tragen.
+#[derive(Deserialize)]
+#[serde(tag = "command", rename_all = "snake_case", deny_unknown_fields)]
+pub enum FormalCommand {
+    /// Legt eine formale Obligation samt Definitionen und Annahmen an.
+    Obligate { request: FormalObligationRequest },
+    /// Stößt die formale Prüfung einer Obligation an.
+    Prove {
+        obligation: String,
+        requirement: FormalEvidenceRequirement,
+    },
+}
+
 #[derive(Deserialize)]
 #[serde(
     tag = "kind",
@@ -64,6 +81,7 @@ pub enum OperatorCommand {
     Goal(GoalCommand),
     Output(OutputCommand),
     TaskOutput(TaskOutputCommand),
+    Formal(FormalCommand),
 }
 
 #[derive(Serialize)]
@@ -80,6 +98,18 @@ pub enum CommandReceipt {
         sequence: u64,
         release_pending: bool,
     },
+    Formal(FormalReceipt),
+}
+
+/// Der Nachweis über den Stand eines formalen Nachweises.
+#[derive(Serialize)]
+pub struct FormalReceipt {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub obligation_version_id: Option<VersionId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub report_version_id: Option<VersionId>,
+    /// `pending`, wenn die Prüfung noch läuft.
+    pub state: String,
 }
 
 impl OperatorCommand {
@@ -125,6 +155,9 @@ impl OperatorCommand {
             Self::TaskOutput(command) => runtime
                 .control_task_output(host, command)
                 .map(|receipt| Some(CommandReceipt::TaskOutput(receipt))),
+            Self::Formal(command) => runtime
+                .apply_formal(host, command)
+                .map(|receipt| Some(CommandReceipt::Formal(receipt))),
         }
     }
 }

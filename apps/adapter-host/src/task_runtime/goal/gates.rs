@@ -117,7 +117,7 @@ impl TaskRuntime {
         Ok(())
     }
     fn gate<'a>(
-        &self,
+        &mut self,
         host: &Host,
         route: &ReasoningRoute,
         config: &'a GoalConfig,
@@ -174,6 +174,11 @@ impl TaskRuntime {
                 host, config, task, &candidate, comparison,
             )?);
         }
+        // Ein vorgeschriebener formaler Nachweis ist Teil des Handlungsvertrags.
+        // Er wird hier wie jeder andere Vertrag geprüft und im Bericht benannt.
+        if let Some(requirement) = &config.formal_evidence {
+            findings.push(self.formal_finding(host, requirement, route)?);
+        }
         Ok(Gate {
             fenced_resource: rule.fenced_resource.as_deref(),
             result: VerificationResult {
@@ -189,12 +194,50 @@ impl TaskRuntime {
 
     pub(super) fn verify_goal(
         &mut self,
-        host: &Host,
+        host: &mut Host,
         route: &ReasoningRoute,
         config: &GoalConfig,
         task: &mut GoalTask,
     ) -> Result<(), HostError> {
-        let gate = self.gate(host, route, config, task)?;
+        // Ein vorgeschriebener formaler Nachweis entscheidet vor dem übrigen
+        // Handlungsvertrag: Ohne ihn wirkt die Handlung nicht.
+        if let Some(requirement) = config.formal_evidence.as_ref() {
+            let mut state = self.formal_evidence_state(&*host, requirement, route)?;
+            if matches!(state, super::super::formal::FormalState::Pending(_)) {
+                // Die Prüfung wird angefordert, wenn sie noch nicht lief. Sie
+                // läuft über die Adapter-Infrastruktur und ist idempotent.
+                if let Some(obligation) = self.formal_obligation(&*host, &requirement.obligation)?
+                    && self
+                        .request_formal_check(host, requirement, &obligation)?
+                        .is_some()
+                {
+                    state = self.formal_evidence_state(&*host, requirement, route)?;
+                }
+            }
+            match state {
+                super::super::formal::FormalState::Ready { .. } => {}
+                super::super::formal::FormalState::Pending(reason) => {
+                    // Die Handlung wartet auf den Nachweis. Sie wirkt noch
+                    // nicht, und der Wartezustand ist begrenzt.
+                    task.state = GoalState::Verifying;
+                    task.detail = reason;
+                    task.wait_ticks += 1;
+                    if task.wait_ticks >= config.max_wait_ticks {
+                        task.state = GoalState::Blocked;
+                        task.detail =
+                            "the formal evidence did not arrive within the configured wait budget"
+                                .into();
+                    }
+                    return Ok(());
+                }
+                super::super::formal::FormalState::Rejected(reason) => {
+                    task.state = GoalState::Blocked;
+                    task.detail = reason;
+                    return Ok(());
+                }
+            }
+        }
+        let gate = self.gate(&*host, route, config, task)?;
         let candidate = task.candidate.as_ref().unwrap();
         let stream = format!("verification:{}", candidate.0);
         let verification = match host

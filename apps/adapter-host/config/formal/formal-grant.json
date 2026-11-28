@@ -1,0 +1,15 @@
+{
+  "adapter_id": "formal.check",
+  "producer_class": "adapter",
+  "enabled_capabilities": [
+    "formal.check"
+  ],
+  "granted_permissions": [
+    "data.transform"
+  ],
+  "assigned_trust": "medium",
+  "ingress_source_kind": null,
+  "max_payload_bytes": 262144,
+  "max_external_reference_bytes": 256,
+  "reasoning_limits": null
+}
