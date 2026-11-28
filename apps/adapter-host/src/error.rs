@@ -67,6 +67,7 @@ pub enum HostError {
         adapter: AdapterId,
         source: arcs::transform::TransformError,
     },
+    WorkContext(arcs::runtime::work_context::WorkContextError),
 }
 
 impl fmt::Display for HostError {
@@ -122,6 +123,7 @@ impl fmt::Display for HostError {
             Self::Transform { adapter, source } => {
                 write!(f, "adapter {} transform: {source:?}", adapter.0)
             }
+            Self::WorkContext(source) => write!(f, "work context: {source:?}"),
         }
     }
 }

@@ -33,6 +33,18 @@
 > und Vertragsprüfung im Routing bleiben offen. Nachweis:
 > [Zwischenbericht 28.11.2026](ZWISCHENBERICHT_2026-11-28_SCHUTZSTUFEN.md).
 >
+> Vierter Slice der Erweiterung: vereinte Multi-Context-Runtime mit
+> persistenten Arbeitskontexten. Jede bearbeitete Aufgabe erhält einen
+> leichtgewichtigen Arbeitskontext im Core, der Ziel, Task, Planrevision,
+> Artefaktversionen, Authority-Scope, Memory-Sicht, Priorität, Budget und
+> die laufenden Operationen bindet, ohne eine eigene Agenteninstanz zu
+> starten. Das Ergebnis wird als Operation gebunden, ein begrenzter
+> Statusbericht nennt Zustände und Bindungen ohne Nutzdaten. `CTX-01`,
+> `CTX-03` und `CTX-05` sind damit teilweise umgesetzt, `CTX-09` in der
+> Grundlage. Offen bleiben `CTX-02`, `CTX-04`, `CTX-06`, `CTX-07`, `CTX-08`,
+> `CTX-10` und `CTX-11`. Nachweis:
+> [Zwischenbericht 28.11.2026](ZWISCHENBERICHT_2026-11-28_ARBEITSKONTEXTE.md).
+>
 > Erster umgesetzter Slice: begrenztes paralleles Reasoning mit zentraler
 > Ergebnisvalidierung, exklusiven Adapter-Sessions, Fehlerisolierung und
 > Wiederaufnahme. PAR-01, PAR-03, PAR-04, PAR-05, PAR-06 und PAR-07 sind damit teilweise

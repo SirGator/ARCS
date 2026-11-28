@@ -1,9 +1,14 @@
 //! Task-level error handling shared by the runtime's workers and scheduler.
 use super::{FailedTask, HostError, ReasoningRoute, ResourceWait, TaskRuntime, TickReport};
+use crate::Host;
+use arcs::runtime::work_context::{
+    ContextChange, WaitCondition, WaitKind, WorkContextError, WorkContextState,
+};
 
 impl TaskRuntime {
     pub(super) fn record_job_failure(
         &mut self,
+        host: &Host,
         sequence: u64,
         route: &ReasoningRoute,
         error: HostError,
@@ -15,6 +20,16 @@ impl TaskRuntime {
             available,
         } = error
         {
+            self.mark_work_context(
+                host,
+                sequence,
+                WorkContextState::Waiting,
+                vec![WaitCondition {
+                    kind: WaitKind::Resource,
+                    reference: resource.clone(),
+                }],
+                "exclusive resource is busy",
+            )?;
             report.waiting_resources.push(ResourceWait {
                 sequence,
                 route_id: route.id.clone(),
@@ -30,6 +45,13 @@ impl TaskRuntime {
         if is_core_failure(&error) {
             return Err(error);
         }
+        self.mark_work_context(
+            host,
+            sequence,
+            WorkContextState::Failed,
+            Vec::new(),
+            "task failed",
+        )?;
         self.journal.fail(sequence, &error)?;
         report.failed.push(FailedTask {
             sequence,
@@ -37,6 +59,37 @@ impl TaskRuntime {
             error: error.to_string(),
         });
         Ok(())
+    }
+
+    /// Schreibt einen Fehler- oder Wartezustand in den Arbeitskontext.
+    ///
+    /// Das Journal bleibt führ den Aufgabenzustand maßgeblich. Ein
+    /// unzulässiger Übergang im Kontext wird deshalb nicht zum Fehler des
+    /// Ticks, während Speicherfehler weiterhin sofort auffallen.
+    fn mark_work_context(
+        &self,
+        host: &Host,
+        sequence: u64,
+        state: WorkContextState,
+        waiting_for: Vec<WaitCondition>,
+        reason: &str,
+    ) -> Result<(), HostError> {
+        let Some(current) = self.current_work_context(host, sequence)? else {
+            return Ok(());
+        };
+        match self.advance_work_context(
+            host,
+            &current,
+            &[ContextChange::State {
+                state,
+                waiting_for,
+                reason: reason.to_owned(),
+            }],
+        ) {
+            Ok(_) => Ok(()),
+            Err(HostError::WorkContext(WorkContextError::Transition(_))) => Ok(()),
+            Err(error) => Err(error),
+        }
     }
 }
 
@@ -97,5 +150,6 @@ pub(super) fn is_core_failure(error: &HostError) -> bool {
             | HostError::Reasoning(arcs::reasoning::ReasoningError::InputData(
                 arcs::adapters::input_data::InputDataError::Store(_)
             ))
+            | HostError::WorkContext(arcs::runtime::work_context::WorkContextError::Store(_))
     )
 }

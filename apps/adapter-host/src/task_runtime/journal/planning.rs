@@ -56,6 +56,40 @@ impl Journal {
         }
         Ok(())
     }
+    /// Liefert die Planrevision einer Aufgabe.
+    ///
+    /// Planabkömmlinge erben die Revision ihres Elternplans. Ohne Plan
+    /// gibt es keine Revision; die Aufgabenummer allein benennt keinen Plan.
+    pub(in crate::task_runtime) fn plan_revision(
+        &self,
+        sequence: u64,
+    ) -> Result<Option<String>, HostError> {
+        let direct: Option<Option<String>> = self
+            .connection
+            .query_row(
+                "SELECT plan_version FROM runtime_plans WHERE sequence=?1",
+                [sequence as i64],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(db)?;
+        if let Some(version) = direct {
+            return Ok(version);
+        }
+        let inherited: Option<Option<String>> = self
+            .connection
+            .query_row(
+                "SELECT p.plan_version FROM runtime_plan_steps s
+                 JOIN runtime_plans p ON p.sequence = s.parent_sequence
+                 WHERE s.sequence = ?1",
+                [sequence as i64],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(db)?;
+        Ok(inherited.flatten())
+    }
+
     pub(in crate::task_runtime) fn saved_plan(
         &self,
         sequence: u64,

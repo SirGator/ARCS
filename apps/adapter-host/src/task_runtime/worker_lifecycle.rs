@@ -60,7 +60,7 @@ impl TaskRuntime {
             }
             if let Err(error) = host.collect_request_input(&control.input) {
                 let route = self.raw_route_for_job(host, control.sequence, &control.route)?;
-                self.record_job_failure(control.sequence, &route, error, report)?;
+                self.record_job_failure(host, control.sequence, &route, error, report)?;
             }
         }
         Ok(())

@@ -21,6 +21,35 @@ impl Journal {
             .map_err(db)
     }
 
+    /// Liefert die zuletzt vergebenen Aufgabennummern in aufsteigender Folge.
+    ///
+    /// Der Statusbericht über Arbeitskontexte braucht eine begrenzte Menge
+    /// bekannter Aufgaben. Die Nummern sind stabil und bleiben über einen
+    /// Neustart erhalten.
+    pub(in crate::task_runtime) fn recent_task_sequences(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<u64>, HostError> {
+        if !(1..=1000).contains(&limit) {
+            return Err(invalid("task page size must be 1..1000"));
+        }
+        let mut query = self
+            .connection
+            .prepare("SELECT sequence FROM runtime_jobs ORDER BY sequence DESC LIMIT ?1")
+            .map_err(db)?;
+        let rows = query
+            .query_map([limit as i64], |row| row.get::<_, i64>(0))
+            .map_err(db)?;
+        let mut sequences = rows
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(db)?
+            .into_iter()
+            .map(|sequence| sequence as u64)
+            .collect::<Vec<_>>();
+        sequences.reverse();
+        Ok(sequences)
+    }
+
     pub(in crate::task_runtime) fn task_queue(
         &self,
         query: TaskQueueQuery,

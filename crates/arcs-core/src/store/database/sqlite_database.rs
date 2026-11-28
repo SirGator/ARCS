@@ -399,6 +399,37 @@ impl SqliteArtifactStore {
         self.append_current_related(artifact, registry, &[])
     }
 
+    /// Hängt eine Version an und setzt im selben Commit den aktuellen Zustand.
+    ///
+    /// Rückgabe ist die gespeicherte Fassung mit der aufgelösten Schutzstufe.
+    /// Arbeitskontexte brauchen beide Wirkungen in einem Commit: Ein Kontext,
+    /// der sichtbar ist, aber nicht als aktueller Stand gilt, würde beim
+    /// Wiederanlauf einen fremden Zustand fortschreiben.
+    pub(crate) fn append_current_resolved(
+        &self,
+        artifact: &Artifact,
+        registry: &SchemaRegistry,
+    ) -> Result<Artifact, StoreError> {
+        validate_artifact(artifact, registry).map_err(StoreError::Validation)?;
+        let subject = artifact
+            .subject
+            .as_ref()
+            .ok_or(StoreError::MissingSubject)?;
+
+        let transaction = self.connection.unchecked_transaction()?;
+        let (_, resolved) = append_validated(&transaction, artifact)?;
+        transaction.execute(
+            "INSERT INTO current_artifacts (subject, schema_id, version_id)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(subject, schema_id) DO UPDATE SET
+                 version_id = excluded.version_id,
+                 updated_at = CURRENT_TIMESTAMP",
+            params![subject.0, artifact.schema_id.0, artifact.version_id.0],
+        )?;
+        transaction.commit()?;
+        Ok(resolved)
+    }
+
     /// Atomare Current-State-Aufnahme mit ausgehenden semantischen Relationen.
     pub(crate) fn append_current_related(
         &self,
@@ -413,7 +444,7 @@ impl SqliteArtifactStore {
             .ok_or(StoreError::MissingSubject)?;
 
         let transaction = self.connection.unchecked_transaction()?;
-        let (sequence, _) = append_validated(&transaction, artifact)?;
+        let (sequence, resolved) = append_validated(&transaction, artifact)?;
         transaction.execute(
             "INSERT INTO current_artifacts (subject, schema_id, version_id)
              VALUES (?1, ?2, ?3)
@@ -424,7 +455,27 @@ impl SqliteArtifactStore {
         )?;
         insert_relations(&transaction, &artifact.version_id, relations)?;
         transaction.commit()?;
-        Ok(sequence)
+        Ok((sequence, resolved))
+    }
+        validate_artifact(artifact, registry).map_err(StoreError::Validation)?;
+        let subject = artifact
+            .subject
+            .as_ref()
+            .ok_or(StoreError::MissingSubject)?;
+
+        let transaction = self.connection.unchecked_transaction()?;
+        let (sequence, resolved) = append_validated(&transaction, artifact)?;
+        transaction.execute(
+            "INSERT INTO current_artifacts (subject, schema_id, version_id)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(subject, schema_id) DO UPDATE SET
+                 version_id = excluded.version_id,
+                 updated_at = CURRENT_TIMESTAMP",
+            params![subject.0, artifact.schema_id.0, artifact.version_id.0],
+        )?;
+        insert_relations(&transaction, &artifact.version_id, relations)?;
+        transaction.commit()?;
+        Ok((sequence, resolved))
     }
 
     /// Speichert einen neuen Current-State zusammen mit einem unveränderlichen

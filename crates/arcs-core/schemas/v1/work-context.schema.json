@@ -1,0 +1,127 @@
+{
+  "$id": "arcs.work_context.v1",
+  "type": "object",
+  "required": [
+    "context_id",
+    "runtime_id",
+    "task_sequence",
+    "route_id",
+    "state",
+    "artifact_versions",
+    "authority",
+    "memory",
+    "priority",
+    "budget",
+    "operations"
+  ],
+  "properties": {
+    "context_id": {"type": "string", "minLength": 1},
+    "runtime_id": {"type": "string", "minLength": 1},
+    "task_sequence": {"type": "integer", "minimum": 1},
+    "route_id": {"type": "string", "minLength": 1},
+    "goal_id": {"type": "string", "minLength": 1},
+    "plan_revision": {"type": "string", "minLength": 1},
+    "state": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "running",
+        "waiting",
+        "ready_for_review",
+        "failed",
+        "completed",
+        "cancelled"
+      ]
+    },
+    "waiting_for": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["kind", "reference"],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "resource",
+              "dependency",
+              "approval",
+              "reasoning",
+              "adapter",
+              "external"
+            ]
+          },
+          "reference": {"type": "string", "minLength": 1}
+        },
+        "additionalProperties": false
+      }
+    },
+    "artifact_versions": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1}
+    },
+    "authority": {
+      "type": "object",
+      "required": ["role_id", "capabilities", "permissions"],
+      "properties": {
+        "role_id": {"type": "string", "minLength": 1},
+        "capabilities": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "permissions": {"type": "array", "items": {"type": "string", "minLength": 1}}
+      },
+      "additionalProperties": false
+    },
+    "memory": {
+      "type": "object",
+      "required": ["schema_ids", "max_classification"],
+      "properties": {
+        "schema_ids": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "max_classification": {
+          "type": "string",
+          "enum": ["public", "internal", "confidential", "restricted", "secret"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "priority": {"type": "integer", "minimum": 0, "maximum": 3},
+    "budget": {
+      "type": "object",
+      "required": [
+        "max_model_calls",
+        "max_tokens",
+        "max_cost_micros",
+        "max_wall_clock_ms"
+      ],
+      "properties": {
+        "max_model_calls": {"type": "integer", "minimum": 0},
+        "max_tokens": {"type": "integer", "minimum": 0},
+        "max_cost_micros": {"type": "integer", "minimum": 0},
+        "max_wall_clock_ms": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "operations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["operation_id", "kind", "state"],
+        "properties": {
+          "operation_id": {"type": "string", "minLength": 1},
+          "kind": {"type": "string", "minLength": 1},
+          "state": {
+            "type": "string",
+            "enum": [
+              "planned",
+              "running",
+              "succeeded",
+              "failed",
+              "cancelled",
+              "unknown"
+            ]
+          },
+          "version_id": {"type": "string", "minLength": 1}
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

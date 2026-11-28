@@ -17,11 +17,13 @@ mod routes;
 pub mod scheduler;
 pub mod suspension;
 pub mod task_output;
+pub mod work_context;
 mod worker_lifecycle;
 pub use config::{ReasoningRoute, RuntimeConfig};
 pub(crate) use control::ControlReleaseIntent;
 pub use control::ResourceEvidenceReview;
 pub use journal::dispatch::{DispatchClassReport, DispatchReport};
+pub use work_context::{OperationReport, WorkContextReport};
 
 use std::time::{Duration, Instant};
 
@@ -287,13 +289,20 @@ impl TaskRuntime {
             if !matches_source(&route, &input) {
                 return Err(invalid("saved task no longer matches source"));
             }
+            // Jede Aufgabe erhält einen Arbeitskontext im Core. Der Kontext
+            // bindet Ziel, Planrevision, Artefaktversionen und Operationen an
+            // den Task, ohne eine eigene Agenteninstanz zu starten.
+            self.start_work_context(host, sequence, &route, &input)?;
             match self.advance_job(host, sequence, &route, &input, now) {
                 Ok(Some(completed)) => {
                     self.journal.complete(&completed)?;
+                    self.finish_work_context(host, sequence, &completed.result_version_id)?;
                     report.ready_for_review.push(completed);
                 }
                 Ok(None) => {}
-                Err(error) => self.record_job_failure(sequence, &route, error, &mut report)?,
+                Err(error) => {
+                    self.record_job_failure(host, sequence, &route, error, &mut report)?
+                }
             }
         }
         self.cleanup_control_sessions(host)?;

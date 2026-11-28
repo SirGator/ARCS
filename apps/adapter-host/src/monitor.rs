@@ -185,6 +185,13 @@ fn snapshot(
         .transpose()
         .map_err(fail)?
         .unwrap_or_default();
+    // Arbeitskontexte zeigen den Stand aller laufenden Tätigkeiten. Der
+    // Bericht enthält nur Zustand und Bindungen, keine Nutzdaten.
+    let work_contexts = runtime
+        .map(|runtime| runtime.work_contexts(host))
+        .transpose()
+        .map_err(fail)?
+        .unwrap_or_default();
     let runtime = runtime
         .map(|runtime| runtime.report(ticks))
         .transpose()
@@ -217,6 +224,6 @@ fn snapshot(
         writer,
         json!({"event":"snapshot","ticks":ticks,"uptime_ms":started.elapsed().as_millis(),
         "stored_artifacts":report.stored_artifacts,"world_revision":report.world_revision,
-        "adapters":adapters,"runtime":runtime,"recent_artifacts":recent,"resource_pools":report.resource_pools,"request_workers":report.request_workers,"transform_workers":report.transform_workers,"execution_workers":host.execution_workers(),"output_workers":host.output_worker_ids(),"ingress_dialogs":host.ingress_status(),"controller_closures":host.controller_closures(),"resource_reservations":reservations,"resource_release_reviews":resource_release_reviews,"reasoner_selections":selections,"reasoning_recoveries":recoveries,"adapter_reconnections":reconnects}),
+        "adapters":adapters,"runtime":runtime,"recent_artifacts":recent,"resource_pools":report.resource_pools,"request_workers":report.request_workers,"transform_workers":report.transform_workers,"execution_workers":host.execution_workers(),"output_workers":host.output_worker_ids(),"ingress_dialogs":host.ingress_status(),"controller_closures":host.controller_closures(),"resource_reservations":reservations,"resource_release_reviews":resource_release_reviews,"reasoner_selections":selections,"reasoning_recoveries":recoveries,"work_contexts":work_contexts,"adapter_reconnections":reconnects}),
     )
 }

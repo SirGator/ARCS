@@ -187,7 +187,7 @@ impl TaskRuntime {
                     if route.reasoning_recovery.is_some() && !super::is_core_failure(&error) {
                         continue;
                     }
-                    self.record_job_failure(sequence, &route, error, report)?;
+                    self.record_job_failure(host, sequence, &route, error, report)?;
                 }
             }
         }
