@@ -191,6 +191,7 @@ fn a_fenced_goal_passes_its_exact_held_revision_to_the_simulated_controller() {
         host.execute_approved(
             &invocation.capability.adapter_id,
             dispatched.action.as_ref().unwrap(),
+            "task:test",
         )
         .is_err()
     );

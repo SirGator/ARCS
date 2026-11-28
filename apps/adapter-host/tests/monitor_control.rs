@@ -817,6 +817,89 @@ fn an_act_reply_can_be_delayed_across_restart_while_independent_work_completes()
 }
 
 #[test]
+fn a_host_failure_during_an_effect_keeps_the_effect_bound_to_its_task() {
+    let f = goals::Fixture::new();
+    let (monitor, action) = dispatch_with_held_reply(&f, "execute_fenced");
+    let sequence = action["sequence"].as_u64().unwrap();
+    let invocation = action["invocation_id"].as_str().unwrap().to_string();
+    monitor.stop();
+
+    // Der Host fällt mitten in der externen Wirkung aus. Die Wirkung bleibt
+    // an ihre Aufgabe gebunden und wird nicht durch eine neue Runde ersetzt.
+    std::fs::remove_file(f.directory.join("monitor.stop")).unwrap();
+    std::fs::remove_file(f.directory.join("act.entered")).unwrap();
+    let monitor = Monitor::start(&f.directory);
+    let replay = monitor.until(|event| {
+        f.directory.join("act.entered").exists() && event["execution_workers"][0] == action
+    });
+    assert_eq!(replay["runtime"]["goals"][0]["state"], "executing");
+    assert_eq!(
+        std::fs::read_to_string(f.directory.join("act.entered")).unwrap(),
+        invocation
+    );
+    std::fs::write(f.directory.join("act.release"), "continue").unwrap();
+    let snapshot = monitor.until(|event| {
+        matches!(
+            event["runtime"]["goals"][0]["state"].as_str(),
+            Some("completed" | "awaiting_approval" | "blocked" | "failed")
+        )
+    });
+    assert_eq!(
+        snapshot["runtime"]["completed_goals"], 1,
+        "{}",
+        snapshot["runtime"]["goals"]
+    );
+    // Das Gerät wurde genau einmal betätigt: Die Wiederholung derselben
+    // idempotenten Sendung erzeugte keine zweite Wirkung.
+    assert_fan_dispatched_once(&f, &action);
+
+    // Das Wirkungsbuch weist die Wirkung ihrer Aufgabe zu und hält beide
+    // Versuche fest.
+    let states: Vec<String> = effect_history(&f)
+        .iter()
+        .map(|entry| {
+            entry["payload"]["state"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string()
+        })
+        .collect();
+    assert_eq!(
+        states,
+        vec!["planned", "dispatched", "dispatched", "confirmed"]
+    );
+    let current = effect_history(&f).pop().unwrap();
+    assert_eq!(
+        current["payload"]["task_key"],
+        json!(format!("goal:{sequence}"))
+    );
+    assert_eq!(current["payload"]["invocation_id"], json!(invocation));
+    assert_eq!(current["payload"]["attempt"], json!(2));
+    assert_eq!(
+        current["payload"]["effect_reference"],
+        json!(format!("simulated:{invocation}:observed"))
+    );
+    monitor.stop();
+}
+
+/// Liest die Historie des Wirkungsbuchs aus dem Core.
+fn effect_history(f: &goals::Fixture) -> Vec<Value> {
+    let core = f.db("core");
+    let mut statement = core
+        .prepare(
+            "SELECT artifact_json FROM artifact_versions WHERE schema_id='arcs.effect.v1' ORDER BY sequence",
+        )
+        .unwrap();
+    let rows = statement
+        .query_map([], |row| {
+            let artifact: String = row.get(0)?;
+            Ok(serde_json::from_str::<Value>(&artifact).unwrap())
+        })
+        .unwrap();
+    rows.map(|row| row.unwrap()).collect()
+}
+
+#[test]
 fn a_cancelled_goal_keeps_its_reservation_and_audits_the_delayed_act_reply() {
     let f = goals::Fixture::new();
     let (mut monitor, action) = dispatch_with_held_reply(&f, "execute_fenced");

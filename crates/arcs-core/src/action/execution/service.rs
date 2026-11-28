@@ -11,6 +11,7 @@ use crate::core::{
     Provenance, SchemaDefinition, SchemaId, SchemaRegistry, Source, SourceClass, SourceKind,
     SubjectId, Trust, VersionId,
 };
+use crate::runtime::effects::{DispatchDecision, EffectDraft, EffectService, EffectState};
 use crate::runtime::reservations::{Reservation, ReservationError, ReservationService};
 use crate::runtime::{
     InvocationKind, InvocationService, InvocationSpec, InvocationState, InvocationStatus,
@@ -111,30 +112,38 @@ impl<'a> ExecutionService<'a> {
         }
     }
 
+    /// Führt einen materialisierten Auftrag aus.
+    ///
+    /// `task_key` benennt die Aufgabe, die die Wirkung verantwortet. Er
+    /// bindet die externe Wirkung dauerhaft an ihren Auftrag, damit ein
+    /// verspätetes Ergebnis nicht einer anderen Aufgabe zugerechnet wird.
     pub fn execute(
         &mut self,
         endpoint: &dyn ActAdapter,
         action_version: &VersionId,
+        task_key: &str,
     ) -> Result<Artifact, ExecutionError> {
-        self.execute_inner(endpoint, action_version, None)
+        self.execute_inner(endpoint, action_version, task_key, None)
     }
 
     pub fn execute_reserved(
         &mut self,
         endpoint: &dyn ActAdapter,
         action_version: &VersionId,
+        task_key: &str,
         reservation: &Reservation,
     ) -> Result<Artifact, ExecutionError> {
-        self.execute_inner(endpoint, action_version, Some(reservation))
+        self.execute_inner(endpoint, action_version, task_key, Some(reservation))
     }
 
     fn execute_inner(
         &mut self,
         endpoint: &dyn ActAdapter,
         action_version: &VersionId,
+        task_key: &str,
         reservation: Option<&Reservation>,
     ) -> Result<Artifact, ExecutionError> {
-        match self.prepare_inner(endpoint, action_version, reservation, true)? {
+        match self.prepare_inner(endpoint, action_version, task_key, reservation, true)? {
             ExecutionPreparation::Complete(result) => Ok(*result),
             ExecutionPreparation::Dispatch(prepared) => {
                 let response = prepared.call().send(endpoint);
@@ -150,15 +159,17 @@ impl<'a> ExecutionService<'a> {
         &self,
         endpoint: &dyn ActAdapter,
         action_version: &VersionId,
+        task_key: &str,
         reservation: Option<&Reservation>,
     ) -> Result<ExecutionPreparation, ExecutionError> {
-        self.prepare_inner(endpoint, action_version, reservation, false)
+        self.prepare_inner(endpoint, action_version, task_key, reservation, false)
     }
 
     fn prepare_inner(
         &self,
         endpoint: &dyn ActAdapter,
         action_version: &VersionId,
+        task_key: &str,
         reservation: Option<&Reservation>,
         retry_failed: bool,
     ) -> Result<ExecutionPreparation, ExecutionError> {
@@ -288,6 +299,8 @@ impl<'a> ExecutionService<'a> {
 
         let grant = registered.grant();
         let invocation_id = execution_invocation_id(action_version, &capability, &result_schema);
+        let operation_id = execution_operation_id(&invocation_id);
+        let effects = EffectService::new(self.store, self.schemas, self.clock);
         let invocation = ActInvocation {
             invocation_id: invocation_id.clone(),
             capability: capability.clone(),
@@ -316,16 +329,32 @@ impl<'a> ExecutionService<'a> {
                 input_fingerprint: deterministic_input_fingerprint(&[&serialized_invocation]),
             })?;
             if prepared.status == InvocationStatus::Succeeded {
+                // The effect belongs to the task that caused it. Another task
+                // may not claim its result as its own.
+                if let Some(record) = effects.lookup(&operation_id)?
+                    && record.task_key != task_key
+                {
+                    return Err(ExecutionError::EffectBindingMismatch {
+                        operation_id: operation_id.clone(),
+                        expected: record.task_key,
+                        actual: task_key.to_string(),
+                    });
+                }
                 let result = prepared
                     .result_version
                     .ok_or(crate::runtime::InvocationError::MissingResult)?;
-                return self
+                let artifact = self
                     .store
                     .get(&result)?
-                    .map(|artifact| ExecutionPreparation::Complete(Box::new(artifact)))
                     .ok_or(crate::runtime::InvocationError::MissingResult)
-                    .map_err(ExecutionError::from);
+                    .map_err(ExecutionError::from)?;
+                // The stored receipt is the evidence of the external effect.
+                self.confirm_effect(&effects, &operation_id, &artifact)?;
+                return Ok(ExecutionPreparation::Complete(Box::new(artifact)));
             }
+            // The book of external effects decides whether the effect may be
+            // sent again. An unresolved effect is never repeated silently.
+            let decision = self.authorize_effect(&effects, &operation_id)?;
             if prepared.status == InvocationStatus::Failed && !retry_failed {
                 return Err(ExecutionError::RecordedFailure {
                     invocation_id,
@@ -334,7 +363,29 @@ impl<'a> ExecutionService<'a> {
                         .unwrap_or_else(|| "Act invocation failed".into()),
                 });
             }
+            // The effect is booked before the endpoint sees the call. A crash
+            // after this point therefore leaves a durable trace. The binding
+            // to the task is checked before anything becomes visible.
+            effects.plan(&EffectDraft {
+                operation_id: operation_id.clone(),
+                task_key: task_key.to_string(),
+                kind: format!("act:{}", capability.adapter_id.0),
+                invocation_id: invocation_id.clone(),
+            })?;
             let recovered = invocations.recover(&prepared)?;
+            // Recovering the receipt of an effect that already happened must
+            // not book a second dispatch. Only the attempt counter grows.
+            match decision {
+                DispatchDecision::Send => {
+                    effects.mark_dispatched(&operation_id, None)?;
+                }
+                DispatchDecision::Replay { .. } => {
+                    // The identical idempotent call is repeated. The attempt
+                    // counter makes the repetition visible in the history.
+                    effects.mark_replayed(&operation_id, None)?;
+                }
+                _ => {}
+            }
             invocations.dispatch(&recovered)?
         };
 
@@ -383,6 +434,14 @@ impl<'a> ExecutionService<'a> {
             result_schema_id,
             ..
         } = invocation;
+        // The external reference is read before the response is consumed. It
+        // proves that the effect happened even when the receipt itself cannot
+        // be written. A later attempt then only recovers the receipt instead
+        // of causing a second effect.
+        let received = response.as_ref().ok().and_then(|act| {
+            (act.invocation_id == invocation_id && !act.external_reference.trim().is_empty())
+                .then(|| act.external_reference.clone())
+        });
         let outcome = (|| {
             let response = response?;
             if response.invocation_id != invocation_id {
@@ -458,21 +517,131 @@ impl<'a> ExecutionService<'a> {
             Ok((artifact, relations))
         })();
 
+        let operation_id = execution_operation_id(&invocation_id);
+        let effects = EffectService::new(self.store, self.schemas, self.clock);
         let (artifact, relations) = match outcome {
             Ok(result) => result,
             Err(error) => {
                 self.record_failure(&dispatched, &error)?;
+                self.record_effect_outcome(&effects, &operation_id, &error, received.as_deref())?;
                 return Err(error);
             }
         };
         // A publication error leaves the invocation dispatched. Its external
         // effect may already exist, so recovery must use the identical call.
-        InvocationService::new(self.store, self.schemas, self.clock).succeed_with_event(
-            &dispatched,
-            &artifact,
-            &relations,
-        )?;
+        if let Err(error) = InvocationService::new(self.store, self.schemas, self.clock)
+            .succeed_with_event(&dispatched, &artifact, &relations)
+        {
+            // The adapter answered, so the effect happened even though the
+            // receipt was lost. Recording that fact keeps a later attempt
+            // from repeating the effect.
+            self.confirm_effect(&effects, &operation_id, &artifact)?;
+            return Err(ExecutionError::Invocation(error));
+        }
+        // The receipt is the evidence of the external effect.
+        self.confirm_effect(&effects, &operation_id, &artifact)?;
         Ok(artifact)
+    }
+
+    /// Prüft, ob die externe Wirkung erneut abgesendet werden darf.
+    ///
+    /// Eine Wirkung, die nicht stattgefunden hat, darf gesendet werden. Eine
+    /// bestätigte Wirkung wird nicht wiederholt: Der erneute Aufruf holt nur
+    /// ihren Beleg zurück. Eine ungeklärte Wirkung wird in den Zustand
+    /// `unclear` überführt und verlangt eine ausdrückliche Klärung, bevor
+    /// erneut gesendet werden darf.
+    fn authorize_effect(
+        &self,
+        effects: &EffectService<'_>,
+        operation_id: &str,
+    ) -> Result<DispatchDecision, ExecutionError> {
+        match effects.authorize_dispatch(operation_id)? {
+            DispatchDecision::Send => Ok(DispatchDecision::Send),
+            DispatchDecision::Replay { attempt } => Ok(DispatchDecision::Replay { attempt }),
+            DispatchDecision::RecoverEvidence { .. } => {
+                // The effect happened; only its receipt is missing. The repeated
+                // call is the identical idempotent call and recovers the
+                // evidence without causing a second effect.
+                effects.mark_evidence_recovery(operation_id)?;
+                Ok(DispatchDecision::RecoverEvidence {
+                    reference: String::new(),
+                })
+            }
+            DispatchDecision::NeedsReconciliation { detail } => {
+                Err(ExecutionError::UnclearExternalEffect {
+                    operation_id: operation_id.to_string(),
+                    detail,
+                })
+            }
+        }
+    }
+
+    /// Bestätigt eine externe Wirkung mit ihrem Beleg.
+    fn confirm_effect(
+        &self,
+        effects: &EffectService<'_>,
+        operation_id: &str,
+        artifact: &Artifact,
+    ) -> Result<(), ExecutionError> {
+        let Some(record) = effects.lookup(operation_id)? else {
+            return Ok(());
+        };
+        if record.state == EffectState::Confirmed {
+            return Ok(());
+        }
+        effects.confirm(operation_id, &artifact.source.reference)?;
+        Ok(())
+    }
+
+    /// Hält fest, was über eine fehlgeschlagene externe Wirkung bekannt ist.
+    ///
+    /// Ein Adapter, der nicht erreicht wurde oder die Anfrage abgelehnt hat,
+    /// belegt: Es ist nichts passiert und ein neuer Versuch ist zulässig. Ein
+    /// Timeout, ein Protokollfehler oder ein unbrauchbares Ergebnis belegt
+    /// nichts: Die Wirkung bleibt ungeklärt und wird nicht wiederholt.
+    ///
+    /// Hat der Adapter mit einer passenden Referenz geantwortet, ist die
+    /// Wirkung eingetreten. Ein fehlender Beleg darf dann nicht zu einer
+    /// zweiten Wirkung führen.
+    fn record_effect_outcome(
+        &self,
+        effects: &EffectService<'_>,
+        operation_id: &str,
+        error: &ExecutionError,
+        received: Option<&str>,
+    ) -> Result<(), ExecutionError> {
+        let Some(record) = effects.lookup(operation_id)? else {
+            return Ok(());
+        };
+        if record.state == EffectState::Confirmed {
+            return Ok(());
+        }
+        let detail = format!("{error:?}");
+        if let Some(reference) = received {
+            effects.confirm(operation_id, reference)?;
+            return Ok(());
+        }
+        match error {
+            ExecutionError::AdapterCall(
+                crate::adapters::AdapterCallError::Unavailable(_)
+                | crate::adapters::AdapterCallError::Rejected(_),
+            ) => {
+                // The call did not reach the effect. A new attempt is allowed.
+                effects.mark_failed(operation_id, &detail)?;
+            }
+            ExecutionError::InvocationResponseMismatch
+            | ExecutionError::InvalidExternalReference => {
+                // The answer cannot be attributed to this operation. Only an
+                // explicit clarification may continue the task.
+                effects.mark_unclear(operation_id, &detail)?;
+            }
+            _ => {
+                // A timeout or a broken protocol leaves the outcome unknown.
+                // The effect stays replayable: the identical idempotent call
+                // may be repeated, and the attempt stays visible.
+            }
+        }
+        Ok(())
     }
 
     fn record_failure(
@@ -487,6 +656,14 @@ impl<'a> ExecutionService<'a> {
         )?;
         Ok(())
     }
+}
+
+/// Stable identity of the external effect of an approved action.
+///
+/// The effect follows the invocation. A replay of the same approved action
+/// therefore refers to the same effect and can be recognised as such.
+pub fn execution_operation_id(invocation_id: &str) -> String {
+    format!("operation:{invocation_id}")
 }
 
 /// Stable execution identity for an approved action and its declared result schema.

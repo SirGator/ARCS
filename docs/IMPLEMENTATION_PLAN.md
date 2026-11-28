@@ -44,6 +44,21 @@
 > Offen bleiben `FORM-04`, `FORM-06` und `FORM-07`. Nachweis:
 > [Zwischenbericht 28.11.2026](ZWISCHENBERICHT_2026-11-28_FORMALE_NACHWEISE.md).
 >
+> Sechster Slice der Erweiterung: Aufgaben-Leases und das Buch der externen
+> Wirkungen. Eine Aufgabe wird jetzt dauerhaft einer logischen Runtime
+> zugeordnet; das Fencing-Token macht den Besitzwechsel eindeutig, und ein
+> fremder Eigentümer führt die Aufgabe in einen Wartezustand statt in eine
+> konkurrierende Bearbeitung. Jede externe Wirkung wird als Artefakt mit
+> Operation, Aufgabe, Invocation, Zustand und Versuchszahl gebucht. Der Core
+> unterscheidet „nicht eingetreten“ (ein neuer Versuch ist erlaubt), „belegt
+> eingetreten“ (nur der Beleg wird nachgeholt) und „nicht zuordenbar“ (eine
+> ausdrückliche Klärung des Betreibers ist nötig). `OPS-03` ist damit in der
+> Grundlage umgesetzt, `OPS-05` für Aufgaben, Wirkungen und Freigaben,
+> `TEST-10` für die Zuordnung, die ausbleibende doppelte Wirkung und die
+> ausdrückliche Klärung nachgewiesen. Offen bleiben `OPS-01`, `OPS-02`,
+> `OPS-04`, `OPS-06` sowie `BIZ-01` bis `BIZ-06`. Nachweis:
+> [Zwischenbericht 28.11.2026](ZWISCHENBERICHT_2026-11-28_AUFGABEN_LEASES.md).
+>
 > Vierter Slice der Erweiterung: vereinte Multi-Context-Runtime mit
 > persistenten Arbeitskontexten. Jede bearbeitete Aufgabe erhält einen
 > leichtgewichtigen Arbeitskontext im Core, der Ziel, Task, Planrevision,

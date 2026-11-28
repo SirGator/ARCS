@@ -294,7 +294,7 @@ fn application_can_execute_only_materialized_approved_actions_through_generic_ho
     let fixture = Fixture::new();
     let mut host = Host::open(&fixture.config_path).unwrap();
     let adapter = AdapterId("demo.fan".into());
-    let missing = host.execute_approved(&adapter, &VersionId("missing-action".into()));
+    let missing = host.execute_approved(&adapter, &VersionId("missing-action".into()), "task:test");
     assert!(matches!(
         missing,
         Err(HostError::Execution {
@@ -324,7 +324,7 @@ fn application_can_execute_only_materialized_approved_actions_through_generic_ho
     })
     .unwrap();
     assert!(matches!(
-        host.execute_approved(&adapter, &candidate.version_id),
+        host.execute_approved(&adapter, &candidate.version_id, "task:test"),
         Err(HostError::Execution {
             source: ExecutionError::NotActionArtifact,
             ..
@@ -357,9 +357,12 @@ fn application_can_execute_only_materialized_approved_actions_through_generic_ho
         &CapabilityRef::new("demo.fan", "fan.set"),
     )
     .unwrap();
-    let first = host.execute_approved(&adapter, &action.version_id).unwrap();
+    let first = host
+        .execute_approved(&adapter, &action.version_id, "task:test")
+        .unwrap();
     assert_eq!(
-        host.execute_approved(&adapter, &action.version_id).unwrap(),
+        host.execute_approved(&adapter, &action.version_id, "task:test")
+            .unwrap(),
         first
     );
     let readback = host.request("fan-state-1").unwrap();

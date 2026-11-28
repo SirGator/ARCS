@@ -345,7 +345,7 @@ fn approved_action_is_executed_and_result_is_persisted() {
     let (endpoint, calls) = endpoint(manifest);
 
     let result = ExecutionService::new(&registry, &schemas, &store, &mut ids, &FixedClock)
-        .execute(&endpoint, &action.version_id)
+        .execute(&endpoint, &action.version_id, "task:test")
         .unwrap();
 
     assert_eq!(calls.lock().unwrap().len(), 1);
@@ -392,8 +392,11 @@ fn candidate_cannot_be_executed_directly() {
     let (endpoint, calls) = endpoint(manifest);
     let mut ids = TestIds(1);
 
-    let result = ExecutionService::new(&registry, &schemas, &store, &mut ids, &FixedClock)
-        .execute(&endpoint, &candidate.version_id);
+    let result = ExecutionService::new(&registry, &schemas, &store, &mut ids, &FixedClock).execute(
+        &endpoint,
+        &candidate.version_id,
+        "task:test",
+    );
 
     assert!(matches!(result, Err(ExecutionError::NotActionArtifact)));
     assert!(calls.lock().unwrap().is_empty());
@@ -415,8 +418,11 @@ fn approval_cannot_be_executed_without_materialized_action() {
     );
     let (endpoint, calls) = endpoint(manifest);
 
-    let result = ExecutionService::new(&registry, &schemas, &store, &mut ids, &FixedClock)
-        .execute(&endpoint, &approval.version_id);
+    let result = ExecutionService::new(&registry, &schemas, &store, &mut ids, &FixedClock).execute(
+        &endpoint,
+        &approval.version_id,
+        "task:test",
+    );
 
     assert!(matches!(result, Err(ExecutionError::NotActionArtifact)));
     assert!(calls.lock().unwrap().is_empty());
@@ -445,8 +451,11 @@ fn action_without_materialization_relations_cannot_execute() {
     store.append(&action, &schemas).unwrap();
     let (endpoint, calls) = endpoint(manifest);
 
-    let result = ExecutionService::new(&registry, &schemas, &store, &mut ids, &FixedClock)
-        .execute(&endpoint, &action.version_id);
+    let result = ExecutionService::new(&registry, &schemas, &store, &mut ids, &FixedClock).execute(
+        &endpoint,
+        &action.version_id,
+        "task:test",
+    );
 
     assert!(matches!(
         result,
@@ -487,8 +496,11 @@ fn changed_payload_in_action_cannot_execute() {
         .unwrap();
     let (endpoint, calls) = endpoint(manifest);
 
-    let result = ExecutionService::new(&registry, &schemas, &store, &mut ids, &FixedClock)
-        .execute(&endpoint, &action.version_id);
+    let result = ExecutionService::new(&registry, &schemas, &store, &mut ids, &FixedClock).execute(
+        &endpoint,
+        &action.version_id,
+        "task:test",
+    );
 
     assert!(matches!(result, Err(ExecutionError::ActionPayloadMismatch)));
     assert!(calls.lock().unwrap().is_empty());
@@ -522,8 +534,11 @@ fn non_act_capability_is_rejected() {
         .unwrap();
     let (endpoint, calls) = endpoint(manifest);
 
-    let result = ExecutionService::new(&registry, &schemas, &store, &mut ids, &FixedClock)
-        .execute(&endpoint, &action.version_id);
+    let result = ExecutionService::new(&registry, &schemas, &store, &mut ids, &FixedClock).execute(
+        &endpoint,
+        &action.version_id,
+        "task:test",
+    );
 
     assert!(matches!(
         result,
@@ -551,8 +566,11 @@ fn wrong_adapter_cannot_execute_action() {
     wrong_manifest.adapter_id = AdapterId("other.executor".into());
     let (endpoint, calls) = endpoint(wrong_manifest);
 
-    let result = ExecutionService::new(&registry, &schemas, &store, &mut ids, &FixedClock)
-        .execute(&endpoint, &action.version_id);
+    let result = ExecutionService::new(&registry, &schemas, &store, &mut ids, &FixedClock).execute(
+        &endpoint,
+        &action.version_id,
+        "task:test",
+    );
 
     assert!(matches!(
         result,
@@ -588,8 +606,11 @@ fn act_capability_must_emit_exactly_one_result_schema() {
     let action = materialize(&registry, &schemas, &store, &mut ids, &approval);
     let (endpoint, calls) = endpoint(manifest);
 
-    let result = ExecutionService::new(&registry, &schemas, &store, &mut ids, &FixedClock)
-        .execute(&endpoint, &action.version_id);
+    let result = ExecutionService::new(&registry, &schemas, &store, &mut ids, &FixedClock).execute(
+        &endpoint,
+        &action.version_id,
+        "task:test",
+    );
 
     assert!(matches!(
         result,
@@ -616,8 +637,11 @@ fn response_with_wrong_invocation_id_is_rejected() {
     let (mut endpoint, calls) = endpoint(manifest);
     endpoint.response_invocation_id = Some("wrong-invocation".into());
 
-    let result = ExecutionService::new(&registry, &schemas, &store, &mut ids, &FixedClock)
-        .execute(&endpoint, &action.version_id);
+    let result = ExecutionService::new(&registry, &schemas, &store, &mut ids, &FixedClock).execute(
+        &endpoint,
+        &action.version_id,
+        "task:test",
+    );
 
     assert!(matches!(
         result,
@@ -659,7 +683,7 @@ fn failed_execution_publication_leaves_the_same_dispatch_recoverable() {
 
     let mut service = ExecutionService::new(&registry, &schemas, &store, &mut ids, &FixedClock);
     let super::ExecutionPreparation::Dispatch(prepared) = service
-        .prepare(&endpoint, &action.version_id, None)
+        .prepare(&endpoint, &action.version_id, "task:test", None)
         .unwrap()
     else {
         panic!("expected a fresh dispatch");
@@ -680,7 +704,7 @@ fn failed_execution_publication_leaves_the_same_dispatch_recoverable() {
         .unwrap();
 
     let super::ExecutionPreparation::Dispatch(recovery) = service
-        .prepare(&endpoint, &action.version_id, None)
+        .prepare(&endpoint, &action.version_id, "task:test", None)
         .unwrap()
     else {
         panic!("expected recovery of the interrupted dispatch");
@@ -720,7 +744,7 @@ fn successful_execution_is_not_dispatched_again_after_restart() {
         );
         let action = materialize(&registry, &schemas, &store, &mut ids, &approval);
         let result = ExecutionService::new(&registry, &schemas, &store, &mut ids, &FixedClock)
-            .execute(&endpoint, &action.version_id)
+            .execute(&endpoint, &action.version_id, "task:test")
             .unwrap();
         (result, action.version_id, approval.version_id)
     };
@@ -731,7 +755,7 @@ fn successful_execution_is_not_dispatched_again_after_restart() {
         let action = materialize(&registry, &schemas, &store, &mut ids, &approval);
         assert_eq!(action.version_id, action_version);
         ExecutionService::new(&registry, &schemas, &store, &mut ids, &FixedClock)
-            .execute(&endpoint, &action_version)
+            .execute(&endpoint, &action_version, "task:test")
             .unwrap()
     };
 
@@ -789,7 +813,7 @@ fn dispatched_execution_recovers_with_same_invocation_id() {
     let (endpoint, calls) = endpoint(manifest);
 
     ExecutionService::new(&registry, &schemas, &store, &mut ids, &FixedClock)
-        .execute(&endpoint, &action.version_id)
+        .execute(&endpoint, &action.version_id, "task:test")
         .unwrap();
 
     assert_eq!(calls.lock().unwrap().len(), 1);
@@ -799,4 +823,150 @@ fn dispatched_execution_recovers_with_same_invocation_id() {
         .unwrap()
         .unwrap();
     assert_eq!(state.status, InvocationStatus::Succeeded);
+}
+
+#[test]
+fn an_unattributable_answer_stops_the_effect_and_demands_a_clarification() {
+    let schemas = schemas();
+    let database = TemporaryDatabase::new();
+    let store = SqliteArtifactStore::open(&database.path).unwrap();
+    let (registry, manifest) = registry(&schemas, &store);
+    let mut ids = TestIds(1);
+    let approval = approval_chain(
+        &schemas,
+        &store,
+        &mut ids,
+        &candidate(),
+        ApprovalDecision::Approved,
+    );
+    let action = materialize(&registry, &schemas, &store, &mut ids, &approval);
+    let (mut endpoint, calls) = endpoint(manifest);
+    // The adapter answers for another operation. The outcome cannot be
+    // attributed to this effect, so it must not be repeated.
+    endpoint.response_invocation_id = Some("wrong-invocation".into());
+
+    let mut service = ExecutionService::new(&registry, &schemas, &store, &mut ids, &FixedClock);
+    let result = service.execute(&endpoint, &action.version_id, "task:test");
+    assert!(matches!(
+        result,
+        Err(ExecutionError::InvocationResponseMismatch)
+    ));
+    assert_eq!(calls.lock().unwrap().len(), 1);
+
+    let operation_id = super::execution_operation_id(&calls.lock().unwrap()[0].invocation_id);
+    let effects = crate::runtime::effects::EffectService::new(&store, &schemas, &FixedClock);
+    let record = effects.lookup(&operation_id).unwrap().unwrap();
+    assert_eq!(record.state, crate::runtime::effects::EffectState::Unclear);
+    assert_eq!(record.task_key, "task:test");
+
+    // The second attempt must not reach the adapter. The effect waits for an
+    // explicit clarification.
+    let result = service.execute(&endpoint, &action.version_id, "task:test");
+    assert!(matches!(
+        result,
+        Err(ExecutionError::UnclearExternalEffect { .. })
+    ));
+    assert_eq!(calls.lock().unwrap().len(), 1);
+}
+
+#[test]
+fn a_clarified_effect_lets_the_same_task_continue_without_a_second_effect() {
+    let schemas = schemas();
+    let database = TemporaryDatabase::new();
+    let store = SqliteArtifactStore::open(&database.path).unwrap();
+    let (registry, manifest) = registry(&schemas, &store);
+    let mut ids = TestIds(1);
+    let approval = approval_chain(
+        &schemas,
+        &store,
+        &mut ids,
+        &candidate(),
+        ApprovalDecision::Approved,
+    );
+    let action = materialize(&registry, &schemas, &store, &mut ids, &approval);
+    let (mut endpoint, calls) = endpoint(manifest);
+    endpoint.response_invocation_id = Some("wrong-invocation".into());
+
+    let mut service = ExecutionService::new(&registry, &schemas, &store, &mut ids, &FixedClock);
+    assert!(matches!(
+        service.execute(&endpoint, &action.version_id, "task:test"),
+        Err(ExecutionError::InvocationResponseMismatch)
+    ));
+    let invocation_id = calls.lock().unwrap()[0].invocation_id.clone();
+    let operation_id = super::execution_operation_id(&invocation_id);
+
+    // The operator clarifies that the effect did not happen. The same task may
+    // try again with the same operation.
+    let effects = crate::runtime::effects::EffectService::new(&store, &schemas, &FixedClock);
+    let reconciled = effects
+        .reconcile_and_release(
+            &operation_id,
+            &crate::runtime::effects::EffectResolution::DidNotOccur {
+                reason: "operator checked the device; it did not move".into(),
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        reconciled.state,
+        crate::runtime::effects::EffectState::Failed
+    );
+
+    // The adapter now answers correctly. The task continues with the same
+    // operation instead of starting a new one.
+    endpoint.response_invocation_id = None;
+    let artifact = service
+        .execute(&endpoint, &action.version_id, "task:test")
+        .unwrap();
+    assert_eq!(calls.lock().unwrap().len(), 2);
+    assert_eq!(calls.lock().unwrap()[1].invocation_id, invocation_id);
+
+    let record = effects.lookup(&operation_id).unwrap().unwrap();
+    assert_eq!(
+        record.state,
+        crate::runtime::effects::EffectState::Confirmed
+    );
+    assert_eq!(record.attempt, 2);
+    assert_eq!(
+        record.effect_reference.as_deref(),
+        Some("device-operation-1")
+    );
+    assert_eq!(artifact.source.reference, "device-operation-1");
+}
+
+#[test]
+fn an_effect_stays_bound_to_its_task_even_when_another_task_reuses_the_action() {
+    let schemas = schemas();
+    let database = TemporaryDatabase::new();
+    let store = SqliteArtifactStore::open(&database.path).unwrap();
+    let (registry, manifest) = registry(&schemas, &store);
+    let mut ids = TestIds(1);
+    let approval = approval_chain(
+        &schemas,
+        &store,
+        &mut ids,
+        &candidate(),
+        ApprovalDecision::Approved,
+    );
+    let action = materialize(&registry, &schemas, &store, &mut ids, &approval);
+    let (endpoint, calls) = endpoint(manifest);
+
+    let mut service = ExecutionService::new(&registry, &schemas, &store, &mut ids, &FixedClock);
+    service
+        .execute(&endpoint, &action.version_id, "task:first")
+        .unwrap();
+    assert_eq!(calls.lock().unwrap().len(), 1);
+
+    // The same action belongs to one task. Another task may not claim its
+    // effect, because that would repeat the external effect.
+    let result = service.execute(&endpoint, &action.version_id, "task:second");
+    assert!(matches!(
+        result,
+        Err(ExecutionError::EffectBindingMismatch { .. })
+    ));
+    assert_eq!(calls.lock().unwrap().len(), 1);
+
+    let operation_id = super::execution_operation_id(&calls.lock().unwrap()[0].invocation_id);
+    let effects = crate::runtime::effects::EffectService::new(&store, &schemas, &FixedClock);
+    let record = effects.lookup(&operation_id).unwrap().unwrap();
+    assert_eq!(record.task_key, "task:first");
 }

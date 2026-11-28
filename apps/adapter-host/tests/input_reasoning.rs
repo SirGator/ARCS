@@ -159,7 +159,8 @@ fn external_input_and_two_independent_reasoners_preserve_trust_and_replay() {
     assert!(
         host.execute_approved(
             &AdapterId("example.solver".into()),
-            &solver.candidates[0].version_id
+            &solver.candidates[0].version_id,
+            "task:test",
         )
         .is_err()
     );

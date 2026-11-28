@@ -66,6 +66,7 @@ impl Host {
         sequence: u64,
         adapter: &AdapterId,
         action: &VersionId,
+        task_key: &str,
         reservation: Option<&Reservation>,
     ) -> Result<Option<Artifact>, HostError> {
         if !self.execution_slot_available(adapter)? {
@@ -84,7 +85,7 @@ impl Host {
         };
         let mut service = self.execution_service();
         let prepared = match service
-            .prepare(endpoint.as_ref(), action, reservation)
+            .prepare(endpoint.as_ref(), action, task_key, reservation)
             .map_err(failure)?
         {
             ExecutionPreparation::Complete(result) => return Ok(Some(*result)),

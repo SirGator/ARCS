@@ -422,7 +422,7 @@ fn complete_cycle(
         .materialize(&approval.version_id, &act_capability())
         .unwrap();
     let result = ExecutionService::new(registry, schemas, store, ids, &FixedClock)
-        .execute(act, &action.version_id)
+        .execute(act, &action.version_id, "task:test")
         .unwrap();
     CompletedCycle {
         input,
@@ -637,7 +637,7 @@ fn completed_execution_is_not_repeated_after_restart() {
         assert_eq!(approval, first.approval);
         assert_eq!(action, first.action);
         ExecutionService::new(&registry, &schemas, &store, &mut ids, &FixedClock)
-            .execute(&act, &action.version_id)
+            .execute(&act, &action.version_id, "task:test")
             .unwrap()
     };
 

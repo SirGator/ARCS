@@ -734,10 +734,15 @@ impl Host {
 
     /// Für Anwendungen, die bereits eine geprüfte und freigegebene Action
     /// persistiert haben. Dieser Host erteilt selbst keine Freigaben.
+    /// Führt eine bereits geprüfte und freigegebene Action aus.
+    ///
+    /// `task_key` benennt die Aufgabe, die die Wirkung verantwortet. Die
+    /// externe Wirkung wird dauerhaft an diese Aufgabe gebunden.
     pub fn execute_approved(
         &mut self,
         adapter_id: &AdapterId,
         action: &VersionId,
+        task_key: &str,
     ) -> Result<Artifact, HostError> {
         self.ensure_adapter_available(adapter_id)?;
         let endpoint = self
@@ -748,7 +753,7 @@ impl Host {
             .endpoint
             .clone();
         self.execution_service()
-            .execute(endpoint.as_ref(), action)
+            .execute(endpoint.as_ref(), action, task_key)
             .map_err(|source| HostError::Execution {
                 adapter: adapter_id.clone(),
                 source,

@@ -148,7 +148,7 @@ fn an_approved_edit_recovers_the_published_commit_and_a_real_check_passes_on_its
 
     let proposed = edit_candidate(&host, "addition-fix", &base, "calculator.py", FIXED);
     assert!(
-        host.execute_approved(&adapter, &proposed.version_id)
+        host.execute_approved(&adapter, &proposed.version_id, "task:test")
             .is_err()
     );
     assert_eq!(revision(&project), base);
@@ -164,7 +164,10 @@ fn an_approved_edit_recovers_the_published_commit_and_a_real_check_passes_on_its
     core_db.execute_batch("CREATE TRIGGER lose_failed_attempt BEFORE INSERT ON artifact_versions
         WHEN NEW.schema_id IN ('arcs.invocation.v1','arcs.invocation.v2') AND json_extract(NEW.artifact_json,'$.payload.status')='failed'
         BEGIN SELECT RAISE(ABORT,'lost failure response'); END;").unwrap();
-    assert!(host.execute_approved(&adapter, &action).is_err());
+    assert!(
+        host.execute_approved(&adapter, &action, "task:test")
+            .is_err()
+    );
     let published = revision(&project);
     assert_ne!(published, base);
     let planned: String = adapter_db
@@ -184,7 +187,9 @@ fn an_approved_edit_recovers_the_published_commit_and_a_real_check_passes_on_its
         .unwrap();
 
     let mut host = f.open();
-    let result = host.execute_approved(&adapter, &action).unwrap();
+    let result = host
+        .execute_approved(&adapter, &action, "task:test")
+        .unwrap();
     assert_eq!(result.schema_id.0, EDIT_RECEIPT);
     assert_eq!(
         result.payload["result"],
@@ -217,7 +222,9 @@ fn an_approved_edit_recovers_the_published_commit_and_a_real_check_passes_on_its
     ] {
         let candidate = revision_check(&host, label, "unit", commit);
         let action = approve_for(&host, &candidate, "check.revision");
-        let result = host.execute_approved(&adapter, &action).unwrap();
+        let result = host
+            .execute_approved(&adapter, &action, "task:test")
+            .unwrap();
         assert_eq!(result.schema_id.0, REVISION_RECEIPT);
         assert_eq!(result.payload["action_version"], json!(action));
         assert_eq!(result.payload["result"]["revision"], commit.as_str());
@@ -240,20 +247,26 @@ fn a_stale_edit_records_conflict_and_an_identical_edit_leaves_the_commit_unchang
     let unchanged = edit_candidate(&host, "identical", &base, "calculator.py", ORIGINAL);
     let action = approve_for(&host, &unchanged, "edit.apply");
     assert_eq!(
-        host.execute_approved(&adapter, &action).unwrap().payload["result"]["status"],
+        host.execute_approved(&adapter, &action, "task:test")
+            .unwrap()
+            .payload["result"]["status"],
         "unchanged"
     );
     assert_eq!(revision(&project), base);
     let edit = edit_candidate(&host, "valid", &base, "calculator.py", FIXED);
     let action = approve_for(&host, &edit, "edit.apply");
     assert_eq!(
-        host.execute_approved(&adapter, &action).unwrap().payload["result"]["status"],
+        host.execute_approved(&adapter, &action, "task:test")
+            .unwrap()
+            .payload["result"]["status"],
         "applied"
     );
     let current = revision(&project);
     let stale = edit_candidate(&host, "stale", &base, "calculator.py", ORIGINAL);
     let action = approve_for(&host, &stale, "edit.apply");
-    let result = host.execute_approved(&adapter, &action).unwrap();
+    let result = host
+        .execute_approved(&adapter, &action, "task:test")
+        .unwrap();
     assert_eq!(result.payload["result"]["status"], "conflict");
     assert_eq!(result.payload["result"]["commit"], current);
     assert_eq!(revision(&project), current);
@@ -271,7 +284,7 @@ fn edits_refuse_unconfigured_paths_and_symlinks_even_with_an_approved_candidate(
         let candidate = edit_candidate(&host, "rejected-file", &base, path, FIXED);
         let action = approve_for(&host, &candidate, "edit.apply");
         assert!(
-            host.execute_approved(&AdapterId(ADAPTER.into()), &action)
+            host.execute_approved(&AdapterId(ADAPTER.into()), &action, "task:test")
                 .is_err()
         );
         assert_eq!(revision(&project), base);
@@ -294,7 +307,10 @@ fn a_prepared_edit_recreates_the_exact_commit_if_its_unpublished_object_is_prune
         BEGIN SELECT RAISE(ABORT,'lost failure response'); END;").unwrap();
     let ref_lock = project.join(".git/refs/arcs/test.lock");
     fs::write(&ref_lock, "").unwrap();
-    assert!(host.execute_approved(&adapter, &action).is_err());
+    assert!(
+        host.execute_approved(&adapter, &action, "task:test")
+            .is_err()
+    );
     assert_eq!(revision(&project), base);
     let journal = Connection::open(f.0.join("checks.sqlite")).unwrap();
     let prepared: String = journal
@@ -319,7 +335,9 @@ fn a_prepared_edit_recreates_the_exact_commit_if_its_unpublished_object_is_prune
     .unwrap();
 
     let mut host = f.open();
-    let result = host.execute_approved(&adapter, &action).unwrap();
+    let result = host
+        .execute_approved(&adapter, &action, "task:test")
+        .unwrap();
     assert_eq!(result.payload["result"]["commit"], prepared);
     assert_eq!(result.payload["result"]["status"], "applied");
     assert_eq!(revision(&project), prepared);
@@ -373,7 +391,7 @@ fn a_competing_git_transaction_keeps_its_commit_when_a_prepared_edit_reaches_the
     let attempt = std::thread::spawn(move || {
         let mut host = Host::open(config).unwrap();
         let result = host
-            .execute_approved(&AdapterId(ADAPTER.into()), &action)
+            .execute_approved(&AdapterId(ADAPTER.into()), &action, "task:test")
             .unwrap();
         host.shutdown().unwrap();
         result
@@ -450,7 +468,9 @@ fn revision_checks_reject_unapproved_tree_scope_and_unlisted_checks_before_start
         let mut host = f.open();
         let candidate = revision_check(&host, label, check, commit);
         let action = approve_for(&host, &candidate, "check.revision");
-        let error = host.execute_approved(&adapter, &action).unwrap_err();
+        let error = host
+            .execute_approved(&adapter, &action, "task:test")
+            .unwrap_err();
         assert!(
             matches!(
                 error,
@@ -484,7 +504,8 @@ fn a_revision_receipt_replays_after_restart_even_when_the_ref_moves() {
         FIXED,
     );
     let action = approve_for(&host, &edit, "edit.apply");
-    host.execute_approved(&adapter, &action).unwrap();
+    host.execute_approved(&adapter, &action, "task:test")
+        .unwrap();
     let commit = revision(&project);
     let candidate = revision_check(&host, "repeat-receipt", "unit", &commit);
     let action = approve_for(&host, &candidate, "check.revision");
@@ -493,7 +514,10 @@ fn a_revision_receipt_replays_after_restart_even_when_the_ref_moves() {
         "CREATE TRIGGER lose_revision_receipt BEFORE INSERT ON artifact_versions
          WHEN NEW.schema_id='{REVISION_RECEIPT}' BEGIN SELECT RAISE(ABORT,'simulated Core receipt rollback'); END;"
     )).unwrap();
-    assert!(host.execute_approved(&adapter, &action).is_err());
+    assert!(
+        host.execute_approved(&adapter, &action, "task:test")
+            .is_err()
+    );
     let count_file = f.0.join("revision-attempts");
     assert_eq!(fs::read_to_string(&count_file).unwrap(), "unit\n");
     host.shutdown().unwrap();
@@ -503,7 +527,9 @@ fn a_revision_receipt_replays_after_restart_even_when_the_ref_moves() {
     git(&project, &["update-ref", EDIT_REF, &base, &commit]);
 
     let mut host = f.open();
-    let result = host.execute_approved(&adapter, &action).unwrap();
+    let result = host
+        .execute_approved(&adapter, &action, "task:test")
+        .unwrap();
     assert_eq!(result.schema_id.0, REVISION_RECEIPT);
     assert_eq!(result.payload["result"]["status"], "passed");
     assert_eq!(result.payload["result"]["revision"], commit);
@@ -583,7 +609,7 @@ fn diagnostic_checks_bound_both_streams_and_replay_the_saved_failure_after_resta
     let proposed = diagnostic_candidate(&host, "loud", &base);
     let attempts = f.0.join("diagnostic-attempts");
     assert!(
-        host.execute_approved(&adapter, &proposed.version_id)
+        host.execute_approved(&adapter, &proposed.version_id, "task:test")
             .is_err()
     );
     assert!(!attempts.exists());
@@ -593,7 +619,10 @@ fn diagnostic_checks_bound_both_streams_and_replay_the_saved_failure_after_resta
         "CREATE TRIGGER lose_diagnostic_receipt BEFORE INSERT ON artifact_versions
          WHEN NEW.schema_id='{DIAGNOSTIC_RECEIPT}' BEGIN SELECT RAISE(ABORT,'simulated Core receipt rollback'); END;"
     )).unwrap();
-    assert!(host.execute_approved(&adapter, &action).is_err());
+    assert!(
+        host.execute_approved(&adapter, &action, "task:test")
+            .is_err()
+    );
     assert_eq!(fs::read_to_string(&attempts).unwrap(), "run\n");
     let journal = Connection::open(f.0.join("checks.sqlite")).unwrap();
     let saved: String = journal
@@ -606,7 +635,9 @@ fn diagnostic_checks_bound_both_streams_and_replay_the_saved_failure_after_resta
         .unwrap();
 
     let mut host = f.open();
-    let receipt = host.execute_approved(&adapter, &action).unwrap();
+    let receipt = host
+        .execute_approved(&adapter, &action, "task:test")
+        .unwrap();
     assert_eq!(receipt.schema_id.0, DIAGNOSTIC_RECEIPT);
     assert_eq!(receipt.payload["action_version"], json!(action));
     assert_eq!(receipt.payload["result"]["revision"], base);
@@ -637,7 +668,10 @@ fn diagnostic_checks_preserve_deadlines_and_discard_successful_output() {
     ] {
         let proposed = diagnostic_candidate(&host, name, &base);
         let action = approve_for(&host, &proposed, DIAGNOSTIC_CAPABILITY);
-        let result = host.execute_approved(&adapter, &action).unwrap().payload;
+        let result = host
+            .execute_approved(&adapter, &action, "task:test")
+            .unwrap()
+            .payload;
         assert_eq!(result["result"]["status"], status);
         assert!(result["result"]["duration_ms"].as_u64().unwrap() < 3000);
         match name {
@@ -842,12 +876,14 @@ fn a_missing_launcher_receipt_cannot_pass_or_fall_back_to_an_unisolated_check() 
     let adapter = AdapterId(ADAPTER.into());
     let proposed = isolated_candidate(&host, "must-isolate", &base);
     let action = approve_for(&host, &proposed, ISOLATED_CAPABILITY);
-    let receipt = host.execute_approved(&adapter, &action).unwrap();
+    let receipt = host
+        .execute_approved(&adapter, &action, "task:test")
+        .unwrap();
     assert_eq!(receipt.payload["result"]["status"], "runner_error");
     assert!(!marker.exists());
     let bypass = approve(&host, &candidate(&host, "legacy-bypass", "must-isolate"));
     let error = host
-        .execute_approved(&adapter, &bypass)
+        .execute_approved(&adapter, &bypass, "task:test")
         .unwrap_err()
         .to_string();
     assert!(
@@ -926,7 +962,10 @@ if sys.argv[4] == 'slow':
     ] {
         let proposed = isolated_candidate(&host, name, &base);
         let action = approve_for(&host, &proposed, ISOLATED_CAPABILITY);
-        let payload = host.execute_approved(&adapter, &action).unwrap().payload;
+        let payload = host
+            .execute_approved(&adapter, &action, "task:test")
+            .unwrap()
+            .payload;
         assert_eq!(payload["result"]["status"], status, "{payload:?}");
         assert_eq!(payload["result"]["revision"], base);
         if name == "failed" {
@@ -987,7 +1026,7 @@ fn missing_cgroup_controls_never_launch_the_check() {
     let proposed = isolated_candidate(&host, "limited", &base);
     let action = approve_for(&host, &proposed, ISOLATED_CAPABILITY);
     let receipt = host
-        .execute_approved(&AdapterId(ADAPTER.into()), &action)
+        .execute_approved(&AdapterId(ADAPTER.into()), &action, "task:test")
         .unwrap();
     assert_eq!(receipt.schema_id.0, RESOURCE_RECEIPT);
     assert_eq!(receipt.payload["result"]["status"], "runner_error");
@@ -1171,7 +1210,7 @@ fn a_killed_adapter_reaps_only_its_cgroup_and_replays_interrupted() {
     assert!(!owned.exists());
     assert!(foreign.is_dir());
     let receipt = host
-        .execute_approved(&AdapterId(ADAPTER.into()), &action)
+        .execute_approved(&AdapterId(ADAPTER.into()), &action, "task:test")
         .unwrap();
     assert_eq!(receipt.schema_id.0, RESOURCE_RECEIPT);
     assert_eq!(receipt.payload["result"]["status"], "interrupted");
@@ -1264,7 +1303,9 @@ finally:
     ] {
         let proposal = isolated_candidate(&host, name, &base);
         let action = approve_for(&host, &proposal, ISOLATED_CAPABILITY);
-        let receipt = host.execute_approved(&adapter, &action).unwrap();
+        let receipt = host
+            .execute_approved(&adapter, &action, "task:test")
+            .unwrap();
         assert_eq!(receipt.schema_id.0, RESOURCE_RECEIPT);
         assert_eq!(receipt.payload["result"]["status"], status, "{receipt:?}");
         assert_eq!(receipt.payload["result"]["revision"], base);

@@ -5,7 +5,9 @@ use std::path::PathBuf;
 use arcs_host::Host;
 use arcs_host::memory::MemoryCommand;
 use arcs_host::monitor::MonitorControl;
-use arcs_host::operator_command::{CommandReceipt, GoalCommand, OperatorCommand, PlanCommand};
+use arcs_host::operator_command::{
+    CommandReceipt, EffectCommand, GoalCommand, OperatorCommand, PlanCommand,
+};
 use arcs_host::task_runtime::output::OutputCommand;
 use arcs_host::task_runtime::scheduler::SeriesControlCommand;
 use arcs_host::task_runtime::suspension::TaskControlCommand;
@@ -77,6 +79,7 @@ fn run() -> Result<(), String> {
     let mut series_command = None;
     let mut output_command = None;
     let mut task_output_command = None;
+    let mut effect_command = None;
     let mut capability_query = None;
     let mut attempt_query = None;
     let mut memory_command = None;
@@ -120,6 +123,8 @@ fn run() -> Result<(), String> {
             output_command = Some(PathBuf::from(value));
         } else if argument == "--task-output-command" && task_output_command.is_none() {
             task_output_command = Some(PathBuf::from(value));
+        } else if argument == "--effect-command" && effect_command.is_none() {
+            effect_command = Some(PathBuf::from(value));
         } else if argument == "--find-capabilities" && capability_query.is_none() {
             capability_query = Some(PathBuf::from(value));
         } else if argument == "--reasoning-attempts" && attempt_query.is_none() {
@@ -141,6 +146,7 @@ fn run() -> Result<(), String> {
         &series_command,
         &output_command,
         &task_output_command,
+        &effect_command,
     ]
     .into_iter()
     .filter(|command| command.is_some())
@@ -265,6 +271,9 @@ fn run() -> Result<(), String> {
     let task_output_command: Option<TaskOutputCommand> = task_output_command
         .map(|path| read_control_command(path, "task output"))
         .transpose()?;
+    let effect_command: Option<EffectCommand> = effect_command
+        .map(|path| read_control_command(path, "effect"))
+        .transpose()?;
     if runtime.is_none() && !monitor && (ticks.is_some() || stop_file.is_some()) {
         return Err(USAGE.into());
     }
@@ -328,7 +337,8 @@ fn run() -> Result<(), String> {
             .or_else(|| plan_command.map(OperatorCommand::Plan))
             .or_else(|| goal_command.map(OperatorCommand::Goal))
             .or_else(|| output_command.map(OperatorCommand::Output))
-            .or_else(|| task_output_command.map(OperatorCommand::TaskOutput));
+            .or_else(|| task_output_command.map(OperatorCommand::TaskOutput))
+            .or_else(|| effect_command.map(OperatorCommand::Effect));
         let (report, receipt) = if let Some(command) = command {
             let receipt = command
                 .apply(&mut runtime, &mut host)
@@ -378,6 +388,10 @@ fn run() -> Result<(), String> {
                 Some(CommandReceipt::ResourceEvidenceReview(review)) => {
                     value["resource_evidence_review"] = serde_json::to_value(review)
                         .expect("resource evidence review serialization")
+                }
+                Some(CommandReceipt::Effect(effect)) => {
+                    value["effect"] =
+                        serde_json::to_value(effect).expect("effect receipt serialization")
                 }
                 _ => {}
             }

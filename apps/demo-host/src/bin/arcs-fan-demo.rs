@@ -403,7 +403,7 @@ fn run() -> Result<(), String> {
                 )
                 .map_err(error)?;
             let result = ExecutionService::new(&registry, &schemas, &store, host.ids, &SystemClock)
-                .execute(&adapter, &action.version_id)
+                .execute(&adapter, &action.version_id, "demo:fan")
                 .map_err(error)?;
             references["action"] = json!(action.version_id);
             references["execution"] = json!(result.version_id);

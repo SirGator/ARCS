@@ -68,6 +68,8 @@ pub enum HostError {
         source: arcs::transform::TransformError,
     },
     WorkContext(arcs::runtime::work_context::WorkContextError),
+    Ownership(arcs::runtime::ownership::OwnershipError),
+    Effect(arcs::runtime::effects::EffectError),
 }
 
 impl fmt::Display for HostError {
@@ -124,6 +126,8 @@ impl fmt::Display for HostError {
                 write!(f, "adapter {} transform: {source:?}", adapter.0)
             }
             Self::WorkContext(source) => write!(f, "work context: {source:?}"),
+            Self::Ownership(source) => write!(f, "task ownership: {source:?}"),
+            Self::Effect(source) => write!(f, "external effect: {source:?}"),
         }
     }
 }

@@ -325,6 +325,7 @@ fn disabled_action_capability_is_checked_even_for_completed_actions() {
         .execute(
             &adapter,
             &VersionId(completed["artifacts"]["action"].as_str().unwrap().into()),
+            "task:test",
         );
     assert!(matches!(
         result,

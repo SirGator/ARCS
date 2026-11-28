@@ -533,6 +533,22 @@ Resultate sind über die Ausführungsidentität zurückzuweisen (bereits für
 Planrevisionen vorhanden). Unklare Wirkungen sind explizit zu klären
 (Reconciliation), nicht zu wiederholen.
 
+> **Umsetzungsstand 28. November 2026:** Task-Ownership und das Buch der
+> externen Wirkungen sind umgesetzt und nachgewiesen. Eine Aufgabe wird einer
+> logischen Runtime über eine Lease mit Ablauf und Fencing-Token zugeordnet;
+> ein fremder Eigentümer führt sie in einen Wartezustand statt in eine
+> konkurrierende Bearbeitung. Jede externe Wirkung wird als Artefakt mit
+> Operation, Aufgabe, Invocation, Zustand und Versuchszahl gebucht. Der Core
+> unterscheidet „nicht eingetreten“, „belegt eingetreten“ und „nicht
+> zuordenbar“; nur der letzte Fall verlangt die ausdrückliche Klärung des
+> Betreibers, die über ein Operator-Kommando erfolgt und die Aufgabe mit
+> demselben Auftrag fortsetzt. `OPS-03` ist damit in der Grundlage umgesetzt,
+> `OPS-05` für Aufgaben, Wirkungen und Freigaben, `TEST-10` für die Zuordnung,
+> die ausbleibende doppelte Wirkung und die ausdrückliche Klärung nachgewiesen.
+> Offen bleiben `OPS-01`, `OPS-02`, `OPS-04`, `OPS-06` und die Knoten-, Kosten-
+> und Übernahmeteile aus `OPS-05`. Nachweis:
+> [Zwischenbericht 28.11.2026](ZWISCHENBERICHT_2026-11-28_AUFGABEN_LEASES.md).
+
 **OPS-04 – Externe Harnesses.**
 *Bezug zum Ist-Stand:* Adapter- und Capability-Verträge
 (`crates/arcs-adapter-protocol/src/`) bilden die natürliche Schnittstelle;

@@ -1,6 +1,7 @@
 use crate::adapters::{AdapterCallError, AdapterId, AdapterRegistryError, CapabilityRef};
 use crate::core::{ArtifactFactoryError, SchemaId, SchemaViolation, VersionId};
 use crate::runtime::InvocationError;
+use crate::runtime::effects::EffectError;
 use crate::runtime::reservations::ReservationError;
 use crate::store::StoreError;
 
@@ -58,6 +59,21 @@ pub enum ExecutionError {
         maximum: usize,
     },
     InvalidPayload(Vec<SchemaViolation>),
+    /// Das Ergebnis einer externen Wirkung ist ungeklärt. Die Wirkung wird
+    /// nicht wiederholt, bis sie ausdrücklich geklärt wurde.
+    UnclearExternalEffect {
+        operation_id: String,
+        detail: String,
+    },
+    /// Das Buch der externen Wirkungen hat die Änderung nicht angenommen.
+    Effect(EffectError),
+    /// Die externe Wirkung gehört einer anderen Aufgabe. Ihre Ergebnisse
+    /// dürfen von dieser Aufgabe nicht übernommen werden.
+    EffectBindingMismatch {
+        operation_id: String,
+        expected: String,
+        actual: String,
+    },
 }
 
 impl From<AdapterRegistryError> for ExecutionError {
@@ -93,5 +109,11 @@ impl From<AdapterCallError> for ExecutionError {
 impl From<InvocationError> for ExecutionError {
     fn from(value: InvocationError) -> Self {
         Self::Invocation(value)
+    }
+}
+
+impl From<EffectError> for ExecutionError {
+    fn from(value: EffectError) -> Self {
+        Self::Effect(value)
     }
 }

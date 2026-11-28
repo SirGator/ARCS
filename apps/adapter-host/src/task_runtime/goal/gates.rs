@@ -456,6 +456,22 @@ impl TaskRuntime {
         Ok(())
     }
 
+    /// Parkt eine Aufgabe, die gerade nicht handeln darf.
+    ///
+    /// Ein geparkter Auftrag bleibt im Journal sichtbar, wird aber nicht
+    /// erneut eingeplant. Seine Begründung nennt den Grund, damit der
+    /// Betreiber die Aufgabe wieder freigeben kann.
+    fn park_goal(
+        &self,
+        task: &mut GoalTask,
+        reason: String,
+    ) -> Result<Option<VersionId>, HostError> {
+        task.state = GoalState::Blocked;
+        task.detail = reason;
+        self.save_goal(task)?;
+        Ok(None)
+    }
+
     pub(super) fn execute_goal(
         &mut self,
         host: &mut Host,
@@ -468,9 +484,22 @@ impl TaskRuntime {
             .clone()
             .ok_or_else(|| invalid("missing action capability"))?;
         let adapter = &capability.adapter_id;
+        // The task belongs exclusively to this runtime while it acts. A task
+        // held by another runtime waits instead of acting twice.
+        if let Err(error) = self.hold_task_lease(host, task.sequence) {
+            return self.park_goal(task, format!("task ownership is held elsewhere: {error:?}"));
+        }
         if let Some(action) = &task.action
             && host.owns_execution(&self.journal.path, task.sequence, action)
         {
+            // A late result still belongs to this task. Only the current owner
+            // may accept it.
+            if let Err(error) = self.check_task_lease(host, task.sequence) {
+                return self.park_goal(
+                    task,
+                    format!("task ownership was lost before the result was accepted: {error:?}"),
+                );
+            }
             return host
                 .collect_execution(adapter)
                 .map(|result| result.map(|artifact| artifact.version_id));
@@ -515,14 +544,31 @@ impl TaskRuntime {
             task.action = Some(action.version_id.clone());
             self.save_goal(task)?;
         }
-        host.start_execution(
+        let task_key = crate::task_runtime::ownership::task_key(task.sequence);
+        match host.start_execution(
             &self.journal.path,
             task.sequence,
             adapter,
             &action.version_id,
+            &task_key,
             reservation.as_ref(),
-        )
-        .map(|result| result.map(|artifact| artifact.version_id))
+        ) {
+            Ok(result) => Ok(result.map(|artifact| artifact.version_id)),
+            // An external effect without a confirmed outcome is not repeated.
+            // The task waits until the effect has been clarified explicitly.
+            Err(HostError::Execution {
+                source:
+                    arcs::execution::ExecutionError::UnclearExternalEffect {
+                        operation_id,
+                        detail,
+                    },
+                ..
+            }) => self.park_goal(
+                task,
+                format!("external outcome unresolved ({operation_id}): {detail}"),
+            ),
+            Err(error) => Err(error),
+        }
     }
 
     pub(super) fn record_goal_outcome(

@@ -350,7 +350,10 @@ fn requests_transforms_actions_and_outputs_target_the_selected_instance_and_repl
         )
         .materialize(&action_approval.version_id, &cap)
         .unwrap();
-        assert!(host.execute_approved(&other, &action.version_id).is_err());
+        assert!(
+            host.execute_approved(&other, &action.version_id, "task:test")
+                .is_err()
+        );
         let other_side = if side == "left" { "right" } else { "left" };
         let other_count: i64 = rusqlite::Connection::open(
             fixture
@@ -363,7 +366,9 @@ fn requests_transforms_actions_and_outputs_target_the_selected_instance_and_repl
         })
         .unwrap();
         assert_eq!(other_count, if side == "left" { 0 } else { 1 });
-        let effect = host.execute_approved(&fan, &action.version_id).unwrap();
+        let effect = host
+            .execute_approved(&fan, &action.version_id, "task:test")
+            .unwrap();
         assert_eq!(effect.payload["result"]["actuation_count"], 1);
         assert_eq!(effect.created_by.id, fan.0);
         replays.push((fan, action, effect, output, request, approval, receipt));
@@ -394,7 +399,8 @@ fn requests_transforms_actions_and_outputs_target_the_selected_instance_and_repl
     let mut host = fixture.open();
     for (fan, action, effect, output, request, approval, receipt) in replays {
         assert_eq!(
-            host.execute_approved(&fan, &action.version_id).unwrap(),
+            host.execute_approved(&fan, &action.version_id, "task:test")
+                .unwrap(),
             effect
         );
         assert_eq!(

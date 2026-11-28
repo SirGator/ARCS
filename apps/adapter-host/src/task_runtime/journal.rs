@@ -398,6 +398,29 @@ impl Journal {
         read_goal(&self.connection, sequence)
     }
 
+    /// Gibt eine geparkte Aufgabe für eine neue Runde frei.
+    ///
+    /// Nur eine geparkte Aufgabe darf freigegeben werden. Der Checkpoint wird
+    /// mitgeliefert, damit die Aufgabe mit frischer Evidenz neu plant und
+    /// keine Wirkungen der vorigen Runde wiederholt.
+    pub(in crate::task_runtime) fn resume_blocked_goal(
+        &mut self,
+        task: &GoalTask,
+    ) -> Result<(), HostError> {
+        let json = serde_json::to_string(task).map_err(|e| invalid(e.to_string()))?;
+        let changed = self
+            .connection
+            .execute(
+                "UPDATE runtime_jobs SET state='running',goal_json=?2,error=NULL WHERE sequence=?1 AND state='blocked'",
+                params![task.sequence as i64, json],
+            )
+            .map_err(db)?;
+        if changed != 1 {
+            return Err(invalid("task is not parked and cannot be resumed"));
+        }
+        Ok(())
+    }
+
     pub(in crate::task_runtime) fn save_goal(&self, task: &GoalTask) -> Result<(), HostError> {
         let json = serde_json::to_string(task).map_err(|e| invalid(e.to_string()))?;
         self.connection

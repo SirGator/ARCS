@@ -1,0 +1,23 @@
+{
+  "$id": "arcs.task_lease.v1",
+  "type": "object",
+  "required": [
+    "lease_id",
+    "task_key",
+    "owner_id",
+    "fencing_token",
+    "acquired_at",
+    "expires_at",
+    "state"
+  ],
+  "properties": {
+    "lease_id": {"type": "string", "minLength": 1},
+    "task_key": {"type": "string", "minLength": 1},
+    "owner_id": {"type": "string", "minLength": 1},
+    "fencing_token": {"type": "integer", "minimum": 1},
+    "acquired_at": {"type": "string", "minLength": 1},
+    "expires_at": {"type": "string", "minLength": 1},
+    "state": {"type": "string", "enum": ["active", "released"]}
+  },
+  "additionalProperties": false
+}

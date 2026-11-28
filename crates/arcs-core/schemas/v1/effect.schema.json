@@ -1,0 +1,26 @@
+{
+  "$id": "arcs.effect.v1",
+  "type": "object",
+  "required": [
+    "operation_id",
+    "task_key",
+    "kind",
+    "invocation_id",
+    "state",
+    "attempt"
+  ],
+  "properties": {
+    "operation_id": {"type": "string", "minLength": 1},
+    "task_key": {"type": "string", "minLength": 1},
+    "kind": {"type": "string", "minLength": 1},
+    "invocation_id": {"type": "string", "minLength": 1},
+    "state": {
+      "type": "string",
+      "enum": ["planned", "dispatched", "confirmed", "unclear", "failed"]
+    },
+    "effect_reference": {"type": "string", "minLength": 1},
+    "attempt": {"type": "integer", "minimum": 0},
+    "detail": {"type": "string", "minLength": 1}
+  },
+  "additionalProperties": false
+}

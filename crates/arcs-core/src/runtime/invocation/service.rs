@@ -183,6 +183,26 @@ impl<'a> InvocationService<'a> {
         }
     }
 
+    /// Gibt eine fehlgeschlagene Invocation für einen erneuten Versuch mit
+    /// derselben Identität wieder frei.
+    ///
+    /// Die Freigabe ist eine ausdrückliche Entscheidung und setzt voraus,
+    /// dass die zugehörige externe Wirkung nachweislich nicht eingetreten ist.
+    /// Ohne diese Entscheidung bleibt eine fehlgeschlagene Invocation
+    /// abgeschlossen: Der Scheduler entscheidet über erneute Versuche.
+    pub fn release_failed(
+        &self,
+        state: &InvocationState,
+    ) -> Result<InvocationState, InvocationError> {
+        if state.status != InvocationStatus::Failed {
+            return Err(InvocationError::NotRunnable(state.status));
+        }
+        let next = self.next_state(state, InvocationStatus::Prepared, None, None, true);
+        let artifact = state_artifact(&next, self.schemas)?;
+        self.store.append_current(&artifact, self.schemas)?;
+        Ok(next)
+    }
+
     /// Hält einen Fehler nach einem externen Versuch inklusive Retryability fest.
     pub fn fail(
         &self,

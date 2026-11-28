@@ -3,6 +3,7 @@ use arcs::approval::ApprovalDecision;
 use arcs::core::{Actor, ActorType, VersionId};
 use serde::{Deserialize, Serialize};
 
+use crate::task_runtime::effects::{EffectOutcome, EffectReceipt};
 use crate::task_runtime::formal::{FormalEvidenceRequirement, FormalObligationRequest};
 use crate::task_runtime::output::{OutputCommand, OutputDelivery};
 use crate::task_runtime::queue::{TaskQueuePage, TaskQueueQuery};
@@ -66,6 +67,28 @@ pub enum FormalCommand {
     },
 }
 
+/// Befehle des Buchs der externen Wirkungen.
+///
+/// Die Befehle kommen aus der vertrauenswürdigen Anwendung. Eine ungeklärte
+/// Wirkung wird nicht wiederholt: Nur die ausdrückliche Klärung des
+/// Betreibers löst die Aufgabe aus dem Wartezustand.
+#[derive(Deserialize)]
+#[serde(tag = "command", rename_all = "snake_case", deny_unknown_fields)]
+pub enum EffectCommand {
+    /// Zeigt den Stand einer externen Wirkung.
+    Inspect { operation_id: String },
+    /// Klärt eine ungeklärte externe Wirkung ausdrücklich.
+    Reconcile {
+        operation_id: String,
+        outcome: EffectOutcome,
+        /// Beleg der eingetretenen Wirkung.
+        #[serde(default)]
+        reference: Option<String>,
+        reason: String,
+        operator_id: String,
+    },
+}
+
 #[derive(Deserialize)]
 #[serde(
     tag = "kind",
@@ -82,6 +105,7 @@ pub enum OperatorCommand {
     Output(OutputCommand),
     TaskOutput(TaskOutputCommand),
     Formal(FormalCommand),
+    Effect(EffectCommand),
 }
 
 #[derive(Serialize)]
@@ -99,6 +123,7 @@ pub enum CommandReceipt {
         release_pending: bool,
     },
     Formal(FormalReceipt),
+    Effect(EffectReceipt),
 }
 
 /// Der Nachweis über den Stand eines formalen Nachweises.
@@ -158,6 +183,39 @@ impl OperatorCommand {
             Self::Formal(command) => runtime
                 .apply_formal(host, command)
                 .map(|receipt| Some(CommandReceipt::Formal(receipt))),
+            Self::Effect(command) => command.apply(runtime, host),
+        }
+    }
+}
+
+impl EffectCommand {
+    fn apply(
+        self,
+        runtime: &mut TaskRuntime,
+        host: &mut Host,
+    ) -> Result<Option<CommandReceipt>, HostError> {
+        match self {
+            Self::Inspect { operation_id } => {
+                let receipt = runtime.effect(host, &operation_id)?;
+                Ok(receipt.map(CommandReceipt::Effect))
+            }
+            Self::Reconcile {
+                operation_id,
+                outcome,
+                reference,
+                reason,
+                operator_id,
+            } => {
+                let receipt = runtime.reconcile_effect(
+                    host,
+                    &operation_id,
+                    outcome,
+                    reference.as_deref(),
+                    &reason,
+                    &operator_id,
+                )?;
+                Ok(Some(CommandReceipt::Effect(receipt)))
+            }
         }
     }
 }

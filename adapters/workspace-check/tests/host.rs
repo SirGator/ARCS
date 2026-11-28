@@ -196,7 +196,7 @@ fn a_real_check_runs_only_after_approval_and_replays_after_an_interrupted_core_c
     let adapter = AdapterId(ADAPTER.into());
     let candidate = candidate(&host, "approved-pass", "pass");
     assert!(
-        host.execute_approved(&adapter, &candidate.version_id)
+        host.execute_approved(&adapter, &candidate.version_id, "task:test")
             .is_err()
     );
     assert_eq!(f.attempts(), 0);
@@ -206,7 +206,10 @@ fn a_real_check_runs_only_after_approval_and_replays_after_an_interrupted_core_c
         "CREATE TRIGGER lose_receipt BEFORE INSERT ON artifact_versions
          WHEN NEW.schema_id='{TOOL}' BEGIN SELECT RAISE(ABORT,'simulated Core receipt rollback'); END;"
     )).unwrap();
-    assert!(host.execute_approved(&adapter, &action).is_err());
+    assert!(
+        host.execute_approved(&adapter, &action, "task:test")
+            .is_err()
+    );
     assert_eq!(f.attempts(), 1);
     let journal = Connection::open(f.0.join("checks.sqlite")).unwrap();
     let saved: String = journal
@@ -217,7 +220,9 @@ fn a_real_check_runs_only_after_approval_and_replays_after_an_interrupted_core_c
     core.execute_batch("DROP TRIGGER lose_receipt").unwrap();
 
     let mut host = f.open();
-    let result = host.execute_approved(&adapter, &action).unwrap();
+    let result = host
+        .execute_approved(&adapter, &action, "task:test")
+        .unwrap();
     assert_eq!(result.schema_id.0, TOOL);
     assert_eq!(result.payload["action_version"], json!(action));
     assert_eq!(
@@ -237,12 +242,17 @@ fn failed_and_timed_out_checks_have_distinct_evidence_and_unknown_commands_are_r
     let adapter = AdapterId(ADAPTER.into());
     for (check, status) in [("fail", "failed"), ("slow", "timed_out_or_killed")] {
         let action = approve(&host, &candidate(&host, check, check));
-        let result = host.execute_approved(&adapter, &action).unwrap();
+        let result = host
+            .execute_approved(&adapter, &action, "task:test")
+            .unwrap();
         assert_eq!(result.payload["result"]["status"], status);
         assert_eq!(result.payload["result"]["check"], check);
     }
     let unknown = approve(&host, &candidate(&host, "unknown", "nonexistent"));
-    assert!(host.execute_approved(&adapter, &unknown).is_err());
+    assert!(
+        host.execute_approved(&adapter, &unknown, "task:test")
+            .is_err()
+    );
     let journal = Connection::open(f.0.join("checks.sqlite")).unwrap();
     assert_eq!(
         journal
@@ -274,14 +284,19 @@ fn a_started_check_with_no_result_returns_interrupted_without_running_again() {
     core.execute_batch("CREATE TRIGGER lose_failed_attempt BEFORE INSERT ON artifact_versions
          WHEN NEW.schema_id IN ('arcs.invocation.v1','arcs.invocation.v2') AND json_extract(NEW.artifact_json,'$.payload.status')='failed'
          BEGIN SELECT RAISE(ABORT,'lost failure response'); END;").unwrap();
-    assert!(host.execute_approved(&adapter, &action).is_err());
+    assert!(
+        host.execute_approved(&adapter, &action, "task:test")
+            .is_err()
+    );
     assert_eq!(f.attempts(), 1);
     drop(host);
     journal.execute_batch("DROP TRIGGER lose_result").unwrap();
     core.execute_batch("DROP TRIGGER lose_failed_attempt")
         .unwrap();
     let mut host = f.open();
-    let result = host.execute_approved(&adapter, &action).unwrap();
+    let result = host
+        .execute_approved(&adapter, &action, "task:test")
+        .unwrap();
     assert_eq!(result.payload["result"]["status"], "interrupted");
     assert_eq!(f.attempts(), 1);
     host.shutdown().unwrap();
