@@ -191,12 +191,16 @@ impl Host {
     }
 
     pub(super) fn execution_service(&mut self) -> ExecutionService<'_> {
-        ExecutionService::new(
+        let service = ExecutionService::new(
             &self.registry,
             &self.schemas,
             &self.store,
             &mut self.ids,
             &SystemClock,
-        )
+        );
+        match self.secrets.as_ref() {
+            Some(vault) => service.with_vault(vault),
+            None => service,
+        }
     }
 }

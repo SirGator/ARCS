@@ -158,6 +158,7 @@ fn manifest() -> AdapterManifest {
 
 fn grant() -> AdapterGrant {
     AdapterGrant {
+        boundary: None,
         adapter_id: AdapterId("demo.fan".into()),
         producer_class: ProducerClass::Executor,
         enabled_capabilities: manifest().capabilities.into_iter().map(|c| c.id).collect(),

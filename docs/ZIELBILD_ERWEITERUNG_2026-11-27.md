@@ -247,6 +247,19 @@ jedes Tool oder jeder Benutzer darf alle Daten sehen, die ARCS verwaltet.
 > erfüllt; `PRIV-07` ist in der Datenklassenprüfung umgesetzt. Die folgenden
 > Abschnitte beschreiben den weiteren Bedarf unverändert fort. Nachweis:
 > [Zwischenbericht 28.11.2026](ZWISCHENBERICHT_2026-11-28_SCHUTZSTUFEN.md).
+>
+> **Umsetzungsstand 28. November 2026 (zweiter Teil):** Geheimnisse liegen
+> in einem Tresor außerhalb des Artefaktnetzes. Der Core vermittelt sie
+> über auditierbare Freigaben, die an Zweck, Ressource, Ablaufzeit und
+> Nutzungszahl gebunden sind; der gespeicherte Auftrag behält nur die
+> Referenz, und erst der ausgehende Auftrag trägt den Wert. Eine
+> Egress-Grenze im Adapter-Grant legt fest, wohin Daten einer Installation
+> gelangen dürfen; die Prüfung erfolgt vor dem Versand, sodass ein Auftrag
+> seine Reichweite nicht erweitern kann. Damit sind `PRIV-04` in der
+> Grundlage und `PRIV-05` für die vom Core kontrollierten Grenzen umgesetzt.
+> Offen bleiben `PRIV-06`, `PRIV-08` bis `PRIV-11` und die Sandbox des
+> Kindprozesses. Nachweis:
+> [Zwischenbericht 28.11.2026](ZWISCHENBERICHT_2026-11-28_VERTRAULICHE_FAEHIGKEITEN.md).
 
 ### 19.1. Informationsflusskontrolle und Authority
 

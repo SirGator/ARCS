@@ -11,6 +11,9 @@ use crate::core::{
     Provenance, SchemaDefinition, SchemaId, SchemaRegistry, Source, SourceClass, SourceKind,
     SubjectId, Trust, VersionId,
 };
+use crate::privacy::{
+    SecretBroker, SecretUse, SecretVault, collect_destinations, collect_secret_references,
+};
 use crate::runtime::effects::{DispatchDecision, EffectDraft, EffectService, EffectState};
 use crate::runtime::reservations::{Reservation, ReservationError, ReservationService};
 use crate::runtime::{
@@ -93,6 +96,8 @@ pub struct ExecutionService<'a> {
     store: &'a SqliteArtifactStore,
     ids: &'a mut dyn ArtifactIdGenerator,
     clock: &'a dyn Clock,
+    /// Tresor der Geheimnisse; ohne Tresor wird kein Wert eingesetzt.
+    vault: Option<&'a SecretVault>,
 }
 
 impl<'a> ExecutionService<'a> {
@@ -109,7 +114,17 @@ impl<'a> ExecutionService<'a> {
             store,
             ids,
             clock,
+            vault: None,
         }
+    }
+
+    /// Bindet den Dienst an einen Tresor von Geheimnissen.
+    ///
+    /// Ohne Tresor bleiben Geheimnisreferenzen in einem Auftrag ungültig:
+    /// Ein Auftrag, der ein Geheimnis verlangt, wird dann nicht gesendet.
+    pub fn with_vault(mut self, vault: &'a SecretVault) -> Self {
+        self.vault = Some(vault);
+        self
     }
 
     /// Führt einen materialisierten Auftrag aus.
@@ -301,13 +316,30 @@ impl<'a> ExecutionService<'a> {
         let invocation_id = execution_invocation_id(action_version, &capability, &result_schema);
         let operation_id = execution_operation_id(&invocation_id);
         let effects = EffectService::new(self.store, self.schemas, self.clock);
+        // The boundary of the installation decides where the order may go.
+        // The check happens before the endpoint sees anything, so a payload
+        // cannot widen its own reach.
+        let boundary = grant.boundary_policy();
+        for destination in collect_destinations(&action.payload) {
+            boundary.check_destination(&destination)?;
+        }
+        // Secrets enter the outbound order only here. The stored action keeps
+        // the reference, and the grant decides whether the value may be used
+        // for this capability at all.
+        let outbound_payload = self.outbound_payload(&action.payload, &capability)?;
         let invocation = ActInvocation {
             invocation_id: invocation_id.clone(),
             capability: capability.clone(),
             action_version_id: action_version.clone(),
             action_schema_id: action.schema_id.clone(),
-            payload: action.payload.clone(),
+            payload: outbound_payload,
             result_schema_id: result_schema.clone(),
+        };
+        // The fingerprint covers the order without its secrets. A stored
+        // digest of a secret would itself be a disclosure.
+        let fingerprint_invocation = ActInvocation {
+            payload: action.payload.clone(),
+            ..invocation.clone()
         };
         let fence = reservation
             .map(|expected| {
@@ -316,8 +348,8 @@ impl<'a> ExecutionService<'a> {
             .transpose()
             .map_err(ExecutionError::Reservation)?;
         let serialized_invocation = match &fence {
-            Some(fence) => serde_json::to_string(&(&invocation, fence)),
-            None => serde_json::to_string(&invocation),
+            Some(fence) => serde_json::to_string(&(&fingerprint_invocation, fence)),
+            None => serde_json::to_string(&fingerprint_invocation),
         }?;
         let dispatched = {
             let invocations = InvocationService::new(self.store, self.schemas, self.clock);
@@ -414,6 +446,35 @@ impl<'a> ExecutionService<'a> {
         )))
     }
 
+    /// Setzt die Geheimnisreferenzen eines Auftrags ein.
+    ///
+    /// Ohne Tresor bleibt eine Referenz ungültig: Der Auftrag nennt dann ein
+    /// Geheimnis, das der Core nicht auflösen kann, und wird nicht gesendet.
+    fn outbound_payload(
+        &self,
+        payload: &Value,
+        capability: &CapabilityRef,
+    ) -> Result<Value, ExecutionError> {
+        if collect_secret_references(payload).is_empty() {
+            return Ok(payload.clone());
+        }
+        let Some(vault) = self.vault else {
+            // Fail closed: an order that demands a secret is not sent without
+            // a vault that can resolve it.
+            return Err(ExecutionError::Secret(
+                crate::privacy::SecretError::Invalid(
+                    "the order references a secret but no vault is available".into(),
+                ),
+            ));
+        };
+        let broker = SecretBroker::new(self.store, self.schemas, vault, self.clock);
+        let use_ = SecretUse {
+            purpose: "act".into(),
+            resource: format!("{}:{}", capability.adapter_id.0, capability.capability_id.0),
+        };
+        Ok(broker.materialize(payload, &use_)?)
+    }
+
     pub fn finish(
         &mut self,
         prepared: PreparedExecution,
@@ -467,6 +528,15 @@ impl<'a> ExecutionService<'a> {
             self.schemas
                 .validate(&result_schema_id, &response.result_payload)
                 .map_err(ExecutionError::InvalidPayload)?;
+            // An external receipt may echo a credential back. It is checked
+            // against the schema first and only then stored without secrets.
+            let result_payload = match self.vault {
+                Some(vault) => {
+                    let broker = SecretBroker::new(self.store, self.schemas, vault, self.clock);
+                    broker.redact_value(&response.result_payload)
+                }
+                None => response.result_payload.clone(),
+            };
 
             let mut parents = vec![action_version_id.0.clone()];
             let mut relations = vec![(action_version_id.clone(), relation_kinds::result_of())];
@@ -501,7 +571,7 @@ impl<'a> ExecutionService<'a> {
                     format!("approval:{}", approval_version.0),
                     format!("candidate:{}", candidate_version.0),
                 ],
-                payload: response.result_payload,
+                payload: result_payload,
                 provenance: Some(Provenance {
                     parents,
                     rules_applied: vec![

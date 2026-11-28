@@ -116,6 +116,7 @@ fn input(host: &Host, id: &str) -> Artifact {
                 }],
             },
             AdapterGrant {
+                boundary: None,
                 adapter_id: AdapterId("test.operator".into()),
                 producer_class: ProducerClass::System,
                 enabled_capabilities: vec![CapabilityId("report.input".into())],

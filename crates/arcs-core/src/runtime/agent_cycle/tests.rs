@@ -110,6 +110,7 @@ fn input_manifest() -> AdapterManifest {
 
 fn input_grant() -> AdapterGrant {
     AdapterGrant {
+        boundary: None,
         adapter_id: AdapterId(INPUT_ADAPTER.into()),
         producer_class: ProducerClass::Adapter,
         enabled_capabilities: vec![CapabilityId(INPUT_CAPABILITY.into())],
@@ -144,6 +145,7 @@ fn reasoning_manifest() -> AdapterManifest {
 
 fn reasoning_grant() -> AdapterGrant {
     AdapterGrant {
+        boundary: None,
         adapter_id: AdapterId(REASONING_ADAPTER.into()),
         producer_class: ProducerClass::Model,
         enabled_capabilities: vec![CapabilityId(REASONING_CAPABILITY.into())],

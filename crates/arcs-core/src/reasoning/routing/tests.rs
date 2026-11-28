@@ -149,6 +149,7 @@ fn manifest() -> AdapterManifest {
 
 fn grant() -> AdapterGrant {
     AdapterGrant {
+        boundary: None,
         adapter_id: AdapterId("reasoner".into()),
         producer_class: ProducerClass::Model,
         enabled_capabilities: vec![CapabilityId("propose".into())],

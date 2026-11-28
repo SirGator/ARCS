@@ -86,6 +86,7 @@ impl Fixture {
             }],
         };
         let grant = AdapterGrant {
+            boundary: None,
             adapter_id: manifest.adapter_id.clone(),
             producer_class: ProducerClass::Adapter,
             enabled_capabilities: vec![CapabilityId("double".into())],
@@ -171,6 +172,7 @@ fn register_route_capability(
         }],
     };
     let grant = AdapterGrant {
+        boundary: None,
         adapter_id: manifest.adapter_id.clone(),
         producer_class: ProducerClass::Adapter,
         enabled_capabilities: vec![CapabilityId(capability_id.into())],

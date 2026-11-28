@@ -47,6 +47,7 @@ fn install(
                 capabilities: vec![capability, disabled],
             },
             AdapterGrant {
+                boundary: None,
                 adapter_id: AdapterId(id.into()),
                 producer_class: ProducerClass::System,
                 enabled_capabilities: vec![CapabilityId("operation".into())],

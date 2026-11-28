@@ -31,7 +31,11 @@ const CANDIDATE_SCHEMA: &str = r#"{
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "type": "object",
     "required": ["command"],
-    "properties": {"command": {"type": "string", "minLength": 1}},
+    "properties": {
+        "command": {"type": "string", "minLength": 1},
+        "hub": {"type": "object"},
+        "token": {"type": "object"}
+    },
     "additionalProperties": false
 }"#;
 
@@ -152,6 +156,7 @@ fn act_manifest() -> AdapterManifest {
 
 fn act_grant() -> AdapterGrant {
     AdapterGrant {
+        boundary: None,
         adapter_id: AdapterId("action.test".into()),
         producer_class: ProducerClass::Executor,
         enabled_capabilities: vec![
@@ -175,10 +180,18 @@ fn registry(
     schemas: &SchemaRegistry,
     store: &SqliteArtifactStore,
 ) -> (AdapterRegistry, AdapterManifest) {
+    registry_with(schemas, store, act_grant())
+}
+
+fn registry_with(
+    schemas: &SchemaRegistry,
+    store: &SqliteArtifactStore,
+    grant: AdapterGrant,
+) -> (AdapterRegistry, AdapterManifest) {
     let manifest = act_manifest();
     let mut registry = AdapterRegistry::new();
     registry
-        .register(manifest.clone(), act_grant(), schemas, store)
+        .register(manifest.clone(), grant, schemas, store)
         .unwrap();
     (registry, manifest)
 }
@@ -188,6 +201,10 @@ fn selected_capability() -> CapabilityRef {
 }
 
 fn candidate() -> Artifact {
+    candidate_with(json!({"command": "open door"}))
+}
+
+fn candidate_with(payload: Value) -> Artifact {
     let capability = selected_capability();
     let mut candidate = Artifact::new(
         "candidate-1",
@@ -208,7 +225,7 @@ fn candidate() -> Artifact {
             source_class: SourceClass::Model,
         },
         "reasoning:execution-test",
-        json!({"command": "open door"}),
+        payload,
     );
     candidate.tags = vec![format!(
         "requires:{}:{}",
@@ -969,4 +986,154 @@ fn an_effect_stays_bound_to_its_task_even_when_another_task_reuses_the_action() 
     let effects = crate::runtime::effects::EffectService::new(&store, &schemas, &FixedClock);
     let record = effects.lookup(&operation_id).unwrap().unwrap();
     assert_eq!(record.task_key, "task:first");
+}
+
+#[test]
+fn an_order_that_names_a_denied_destination_is_never_sent() {
+    let schemas = schemas();
+    let database = TemporaryDatabase::new();
+    let store = SqliteArtifactStore::open(&database.path).unwrap();
+    let grant = AdapterGrant {
+        boundary: Some(crate::privacy::BoundaryPolicy {
+            network: true,
+            destinations: vec!["hub.example.com".into()],
+            filesystem_roots: vec![],
+        }),
+        ..act_grant()
+    };
+    let (registry, manifest) = registry_with(&schemas, &store, grant);
+    let mut ids = TestIds(1);
+    let approval = approval_chain(
+        &schemas,
+        &store,
+        &mut ids,
+        &candidate_with(json!({
+            "command": "open door",
+            "hub": {"$destination": "other.example.com"}
+        })),
+        ApprovalDecision::Approved,
+    );
+    let action = materialize(&registry, &schemas, &store, &mut ids, &approval);
+    let (endpoint, calls) = endpoint(manifest);
+
+    let mut service = ExecutionService::new(&registry, &schemas, &store, &mut ids, &FixedClock);
+    let result = service.execute(&endpoint, &action.version_id, "task:boundary");
+    assert!(matches!(
+        result,
+        Err(ExecutionError::Boundary(
+            crate::privacy::BoundaryViolation::DestinationNotAllowed { .. }
+        ))
+    ));
+    // The adapter never saw the order.
+    assert_eq!(calls.lock().unwrap().len(), 0);
+}
+
+#[test]
+fn an_order_that_names_a_permitted_destination_is_sent() {
+    let schemas = schemas();
+    let database = TemporaryDatabase::new();
+    let store = SqliteArtifactStore::open(&database.path).unwrap();
+    let grant = AdapterGrant {
+        boundary: Some(crate::privacy::BoundaryPolicy {
+            network: true,
+            destinations: vec!["hub.example.com".into()],
+            filesystem_roots: vec![],
+        }),
+        ..act_grant()
+    };
+    let (registry, manifest) = registry_with(&schemas, &store, grant);
+    let mut ids = TestIds(1);
+    let approval = approval_chain(
+        &schemas,
+        &store,
+        &mut ids,
+        &candidate_with(json!({
+            "command": "open door",
+            "hub": {"$destination": "hub.example.com"}
+        })),
+        ApprovalDecision::Approved,
+    );
+    let action = materialize(&registry, &schemas, &store, &mut ids, &approval);
+    let (endpoint, calls) = endpoint(manifest);
+
+    let mut service = ExecutionService::new(&registry, &schemas, &store, &mut ids, &FixedClock);
+    service
+        .execute(&endpoint, &action.version_id, "task:boundary")
+        .unwrap();
+    assert_eq!(calls.lock().unwrap().len(), 1);
+}
+
+#[test]
+fn a_secret_reaches_the_adapter_but_not_the_artifact_network() {
+    let schemas = schemas();
+    let database = TemporaryDatabase::new();
+    let store = SqliteArtifactStore::open(&database.path).unwrap();
+    let (registry, manifest) = registry(&schemas, &store);
+    let mut ids = TestIds(1);
+    let vault = crate::privacy::SecretVault::in_memory().unwrap();
+    let broker = crate::privacy::SecretBroker::new(&store, &schemas, &vault, &FixedClock);
+    let secret_id = broker.register("device-token").unwrap();
+    let _ = &broker;
+    let grant = broker
+        .issue(&crate::privacy::SecretGrantSpec {
+            secret_id,
+            parameter: "token".into(),
+            purpose: "act".into(),
+            resource: "action.test:device.set".into(),
+            ttl_seconds: 600,
+            max_uses: 1,
+        })
+        .unwrap();
+    let approval = approval_chain(
+        &schemas,
+        &store,
+        &mut ids,
+        &candidate_with(json!({
+            "command": "open door",
+            "token": {"$secret": grant.grant_id}
+        })),
+        ApprovalDecision::Approved,
+    );
+    let action = materialize(&registry, &schemas, &store, &mut ids, &approval);
+    let (endpoint, calls) = endpoint(manifest);
+
+    let mut service = ExecutionService::new(&registry, &schemas, &store, &mut ids, &FixedClock)
+        .with_vault(&vault);
+    service
+        .execute(&endpoint, &action.version_id, "task:secret")
+        .unwrap();
+
+    // The adapter receives the value.
+    let calls = calls.lock().unwrap();
+    assert_eq!(calls.len(), 1);
+    assert!(calls[0].payload.to_string().contains("device-token"));
+    // The stored order keeps the reference only.
+    assert!(action.payload.to_string().contains("$secret"));
+    assert!(!action.payload.to_string().contains("device-token"));
+}
+
+#[test]
+fn an_order_with_a_secret_is_refused_without_a_vault() {
+    let schemas = schemas();
+    let database = TemporaryDatabase::new();
+    let store = SqliteArtifactStore::open(&database.path).unwrap();
+    let (registry, manifest) = registry(&schemas, &store);
+    let mut ids = TestIds(1);
+    let approval = approval_chain(
+        &schemas,
+        &store,
+        &mut ids,
+        &candidate_with(json!({
+            "command": "open door",
+            "token": {"$secret": "grant:secret-1"}
+        })),
+        ApprovalDecision::Approved,
+    );
+    let action = materialize(&registry, &schemas, &store, &mut ids, &approval);
+    let (endpoint, calls) = endpoint(manifest);
+
+    let mut service = ExecutionService::new(&registry, &schemas, &store, &mut ids, &FixedClock);
+    let result = service.execute(&endpoint, &action.version_id, "task:secret");
+    assert!(matches!(result, Err(ExecutionError::Secret(_))));
+    assert_eq!(calls.lock().unwrap().len(), 0);
 }

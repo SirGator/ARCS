@@ -85,6 +85,7 @@ fn input_manifest() -> AdapterManifest {
 
 fn grant(capabilities: &[&str], max_payload_bytes: usize) -> AdapterGrant {
     AdapterGrant {
+        boundary: None,
         adapter_id: AdapterId(ADAPTER_ID.into()),
         producer_class: ProducerClass::Adapter,
         enabled_capabilities: capabilities

@@ -35,6 +35,7 @@ fn main() {
         }],
     };
     let grant = AdapterGrant {
+        boundary: None,
         adapter_id: AdapterId("demo.chat".into()),
         producer_class: ProducerClass::Adapter,
         enabled_capabilities: vec![CapabilityId("chat.observe".into())],

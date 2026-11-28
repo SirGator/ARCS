@@ -92,6 +92,7 @@ impl Journal {
                     }],
                 },
                 AdapterGrant {
+                    boundary: None,
                     adapter_id: AdapterId(PIPELINE_ID.into()),
                     producer_class: ProducerClass::System,
                     enabled_capabilities: vec![CapabilityId(CAPABILITY.into())],

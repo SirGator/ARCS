@@ -52,6 +52,7 @@ fn setup() -> (SchemaRegistry, SqliteArtifactStore, AdapterRegistry) {
         }],
     };
     let grant = AdapterGrant {
+        boundary: None,
         adapter_id: manifest.adapter_id.clone(),
         producer_class: ProducerClass::Executor,
         enabled_capabilities: vec![CapabilityId("set".into())],

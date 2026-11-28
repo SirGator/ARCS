@@ -34,6 +34,9 @@ fn default_batch() -> u32 {
 pub struct HostConfig {
     pub config_version: u32,
     pub database: PathBuf,
+    /// Tresor der Geheimnisse; eigene Datei außerhalb des Artefaktnetzes.
+    #[serde(default)]
+    pub secret_vault: Option<PathBuf>,
     #[serde(default = "default_node")]
     pub node_id: String,
     #[serde(default)]
@@ -131,6 +134,7 @@ pub struct TransformConfig {
 
 pub(crate) struct PreparedConfig {
     pub database: PathBuf,
+    pub secret_vault: Option<PathBuf>,
     pub node_id: String,
     pub schemas: SchemaRegistry,
     pub adapters: Vec<PreparedAdapter>,
@@ -235,6 +239,11 @@ impl PreparedConfig {
             ));
         }
         let database = resolve(base, &config.database)?;
+        let secret_vault = config
+            .secret_vault
+            .as_ref()
+            .map(|path| resolve(base, path))
+            .transpose()?;
         let mut schemas =
             SchemaRegistry::with_bundled_schemas().map_err(|source| HostError::Schema {
                 path: "<bundled>".into(),
@@ -500,6 +509,7 @@ impl PreparedConfig {
         }
         Ok(Self {
             database,
+            secret_vault,
             node_id: config.node_id,
             schemas,
             adapters,

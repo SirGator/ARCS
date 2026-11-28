@@ -97,6 +97,7 @@ fn register_source(
                 }],
             },
             AdapterGrant {
+                boundary: None,
                 adapter_id: AdapterId("other.source".into()),
                 producer_class: ProducerClass::Adapter,
                 enabled_capabilities: vec![CapabilityId("value.input".into())],

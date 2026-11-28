@@ -43,6 +43,8 @@ pub enum HostError {
         source: RegistryError,
     },
     InvalidConfig(String),
+    /// Der Tresor oder eine Geheimnisfreigabe hat die Anfrage abgelehnt.
+    Secret(arcs::privacy::SecretError),
     Store(StoreError),
     Registration(AdapterRegistryError),
     Adapter {
@@ -112,6 +114,7 @@ impl fmt::Display for HostError {
                 write!(f, "invalid schema {}: {source:?}", path.display())
             }
             Self::InvalidConfig(message) => write!(f, "invalid configuration: {message}"),
+            Self::Secret(source) => write!(f, "secret grant: {source}"),
             Self::Store(source) => write!(f, "store: {source:?}"),
             Self::Registration(source) => write!(f, "registration: {source:?}"),
             Self::Adapter { adapter, source } => write!(f, "adapter {}: {source:?}", adapter.0),

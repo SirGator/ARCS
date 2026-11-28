@@ -74,6 +74,10 @@ pub enum ExecutionError {
         expected: String,
         actual: String,
     },
+    /// Der Auftrag verlässt die freigegebene Grenze der Installation.
+    Boundary(crate::privacy::BoundaryViolation),
+    /// Eine Geheimnisfreigabe hat den Einsatz nicht getragen.
+    Secret(crate::privacy::SecretError),
 }
 
 impl From<AdapterRegistryError> for ExecutionError {
@@ -115,5 +119,17 @@ impl From<InvocationError> for ExecutionError {
 impl From<EffectError> for ExecutionError {
     fn from(value: EffectError) -> Self {
         Self::Effect(value)
+    }
+}
+
+impl From<crate::privacy::BoundaryViolation> for ExecutionError {
+    fn from(value: crate::privacy::BoundaryViolation) -> Self {
+        Self::Boundary(value)
+    }
+}
+
+impl From<crate::privacy::SecretError> for ExecutionError {
+    fn from(value: crate::privacy::SecretError) -> Self {
+        Self::Secret(value)
     }
 }

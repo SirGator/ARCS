@@ -117,6 +117,7 @@ fn reasoning_manifest() -> AdapterManifest {
 
 fn reasoning_grant() -> AdapterGrant {
     AdapterGrant {
+        boundary: None,
         adapter_id: AdapterId("reasoning.test".into()),
         producer_class: ProducerClass::Model,
         enabled_capabilities: vec![CapabilityId("reasoning.propose".into())],
@@ -161,6 +162,7 @@ fn action_manifest() -> AdapterManifest {
 
 fn action_grant() -> AdapterGrant {
     AdapterGrant {
+        boundary: None,
         adapter_id: AdapterId("action.test".into()),
         producer_class: ProducerClass::Executor,
         enabled_capabilities: vec![CapabilityId("device.set".into())],

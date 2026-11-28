@@ -121,6 +121,7 @@ impl Fixture {
             },
         );
         let grant = |id: &str| AdapterGrant {
+            boundary: None,
             adapter_id: AdapterId(id.into()),
             producer_class: ProducerClass::Adapter,
             enabled_capabilities: vec![CapabilityId("run".into())],

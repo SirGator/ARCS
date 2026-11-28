@@ -131,6 +131,7 @@ fn registry(schemas: &SchemaRegistry, store: &SqliteArtifactStore) -> AdapterReg
         .register(
             manifest(),
             AdapterGrant {
+                boundary: None,
                 adapter_id: AdapterId("action.test".into()),
                 producer_class: ProducerClass::Executor,
                 enabled_capabilities: vec![

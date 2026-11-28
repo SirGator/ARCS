@@ -50,6 +50,13 @@ pub struct AdapterGrant {
     /// fremder Adaptermäßig auf interne Daten beschränkt.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub data_classification: Option<Classification>,
+    /// Grenze der externen Umgebung dieser Installation.
+    ///
+    /// Die Grenze legt fest, wohin Daten aus dieser Installation gelangen
+    /// dürfen. Ohne Grenze gilt Default-Deny: Kein Netzwerk, kein Ziel und
+    /// keine Dateisystemwurzel sind freigegeben.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub boundary: Option<crate::privacy::BoundaryPolicy>,
 }
 
 impl AdapterGrant {
@@ -59,6 +66,14 @@ impl AdapterGrant {
     /// diese Grenze nur weiter einschränken, niemals erhöhen.
     pub fn data_classification_ceiling(&self) -> Classification {
         self.data_classification.unwrap_or(Classification::DEFAULT)
+    }
+
+    /// Grenze der externen Umgebung; ohne Grenze gilt Default-Deny.
+    pub fn boundary_policy(&self) -> std::borrow::Cow<'_, crate::privacy::BoundaryPolicy> {
+        match &self.boundary {
+            Some(policy) => std::borrow::Cow::Borrowed(policy),
+            None => std::borrow::Cow::Owned(crate::privacy::BoundaryPolicy::default()),
+        }
     }
 
     /// Schutzstufe, mit der die Daten dieses Adapters einzustufen sind.

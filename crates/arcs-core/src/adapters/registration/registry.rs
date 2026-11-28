@@ -33,6 +33,8 @@ pub enum AdapterRegistryError {
     },
     UnknownSchema(SchemaId),
     ReasoningOutputMustBeCandidate(SchemaId),
+    /// Die Egress-Grenze der Installation ist strukturell unzulässig.
+    InvalidBoundary,
     Store(StoreError),
     UnknownAdapter(AdapterId),
     CapabilityNotEnabled {
@@ -116,6 +118,15 @@ impl AdapterRegistry {
         }
         if grant.max_payload_bytes == 0 {
             return Err(AdapterRegistryError::InvalidPayloadLimit);
+        }
+        // A boundary that cannot be read is no boundary. The installation is
+        // refused instead of running with an undecided limit.
+        if grant
+            .boundary
+            .as_ref()
+            .is_some_and(|boundary| !boundary.is_valid())
+        {
+            return Err(AdapterRegistryError::InvalidBoundary);
         }
         if let Some(limits) = grant.data_limits {
             if !limits.is_valid() {
@@ -400,6 +411,7 @@ mod tests {
         let registry = AdapterRegistry::new();
         let manifest = manifest();
         let grant = AdapterGrant {
+            boundary: None,
             adapter_id: manifest.adapter_id.clone(),
             producer_class: ProducerClass::Adapter,
             enabled_capabilities: vec![CapabilityId("sensor.observe".into())],
@@ -427,6 +439,7 @@ mod tests {
         let registry = AdapterRegistry::new();
         let manifest = manifest();
         let grant = AdapterGrant {
+            boundary: None,
             adapter_id: manifest.adapter_id.clone(),
             producer_class: ProducerClass::Adapter,
             enabled_capabilities: vec![CapabilityId("sensor.observe".into())],

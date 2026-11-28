@@ -94,6 +94,7 @@ impl Fixture {
             capabilities: vec![descriptor("report.write"), descriptor("other.write")],
         };
         let grant = AdapterGrant {
+            boundary: None,
             adapter_id: manifest.adapter_id.clone(),
             producer_class: ProducerClass::Executor,
             enabled_capabilities: manifest

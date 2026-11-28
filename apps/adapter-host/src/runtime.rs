@@ -32,6 +32,7 @@ use arcs::core::{
 };
 use arcs::execution::ExecutionService;
 use arcs::input::{InputMessage, InputService};
+use arcs::privacy::{SecretBroker, SecretGrant, SecretGrantSpec, SecretId, SecretVault};
 use arcs::request::RequestService;
 use arcs::runtime::reservations::ReservationError;
 use arcs::store::{ArtifactRelations, SqliteArtifactStore, relation_kinds};
@@ -112,6 +113,9 @@ struct RunningAdapter {
 
 pub struct Host {
     database_path: std::path::PathBuf,
+    /// Tresor der Geheimnisse; ohne Tresor bleibt jede Geheimnisanfrage
+    /// ungültig.
+    secrets: Option<SecretVault>,
     schemas: SchemaRegistry,
     registry: AdapterRegistry,
     store: SqliteArtifactStore,
@@ -184,6 +188,7 @@ fn register_host(
         });
     }
     let grant = AdapterGrant {
+        boundary: None,
         adapter_id: AdapterId(HOST_ID.into()),
         producer_class: ProducerClass::System,
         enabled_capabilities: capabilities.iter().map(|c| c.id.clone()).collect(),
@@ -363,6 +368,18 @@ impl Host {
             })?;
         }
         let store = SqliteArtifactStore::open(&config.database).map_err(HostError::Store)?;
+        let secrets = match &config.secret_vault {
+            Some(path) => {
+                if let Some(parent) = path.parent() {
+                    std::fs::create_dir_all(parent).map_err(|source| HostError::Io {
+                        path: parent.into(),
+                        source,
+                    })?;
+                }
+                Some(SecretVault::open(path).map_err(HostError::Secret)?)
+            }
+            None => None,
+        };
         let database_path = config
             .database
             .canonicalize()
@@ -457,6 +474,7 @@ impl Host {
         }
         Ok(Self {
             database_path,
+            secrets,
             schemas: config.schemas,
             registry,
             store,
@@ -485,6 +503,51 @@ impl Host {
 
     pub fn store(&self) -> &SqliteArtifactStore {
         &self.store
+    }
+
+    /// Nimmt ein Geheimnis in den Tresor auf.
+    ///
+    /// Der Wert verlässt den Tresor nicht. Ohne Tresor ist die Annahme nicht
+    /// möglich: Dann kennt die Instanz kein Geheimnis.
+    pub fn register_secret(&self, value: &str) -> Result<SecretId, HostError> {
+        let vault = self.vault()?;
+        self.broker(vault)
+            .register(value)
+            .map_err(HostError::Secret)
+    }
+
+    /// Stellt eine Freigabe für ein Geheimnis aus.
+    pub fn issue_secret_grant(&self, spec: &SecretGrantSpec) -> Result<SecretGrant, HostError> {
+        let vault = self.vault()?;
+        self.broker(vault).issue(spec).map_err(HostError::Secret)
+    }
+
+    /// Liest den Stand einer Freigabe.
+    pub fn secret_grant(&self, grant_id: &str) -> Result<Option<SecretGrant>, HostError> {
+        let vault = self.vault()?;
+        self.broker(vault)
+            .lookup(grant_id)
+            .map_err(HostError::Secret)
+    }
+
+    /// Widerruft eine Freigabe ausdrücklich.
+    pub fn revoke_secret_grant(&self, grant_id: &str) -> Result<SecretGrant, HostError> {
+        let vault = self.vault()?;
+        self.broker(vault)
+            .revoke(grant_id)
+            .map_err(HostError::Secret)
+    }
+
+    fn vault(&self) -> Result<&SecretVault, HostError> {
+        self.secrets.as_ref().ok_or_else(|| {
+            HostError::Secret(arcs::privacy::SecretError::Invalid(
+                "this host has no secret vault".into(),
+            ))
+        })
+    }
+
+    fn broker<'a>(&'a self, vault: &'a SecretVault) -> SecretBroker<'a> {
+        SecretBroker::new(&self.store, &self.schemas, vault, &SystemClock)
     }
     pub(crate) fn database_path(&self) -> &Path {
         &self.database_path

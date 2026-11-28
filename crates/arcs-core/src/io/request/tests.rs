@@ -109,6 +109,7 @@ fn manifest() -> AdapterManifest {
 
 fn grant() -> AdapterGrant {
     AdapterGrant {
+        boundary: None,
         adapter_id: AdapterId("metrics.request-test".into()),
         producer_class: ProducerClass::Adapter,
         enabled_capabilities: vec![CapabilityId("metrics.fetch".into())],

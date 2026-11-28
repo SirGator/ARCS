@@ -59,6 +59,20 @@
 > `OPS-04`, `OPS-06` sowie `BIZ-01` bis `BIZ-06`. Nachweis:
 > [Zwischenbericht 28.11.2026](ZWISCHENBERICHT_2026-11-28_AUFGABEN_LEASES.md).
 >
+> Siebter Slice der Erweiterung: vertrauliche Fähigkeiten. Geheimnisse
+> liegen in einem Tresor außerhalb des Artefaktnetzes und werden nur über
+> auditierbare Freigaben vermittelt, die an Zweck, Ressource, Ablaufzeit und
+> Nutzungszahl gebunden sind. Der gespeicherte Auftrag behält die Referenz;
+> der Fingerabdruck der Invocation entsteht ohne eingesetztes Geheimnis, und
+> eine Antwort, die einen Wert zurückspiegelt, wird vor dem Speichern
+> redigiert. Eine Egress-Grenze im Adapter-Grant legt fest, wohin Daten einer
+> Installation gelangen dürfen; ein Auftrag kann ein Ziel benennen, aber
+> seine Reichweite nicht erweitern. `PRIV-04` ist damit in der Grundlage
+> umgesetzt, `PRIV-05` für die vom Core kontrollierten Grenzen. Offen
+> bleiben `PRIV-06`, `PRIV-08` bis `PRIV-11` und die Sandbox des
+> Kindprozesses. Nachweis:
+> [Zwischenbericht 28.11.2026](ZWISCHENBERICHT_2026-11-28_VERTRAULICHE_FAEHIGKEITEN.md).
+>
 > Vierter Slice der Erweiterung: vereinte Multi-Context-Runtime mit
 > persistenten Arbeitskontexten. Jede bearbeitete Aufgabe erhält einen
 > leichtgewichtigen Arbeitskontext im Core, der Ziel, Task, Planrevision,

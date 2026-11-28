@@ -85,6 +85,7 @@ fn grant(
     max_payload_bytes: usize,
 ) -> AdapterGrant {
     AdapterGrant {
+        boundary: None,
         adapter_id: AdapterId(adapter_id.into()),
         producer_class: ProducerClass::Adapter,
         enabled_capabilities: capabilities
@@ -282,6 +283,7 @@ fn act_capability_cannot_push_observation() {
         }],
     };
     let grant = AdapterGrant {
+        boundary: None,
         adapter_id: AdapterId("action.demo".into()),
         producer_class: ProducerClass::Executor,
         enabled_capabilities: vec![CapabilityId("device.set".into())],

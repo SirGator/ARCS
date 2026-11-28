@@ -92,6 +92,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }],
             },
             AdapterGrant {
+                boundary: None,
                 adapter_id: AdapterId(SOURCE.into()),
                 producer_class: ProducerClass::System,
                 enabled_capabilities: vec![CapabilityId("report.input".into())],

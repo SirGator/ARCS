@@ -312,6 +312,7 @@ fn bind_definition(
                 capabilities,
             },
             AdapterGrant {
+                boundary: None,
                 adapter_id: adapter.clone(),
                 producer_class: ProducerClass::System,
                 enabled_capabilities,

@@ -50,6 +50,7 @@ fn schemas() -> Result<SchemaRegistry, String> {
 fn grant() -> AdapterGrant {
     let manifest = fan::manifest();
     AdapterGrant {
+        boundary: None,
         adapter_id: manifest.adapter_id,
         producer_class: ProducerClass::Executor,
         enabled_capabilities: manifest.capabilities.into_iter().map(|c| c.id).collect(),
@@ -92,6 +93,7 @@ fn register_host(
         .collect(),
     };
     let grant = AdapterGrant {
+        boundary: None,
         adapter_id: manifest.adapter_id.clone(),
         producer_class: ProducerClass::System,
         enabled_capabilities: manifest.capabilities.iter().map(|c| c.id.clone()).collect(),

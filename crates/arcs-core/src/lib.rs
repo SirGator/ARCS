@@ -19,6 +19,8 @@ pub mod io;
 pub mod learning;
 /// Versioned epistemic annotations over the shared Artifact Store.
 pub mod memory;
+/// Kontrollierte Informationsflüsse nach außen: Grenzen und Geheimnisse.
+pub mod privacy;
 /// Kuratierter Fallback für neue oder komplexe Situationen.
 pub mod reasoning;
 /// Orchestrierung zwischen bekanntem Fast Path und kuratiertem Reasoning.

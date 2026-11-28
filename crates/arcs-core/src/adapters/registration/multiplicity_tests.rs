@@ -61,6 +61,7 @@ fn all_seven_roles_support_multiple_installations_with_equal_local_names() {
                         capabilities: vec![cap, disabled],
                     },
                     AdapterGrant {
+                        boundary: None,
                         adapter_id: id,
                         producer_class: ProducerClass::Adapter,
                         enabled_capabilities: vec![CapabilityId("same.name".into())],
@@ -151,6 +152,7 @@ fn catalog_contains_only_enabled_capabilities_and_keeps_both_multi_role_connecti
                     capabilities: vec![input, disabled, observe],
                 },
                 AdapterGrant {
+                    boundary: None,
                     adapter_id: AdapterId(id.into()),
                     producer_class: ProducerClass::Adapter,
                     enabled_capabilities: vec![

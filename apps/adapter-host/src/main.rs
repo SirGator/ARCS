@@ -6,7 +6,7 @@ use arcs_host::Host;
 use arcs_host::memory::MemoryCommand;
 use arcs_host::monitor::MonitorControl;
 use arcs_host::operator_command::{
-    CommandReceipt, EffectCommand, GoalCommand, OperatorCommand, PlanCommand,
+    CommandReceipt, EffectCommand, GoalCommand, OperatorCommand, PlanCommand, SecretCommand,
 };
 use arcs_host::task_runtime::output::OutputCommand;
 use arcs_host::task_runtime::scheduler::SeriesControlCommand;
@@ -15,7 +15,7 @@ use arcs_host::task_runtime::task_output::TaskOutputCommand;
 use arcs_host::task_runtime::{RuntimeConfig, TaskRuntime};
 use serde::Deserialize;
 
-const USAGE: &str = "usage: arcs-host --config <host.json> [--list-adapters | --find-capabilities <query.json> | --reasoning-attempts <query.json> | --memory-command <command.json> | [--monitor --stop-file <path> [--control-stdin]] [--runtime <runtime.json>] [--ticks <count>] [--stop-file <path>] | --runtime <runtime.json> [--goal-command <command.json> | --plan-command <command.json> | --task-command <command.json> | --series-command <command.json> | --output-command <command.json> | --task-output-command <command.json>]]";
+const USAGE: &str = "usage: arcs-host --config <host.json> [--list-adapters | --find-capabilities <query.json> | --reasoning-attempts <query.json> | --memory-command <command.json> | [--monitor --stop-file <path> [--control-stdin]] [--runtime <runtime.json>] [--ticks <count>] [--stop-file <path>] | --runtime <runtime.json> [--goal-command <command.json> | --plan-command <command.json> | --task-command <command.json> | --series-command <command.json> | --output-command <command.json> | --task-output-command <command.json> | --secret-command <command.json>]]";
 
 fn read_control_command<T: serde::de::DeserializeOwned>(
     path: PathBuf,
@@ -80,6 +80,7 @@ fn run() -> Result<(), String> {
     let mut output_command = None;
     let mut task_output_command = None;
     let mut effect_command = None;
+    let mut secret_command = None;
     let mut capability_query = None;
     let mut attempt_query = None;
     let mut memory_command = None;
@@ -125,6 +126,8 @@ fn run() -> Result<(), String> {
             task_output_command = Some(PathBuf::from(value));
         } else if argument == "--effect-command" && effect_command.is_none() {
             effect_command = Some(PathBuf::from(value));
+        } else if argument == "--secret-command" && secret_command.is_none() {
+            secret_command = Some(PathBuf::from(value));
         } else if argument == "--find-capabilities" && capability_query.is_none() {
             capability_query = Some(PathBuf::from(value));
         } else if argument == "--reasoning-attempts" && attempt_query.is_none() {
@@ -147,6 +150,7 @@ fn run() -> Result<(), String> {
         &output_command,
         &task_output_command,
         &effect_command,
+        &secret_command,
     ]
     .into_iter()
     .filter(|command| command.is_some())
@@ -274,6 +278,9 @@ fn run() -> Result<(), String> {
     let effect_command: Option<EffectCommand> = effect_command
         .map(|path| read_control_command(path, "effect"))
         .transpose()?;
+    let secret_command: Option<SecretCommand> = secret_command
+        .map(|path| read_control_command(path, "secret"))
+        .transpose()?;
     if runtime.is_none() && !monitor && (ticks.is_some() || stop_file.is_some()) {
         return Err(USAGE.into());
     }
@@ -338,7 +345,8 @@ fn run() -> Result<(), String> {
             .or_else(|| goal_command.map(OperatorCommand::Goal))
             .or_else(|| output_command.map(OperatorCommand::Output))
             .or_else(|| task_output_command.map(OperatorCommand::TaskOutput))
-            .or_else(|| effect_command.map(OperatorCommand::Effect));
+            .or_else(|| effect_command.map(OperatorCommand::Effect))
+            .or_else(|| secret_command.map(OperatorCommand::Secret));
         let (report, receipt) = if let Some(command) = command {
             let receipt = command
                 .apply(&mut runtime, &mut host)
@@ -392,6 +400,10 @@ fn run() -> Result<(), String> {
                 Some(CommandReceipt::Effect(effect)) => {
                     value["effect"] =
                         serde_json::to_value(effect).expect("effect receipt serialization")
+                }
+                Some(CommandReceipt::Secret(secret)) => {
+                    value["secret"] =
+                        serde_json::to_value(secret).expect("secret receipt serialization")
                 }
                 _ => {}
             }

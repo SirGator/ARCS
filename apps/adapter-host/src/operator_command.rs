@@ -89,6 +89,31 @@ pub enum EffectCommand {
     },
 }
 
+/// Befehle des Geheimnistresors.
+///
+/// Die Befehle kommen aus der vertrauenswürdigen Anwendung. Der Wert eines
+/// Geheimnisses wird nur beim Anlegen übergeben und verlässt den Tresor
+/// danach nicht mehr.
+#[derive(Deserialize)]
+#[serde(tag = "command", rename_all = "snake_case", deny_unknown_fields)]
+pub enum SecretCommand {
+    /// Nimmt ein Geheimnis in den Tresor auf und gibt seine Kennung zurück.
+    Register { value: String },
+    /// Stellt eine Freigabe für ein Geheimnis aus.
+    Issue {
+        secret_id: String,
+        parameter: String,
+        purpose: String,
+        resource: String,
+        ttl_seconds: u64,
+        max_uses: u32,
+    },
+    /// Zeigt den Stand einer Freigabe.
+    Inspect { grant_id: String },
+    /// Widerruft eine Freigabe ausdrücklich.
+    Revoke { grant_id: String },
+}
+
 #[derive(Deserialize)]
 #[serde(
     tag = "kind",
@@ -106,6 +131,7 @@ pub enum OperatorCommand {
     TaskOutput(TaskOutputCommand),
     Formal(FormalCommand),
     Effect(EffectCommand),
+    Secret(SecretCommand),
 }
 
 #[derive(Serialize)]
@@ -124,6 +150,31 @@ pub enum CommandReceipt {
     },
     Formal(FormalReceipt),
     Effect(EffectReceipt),
+    Secret(SecretReceipt),
+}
+
+/// Der Nachweis über eine Geheimnisfreigabe.
+///
+/// Der Bericht nennt Zweck, Ressource, Ablauf und Nutzungen. Er enthält nie
+/// den Wert eines Geheimnisses.
+#[derive(Serialize)]
+pub struct SecretReceipt {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub secret_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub grant_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub state: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub uses: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_uses: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub purpose: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resource: Option<String>,
 }
 
 /// Der Nachweis über den Stand eines formalen Nachweises.
@@ -184,6 +235,50 @@ impl OperatorCommand {
                 .apply_formal(host, command)
                 .map(|receipt| Some(CommandReceipt::Formal(receipt))),
             Self::Effect(command) => command.apply(runtime, host),
+            Self::Secret(command) => command.apply(host),
+        }
+    }
+}
+
+impl SecretCommand {
+    fn apply(self, host: &Host) -> Result<Option<CommandReceipt>, HostError> {
+        match self {
+            Self::Register { value } => {
+                let secret_id = host.register_secret(&value)?;
+                Ok(Some(CommandReceipt::Secret(SecretReceipt {
+                    secret_id: Some(secret_id.as_str().to_string()),
+                    ..SecretReceipt::empty()
+                })))
+            }
+            Self::Issue {
+                secret_id,
+                parameter,
+                purpose,
+                resource,
+                ttl_seconds,
+                max_uses,
+            } => {
+                let grant = host.issue_secret_grant(&arcs::privacy::SecretGrantSpec {
+                    secret_id: arcs::privacy::SecretId::new(secret_id),
+                    parameter,
+                    purpose,
+                    resource,
+                    ttl_seconds,
+                    max_uses,
+                })?;
+                Ok(Some(CommandReceipt::Secret(SecretReceipt::of(&grant))))
+            }
+            Self::Inspect { grant_id } => {
+                let receipt = match host.secret_grant(&grant_id)? {
+                    Some(grant) => SecretReceipt::of(&grant),
+                    None => SecretReceipt::empty(),
+                };
+                Ok(Some(CommandReceipt::Secret(receipt)))
+            }
+            Self::Revoke { grant_id } => {
+                let grant = host.revoke_secret_grant(&grant_id)?;
+                Ok(Some(CommandReceipt::Secret(SecretReceipt::of(&grant))))
+            }
         }
     }
 }
@@ -299,6 +394,34 @@ impl GoalCommand {
             Self::Cancel { sequence, reason } => runtime.cancel_goal(host, sequence, reason),
         }
         .map(|()| None)
+    }
+}
+
+impl SecretReceipt {
+    fn empty() -> Self {
+        Self {
+            secret_id: None,
+            grant_id: None,
+            state: None,
+            expires_at: None,
+            uses: None,
+            max_uses: None,
+            purpose: None,
+            resource: None,
+        }
+    }
+
+    fn of(grant: &arcs::privacy::SecretGrant) -> Self {
+        Self {
+            secret_id: Some(grant.secret_id.as_str().to_string()),
+            grant_id: Some(grant.grant_id.clone()),
+            state: Some(grant.state.as_str().to_string()),
+            expires_at: Some(grant.expires_at.clone()),
+            uses: Some(grant.uses),
+            max_uses: Some(grant.max_uses),
+            purpose: Some(grant.purpose.clone()),
+            resource: Some(grant.resource.clone()),
+        }
     }
 }
 

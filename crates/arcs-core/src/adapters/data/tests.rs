@@ -55,6 +55,7 @@ fn fixture(limits: Option<DataLimits>) -> (AdapterRegistry, Endpoint, AdapterGra
         capabilities: vec![descriptor("data.observe"), descriptor("disabled")],
     };
     let grant = AdapterGrant {
+        boundary: None,
         adapter_id: manifest.adapter_id.clone(),
         producer_class: ProducerClass::Adapter,
         enabled_capabilities: vec![CapabilityId("data.observe".into())],

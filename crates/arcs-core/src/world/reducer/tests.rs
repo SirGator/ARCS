@@ -74,6 +74,7 @@ fn registry(schemas: &SchemaRegistry, trust: TrustLevel) -> AdapterRegistry {
         }],
     };
     let grant = AdapterGrant {
+        boundary: None,
         adapter_id: AdapterId(ADAPTER_ID.into()),
         producer_class: ProducerClass::Adapter,
         enabled_capabilities: vec![CapabilityId(CAPABILITY_ID.into())],
