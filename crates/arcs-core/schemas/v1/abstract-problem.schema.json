@@ -1,0 +1,42 @@
+{
+  "$id": "arcs.abstract_problem.v1",
+  "type": "object",
+  "required": [
+    "purpose",
+    "reasoner",
+    "problem",
+    "variables",
+    "residual_risk"
+  ],
+  "properties": {
+    "purpose": {"type": "string", "minLength": 1},
+    "reasoner": {
+      "type": "object",
+      "required": ["adapter_id", "capability_id"],
+      "properties": {
+        "adapter_id": {"type": "string", "minLength": 1},
+        "capability_id": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    },
+    "problem": {"type": "object"},
+    "variables": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "kind", "field"],
+        "properties": {
+          "name": {"type": "string", "minLength": 1},
+          "kind": {
+            "type": "string",
+            "enum": ["text", "identifier", "number", "quantity", "opaque"]
+          },
+          "field": {"type": "string", "minLength": 1}
+        },
+        "additionalProperties": false
+      }
+    },
+    "residual_risk": {"type": "string", "minLength": 1}
+  },
+  "additionalProperties": false
+}

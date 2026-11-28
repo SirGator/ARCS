@@ -1,0 +1,41 @@
+{
+  "$id": "arcs.abstract_binding.v1",
+  "type": "object",
+  "required": [
+    "purpose",
+    "reasoner",
+    "source",
+    "variables"
+  ],
+  "properties": {
+    "purpose": {"type": "string", "minLength": 1},
+    "reasoner": {
+      "type": "object",
+      "required": ["adapter_id", "capability_id"],
+      "properties": {
+        "adapter_id": {"type": "string", "minLength": 1},
+        "capability_id": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    },
+    "source": {"type": "string", "minLength": 1},
+    "variables": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "kind", "field", "value"],
+        "properties": {
+          "name": {"type": "string", "minLength": 1},
+          "kind": {
+            "type": "string",
+            "enum": ["text", "identifier", "number", "quantity", "opaque"]
+          },
+          "field": {"type": "string", "minLength": 1},
+          "value": {}
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

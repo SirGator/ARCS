@@ -266,6 +266,22 @@ impl GeneralReasoningService<'_> {
             })?;
             validate_artifact(&input, self.schemas)
                 .map_err(|_| invalid("invalid persisted context"))?;
+            // Vor der Offenlegung: Der Kontext muss die Grenze des Adapters
+            // einhalten. Die Prüfung steht hier am Rand und damit unabhängig
+            // davon, wie der Auftrag zustande kam.
+            let classification = input.security.effective();
+            if !classification.allows(grant.data_classification_ceiling()) {
+                return Err(ReasoningError::DataClassExceedsGrant {
+                    requested: classification,
+                    permitted: grant.data_classification_ceiling(),
+                });
+            }
+            // Eine Abstraktion darf nur den Reasoner sehen, dem der
+            // Betreiber sie zugedacht hat.
+            if input.schema_id.0 == crate::privacy::ABSTRACT_PROBLEM_SCHEMA {
+                crate::privacy::ensure_authorized_reasoner(&input.payload, &request.capability)
+                    .map_err(|error| ReasoningError::InvalidReasoningRequest(error.to_string()))?;
+            }
             level = minimum(level, input.trust.level);
             model |= input.trust.source_class == SourceClass::Model
                 || input.created_by.actor_type == ActorType::Model;

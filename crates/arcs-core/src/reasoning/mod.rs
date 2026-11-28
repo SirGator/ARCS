@@ -30,4 +30,7 @@ pub use service::ReasoningService;
 mod tests;
 
 #[cfg(test)]
+mod abstraction_tests;
+
+#[cfg(test)]
 mod test_support;

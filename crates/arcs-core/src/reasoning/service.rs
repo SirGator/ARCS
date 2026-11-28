@@ -489,6 +489,15 @@ impl ReasoningService<'_> {
                     permitted: ceiling,
                 });
             }
+            // Eine Abstraktion darf nur den Reasoner sehen, dem der
+            // Betreiber sie zugedacht hat.
+            if artifact.schema_id.0 == crate::privacy::ABSTRACT_PROBLEM_SCHEMA {
+                crate::privacy::ensure_authorized_reasoner(
+                    &artifact.payload,
+                    &request.reasoning_capability,
+                )
+                .map_err(|error| ReasoningError::InvalidReasoningRequest(error.to_string()))?;
+            }
             let payload = select_payload_fields(&artifact, &selection.payload_fields)?;
             context.push(ReasoningContextItem {
                 version_id: artifact.version_id,

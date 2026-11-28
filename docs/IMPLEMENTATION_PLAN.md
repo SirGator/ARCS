@@ -59,6 +59,22 @@
 > `OPS-04`, `OPS-06` sowie `BIZ-01` bis `BIZ-06`. Nachweis:
 > [Zwischenbericht 28.11.2026](ZWISCHENBERICHT_2026-11-28_AUFGABEN_LEASES.md).
 >
+> Achter Slice der Erweiterung: Abstraktion, symbolisches Reasoning und
+> lokale Rekonstruktion. Der Core zerlegt einen vertraulichen Sachverhalt
+> lokal in Variablen, prüft die Abstraktion auf verbliebene Offenlegung und
+> gibt nur das abstrakte Problem an den freigegebenen Reasoner frei. Die
+> Zuordnung von Platzhalter zu Wert bleibt im Core, und die konkrete Lösung
+> wird lokal rekonstruiert, geprüft und mit der Schutzstufe der Quelle
+> gespeichert. Ergänzend prüft die v2-Reasoning-Kante die Schutzstufe jedes
+> Kontextartefakts selbst und die Freigabe des Empfängers; die v1-Kante
+> prüft den Empfänger ebenfalls. Damit sind `PRIV-08` in der Grundlage,
+> `PRIV-09` für die Nutzlast und `PRIV-10` für die Rekonstruktion
+> umgesetzt, `PRIV-02` an beiden Kanten nachgezogen. Offen bleiben
+> `PRIV-06`, `PRIV-09` für erzeugten Code, `PRIV-10` für die formale
+> Prüfung der Anwendbarkeit, `PRIV-11` sowie die Messung der Baselines aus
+> der Forschungsfrage. Nachweis:
+> [Zwischenbericht 28.11.2026](ZWISCHENBERICHT_2026-11-28_ABSTRAKTION.md).
+>
 > Siebter Slice der Erweiterung: vertrauliche Fähigkeiten. Geheimnisse
 > liegen in einem Tresor außerhalb des Artefaktnetzes und werden nur über
 > auditierbare Freigaben vermittelt, die an Zweck, Ressource, Ablaufzeit und

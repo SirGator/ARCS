@@ -260,6 +260,21 @@ jedes Tool oder jeder Benutzer darf alle Daten sehen, die ARCS verwaltet.
 > Offen bleiben `PRIV-06`, `PRIV-08` bis `PRIV-11` und die Sandbox des
 > Kindprozesses. Nachweis:
 > [Zwischenbericht 28.11.2026](ZWISCHENBERICHT_2026-11-28_VERTRAULICHE_FAEHIGKEITEN.md).
+>
+> **Umsetzungsstand 28. November 2026 (dritter Teil):** Ein vertraulicher
+> Sachverhalt wird lokal in Variablen zerlegt, extern nur als Struktur
+> bearbeitet und lokal rekonstruiert. Die Abstraktion ist eine ausdrücklich
+> freigegebene Herabstufung mit Herkunftsbeleg und Prüfung; ein sichtbares
+> Feld, das den sensiblen Wert wiederholt, bricht sie ab. Das abstrakte
+> Problem gehört genau einem freigegebenen Reasoner, und die Bindung der
+> Platzhalter an die Werte bleibt im Core. Ergänzend prüft die v2-Kante des
+> Reasonings die Schutzstufe jedes Kontextartefakts selbst, statt dem
+> Aufrufer zu vertrauen. Damit sind `PRIV-08` in der Grundlage, `PRIV-09`
+> für die Nutzlast und `PRIV-10` für die Rekonstruktion umgesetzt, `PRIV-02`
+> an beiden Reasoning-Kanten nachgezogen. Offen bleiben `PRIV-06`,
+> `PRIV-09` für erzeugten Code, `PRIV-10` für die formale Prüfung der
+> Anwendbarkeit, `PRIV-11` sowie die Messung der Baselines. Nachweis:
+> [Zwischenbericht 28.11.2026](ZWISCHENBERICHT_2026-11-28_ABSTRAKTION.md).
 
 ### 19.1. Informationsflusskontrolle und Authority
 
@@ -682,6 +697,15 @@ festzulegen; die nachstehenden Slices sind Empfehlungen, keine Zusicherung.
 | TEST-10 – Verteilte Recovery | Node-/Host-Ausfall und verspätete Resultate führen weder zur falschen Task-Zuordnung noch zur unkontrollierten Wiederholung einer externen Wirkung. Unklare Wirkung wird explizit geklärt. | CTX-05, OPS-01, OPS-03 |
 | TEST-11 – Betrieblicher Prozess | Ein unvollständiger Kundenauftrag wird in belegte Anforderungen, Hypothesen, Rückfragen, Plan, Umsetzung und überprüfte Ergebnisse überführt; eine nicht autorisierte Produktionsänderung oder Budgetüberschreitung wird blockiert. | BIZ-01, BIZ-02, BIZ-04, BIZ-05, CTX-09 |
 | TEST-12 – Ressourcen und Fairness | Mit zunehmenden aktiven und wartenden Kontexten werden RAM/VRAM, Tokenkosten, Antwortlatenz, Durchsatz und Wiederaufnahmekosten gemessen. Vergleich mit getrennten Vollinstanzen; definierte Ressourcenlimits, faire Ausführung und interaktive Reaktionsfähigkeit werden nachgewiesen. | CTX-04, CTX-07, OPS-01 |
+
+> **Umsetzungsstand TEST-08 (28. November 2026):** Der erste Teil des Tests
+> ist nachgewiesen: Markierte Werte erreichen weder das Artefaktnetz noch
+> einen externen Adapter, und ein Auftrag ohne passende Freigabe wird nicht
+> gesendet. Der zweite Teil ist mit dem achten Slice nachgewiesen: Eine
+> vertrauliche Anfrage wird lokal abstrahiert, der externe Reasoner sieht
+> nur Struktur und Platzhalter, und die konkrete Lösung entsteht lokal und
+> erbt die Schutzstufe der Quelle. Noch offen ist die Prüfung über den
+> Adapterprozess und das Netzwerk (Shell, Browser, Telemetrie).
 
 **Umsetzungshinweise zur Testbarkeit.**
 
