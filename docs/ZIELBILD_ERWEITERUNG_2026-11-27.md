@@ -698,6 +698,22 @@ festzulegen; die nachstehenden Slices sind Empfehlungen, keine Zusicherung.
 | TEST-11 – Betrieblicher Prozess | Ein unvollständiger Kundenauftrag wird in belegte Anforderungen, Hypothesen, Rückfragen, Plan, Umsetzung und überprüfte Ergebnisse überführt; eine nicht autorisierte Produktionsänderung oder Budgetüberschreitung wird blockiert. | BIZ-01, BIZ-02, BIZ-04, BIZ-05, CTX-09 |
 | TEST-12 – Ressourcen und Fairness | Mit zunehmenden aktiven und wartenden Kontexten werden RAM/VRAM, Tokenkosten, Antwortlatenz, Durchsatz und Wiederaufnahmekosten gemessen. Vergleich mit getrennten Vollinstanzen; definierte Ressourcenlimits, faire Ausführung und interaktive Reaktionsfähigkeit werden nachgewiesen. | CTX-04, CTX-07, OPS-01 |
 
+> **Umsetzungsstand BIZ-05 (28. November 2026):** Die drei Autonomiestufen
+> sind als Betreiberregel im Core umgesetzt. `Routine`, `Bounded` und
+> `HumanDecision` werden aus Fähigkeitsregel, Umgebungsgrenze, Risiko-,
+> Preis-, Währungs- und Budgetgrenzen abgeleitet; ein Vorschlag kann weder
+> sein Risiko herabstufen noch den Preis unter die Betreibererwartung drücken.
+> Eine autonome Freigabe entsteht als System-Approval über die bestehende
+> Approval-Kette und setzt weiterhin einen Prüfbericht voraus; die
+> bestehende Action- und Execution-Kette bleibt unverändert. Das
+> Kostenbudget ist ein Core-Artefakt mit optimistischem Vergleich, sodass
+> parallele Aufgaben die Grenze nicht überschreiten. Nicht delegierbare
+> Regeln bilden gesetzliche, vertragliche und betreiberpolitische Grenzen ab;
+> ARCS entscheidet in diesen Fällen nicht. Nicht belegt ist der vollständige
+> betriebliche Prozess aus `TEST-11`; die Bausteine Budgetüberschreitung und
+> unautorisierte Wirkung sind nachgewiesen. Nachweis:
+> [Zwischenbericht 28.11.2026](ZWISCHENBERICHT_2026-11-28_AUTONOMIE.md).
+>
 > **Umsetzungsstand TEST-08 (28. November 2026):** Der erste Teil des Tests
 > ist nachgewiesen: Markierte Werte erreichen weder das Artefaktnetz noch
 > einen externen Adapter, und ein Auftrag ohne passende Freigabe wird nicht

@@ -1,0 +1,15 @@
+{
+  "$id": "arcs.autonomy_budget.v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ARCS Autonomy Budget",
+  "description": "Kumulatives Kostenbudget autonom erteilter Freigaben.",
+  "type": "object",
+  "required": ["budget_id", "currency", "limit", "spent"],
+  "properties": {
+    "budget_id": { "type": "string", "minLength": 1 },
+    "currency": { "type": "string", "minLength": 1 },
+    "limit": { "type": "integer", "minimum": 0 },
+    "spent": { "type": "integer", "minimum": 0 }
+  },
+  "additionalProperties": false
+}

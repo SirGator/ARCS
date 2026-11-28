@@ -58,6 +58,32 @@ impl<'a> ApprovalService<'a> {
         approver: Actor,
         reason: String,
     ) -> Result<Artifact, ApprovalError> {
+        self.decide_with_basis(
+            target,
+            verification_report,
+            None,
+            decision,
+            approver,
+            reason,
+        )
+    }
+
+    /// Erzeugt eine Autoritätsentscheidung mit einer zusätzlichen Grundlage.
+    ///
+    /// Die Grundlage ist ein weiterer Beleg, auf den sich die Entscheidung
+    /// stützt. Sie wird als `based_on` erfasst und ändert die bestehende
+    /// Kette aus Kandidat, Prüfbericht und Freigabe nicht. Eine autonome
+    /// Freigabe nutzt diesen Weg, um die Autonomieentscheidung als Beleg
+    /// festzuhalten.
+    pub fn decide_with_basis(
+        &mut self,
+        target: &VersionId,
+        verification_report: &VersionId,
+        basis: Option<&VersionId>,
+        decision: ApprovalDecision,
+        approver: Actor,
+        reason: String,
+    ) -> Result<Artifact, ApprovalError> {
         self.store
             .get(target)?
             .ok_or_else(|| ApprovalError::MissingTarget(target.clone()))?;
@@ -146,14 +172,15 @@ impl<'a> ApprovalService<'a> {
             ApprovalDecision::Approved => relation_kinds::approves(),
             ApprovalDecision::Rejected => relation_kinds::rejects(),
         };
-        self.store.append_related(
-            &approval,
-            self.schemas,
-            &[
-                (target.clone(), target_relation),
-                (verification_report.clone(), relation_kinds::based_on()),
-            ],
-        )?;
+        let mut relations = vec![
+            (target.clone(), target_relation),
+            (verification_report.clone(), relation_kinds::based_on()),
+        ];
+        if let Some(basis) = basis {
+            relations.push((basis.clone(), relation_kinds::based_on()));
+        }
+        self.store
+            .append_related(&approval, self.schemas, &relations)?;
 
         Ok(approval)
     }

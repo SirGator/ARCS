@@ -1,0 +1,138 @@
+{
+  "$id": "arcs.autonomy_policy.v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ARCS Autonomy Policy",
+  "description": "Betreiberbindung der Autonomiestufen fuer vorgeschlagene Wirkungen.",
+  "type": "object",
+  "required": [
+    "version",
+    "capabilities",
+    "routine",
+    "bounded",
+    "human_triggers",
+    "non_delegable"
+  ],
+  "properties": {
+    "version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "capabilities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["adapter_id", "capability_id", "baseline_risk", "environments"],
+        "properties": {
+          "adapter_id": { "type": "string", "minLength": 1 },
+          "capability_id": { "type": "string", "minLength": 1 },
+          "schema_id": { "type": "string", "minLength": 1 },
+          "baseline_risk": {
+            "type": "string",
+            "enum": ["low", "medium", "high", "critical"]
+          },
+          "environments": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": ["development", "test", "production"]
+            }
+          },
+          "max_cost": { "type": "integer", "minimum": 0 },
+          "expected_cost": { "type": "integer", "minimum": 0 },
+          "currency": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": false
+      }
+    },
+    "routine": {
+      "type": "object",
+      "required": ["max_risk", "environments"],
+      "properties": {
+        "max_risk": {
+          "type": "string",
+          "enum": ["low", "medium", "high", "critical"]
+        },
+        "max_cost": { "type": "integer", "minimum": 0 },
+        "environments": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["development", "test", "production"]
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "bounded": {
+      "type": "object",
+      "required": ["max_risk", "environments"],
+      "properties": {
+        "max_risk": {
+          "type": "string",
+          "enum": ["low", "medium", "high", "critical"]
+        },
+        "max_cost": { "type": "integer", "minimum": 0 },
+        "environments": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["development", "test", "production"]
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "human_triggers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["reason"],
+        "properties": {
+          "adapter_id": { "type": "string", "minLength": 1 },
+          "capability_id": { "type": "string", "minLength": 1 },
+          "schema_id": { "type": "string", "minLength": 1 },
+          "min_risk": {
+            "type": "string",
+            "enum": ["low", "medium", "high", "critical"]
+          },
+          "min_cost": { "type": "integer", "minimum": 0 },
+          "environment": {
+            "type": "string",
+            "enum": ["development", "test", "production"]
+          },
+          "reason": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": false
+      }
+    },
+    "non_delegable": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["reason"],
+        "properties": {
+          "adapter_id": { "type": "string", "minLength": 1 },
+          "capability_id": { "type": "string", "minLength": 1 },
+          "schema_id": { "type": "string", "minLength": 1 },
+          "environment": {
+            "type": "string",
+            "enum": ["development", "test", "production"]
+          },
+          "reason": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": false
+      }
+    },
+    "budget": {
+      "type": "object",
+      "required": ["budget_id", "currency", "limit"],
+      "properties": {
+        "budget_id": { "type": "string", "minLength": 1 },
+        "currency": { "type": "string", "minLength": 1 },
+        "limit": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

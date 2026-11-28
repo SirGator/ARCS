@@ -1,0 +1,50 @@
+{
+  "$id": "arcs.autonomy_decision.v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ARCS Autonomy Decision",
+  "description": "Nachvollziehbare Zuordnung einer vorgeschlagenen Wirkung zu einer Autonomiestufe.",
+  "type": "object",
+  "required": [
+    "decision_id",
+    "policy_version",
+    "candidate_version",
+    "capability",
+    "level",
+    "reasons",
+    "risk",
+    "environment"
+  ],
+  "properties": {
+    "decision_id": { "type": "string", "minLength": 1 },
+    "policy_version": { "type": "string", "minLength": 1 },
+    "candidate_version": { "type": "string", "minLength": 1 },
+    "capability": {
+      "type": "object",
+      "required": ["adapter_id", "capability_id"],
+      "properties": {
+        "adapter_id": { "type": "string", "minLength": 1 },
+        "capability_id": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "level": {
+      "type": "string",
+      "enum": ["routine", "bounded", "human_decision"]
+    },
+    "reasons": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "risk": {
+      "type": "string",
+      "enum": ["low", "medium", "high", "critical"]
+    },
+    "environment": {
+      "type": "string",
+      "enum": ["development", "test", "production"]
+    },
+    "cost": { "type": "integer", "minimum": 0 },
+    "currency": { "type": "string", "minLength": 1 }
+  },
+  "additionalProperties": false
+}

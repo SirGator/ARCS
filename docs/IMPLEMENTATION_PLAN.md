@@ -59,6 +59,23 @@
 > `OPS-04`, `OPS-06` sowie `BIZ-01` bis `BIZ-06`. Nachweis:
 > [Zwischenbericht 28.11.2026](ZWISCHENBERICHT_2026-11-28_AUFGABEN_LEASES.md).
 >
+> Neunter Slice der Erweiterung: kontrollierte Autonomie nach BIZ-05. Die
+> Freigabestufe ist jetzt eine Policy und keine binäre Entscheidung: Der
+> Core unterscheidet `Routine`, `Bounded` und `HumanDecision` und leitet die
+> Stufe aus Betreiberregel und Vorschlag konservativ ab. Risiko, Preis,
+> Umgebung und Währung stammen aus der Betreiberregel; ein Vorschlag kann sein
+> eigenes Risiko nicht herabstufen und den Preis nicht unter die Betreiber-
+> erwartung drücken. Das Kostenbudget ist ein Core-Artefakt mit optimisti-
+> schem Vergleich, sodass parallele Aufgaben die Grenze nicht überschreiten
+> können. Die autonome Freigabe entsteht über die bestehende Approval-Kette
+> (System-Akteur), damit Action und Execution unverändert bleiben; ein
+> vorgeschlagener Kandidat muss weiterhin verifiziert sein. Jede Einordnung
+> wird als `arcs.autonomy_decision.v1` protokolliert, auch eine ablehnende.
+> `BIZ-05` ist damit in der Grundlage umgesetzt; offen bleiben `BIZ-01` bis
+> `BIZ-04` und `BIZ-06` sowie der vollständige betriebliche Prozess aus
+> `TEST-11`. Nachweis:
+> [Zwischenbericht 28.11.2026](ZWISCHENBERICHT_2026-11-28_AUTONOMIE.md).
+>
 > Achter Slice der Erweiterung: Abstraktion, symbolisches Reasoning und
 > lokale Rekonstruktion. Der Core zerlegt einen vertraulichen Sachverhalt
 > lokal in Variablen, prüft die Abstraktion auf verbliebene Offenlegung und
